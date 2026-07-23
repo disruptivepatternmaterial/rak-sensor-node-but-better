@@ -1,0 +1,12 @@
+.DS_Store
+.idea/
+.vscode/
+*.env
+secrets.h
+secrets.hpp
+.pio/
+.vscode/.browse.c_cpp.db*
+compile_commands.json
+*.pem
+*.key
+.particle_env.yaml
