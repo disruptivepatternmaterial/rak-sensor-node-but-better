@@ -55,7 +55,12 @@ struct BatteryReading {
     Maybe<uint16_t> voltage;     // x0.01 V
     Maybe<int16_t>  current;     // x0.01 A — sign convention unresolved, see ADR-0002
     Maybe<uint8_t>  soc;         // %
-    Maybe<int16_t>  temperature; // whole degC as reported by the BMS
+    // Tenths of a degree, matching the wire format the encoder expects. The pack reports
+    // this over one-wire using the same IPSO type as its own uplinks, which carry tenths —
+    // but that has not been confirmed against hardware, and the pack's Modbus register for
+    // the same measurement is whole degrees. If the first reading looks ten times too
+    // small, this is why. Tracked in TODO.md.
+    Maybe<int16_t>  temperature; // x0.1 degC
 
     bool any() const
     {
