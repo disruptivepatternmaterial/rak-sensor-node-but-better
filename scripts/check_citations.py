@@ -38,6 +38,15 @@ CODE_EXT = {".c", ".cpp", ".h", ".hpp", ".ino"}
 MIN_CITATIONS = 3
 MIN_CATEGORIES = 2
 
+# Vendored upstream code. Its provenance is the pinned commit and file hashes recorded
+# in the directory's README, not inline citations -- and we do not edit it, so holding
+# it to our sourcing bar would only produce noise that trains people to ignore the gate.
+VENDORED_PREFIXES = ("rakwireless/",)
+
+
+def is_vendored(rel: str) -> bool:
+    return rel.startswith(VENDORED_PREFIXES)
+
 CITE_RE = re.compile(r"CITE\(([a-z\-]+)\)\s*:\s*(.+)")
 KEY_REF_RE = re.compile(r"\[(CIT-[A-Z0-9\-]+)\]")
 KEY_DEF_RE = re.compile(r"^\|\s*`?(CIT-[A-Z0-9\-]+)`?\s*\|", re.M)
@@ -105,6 +114,8 @@ def main() -> int:
         except (UnicodeDecodeError, OSError):
             continue
         rel = path.relative_to(REPO_ROOT)
+        if is_vendored(rel.as_posix()):
+            continue
 
         for n, line in enumerate(text.splitlines(), 1):
             m = CITE_RE.search(line)
@@ -169,7 +180,10 @@ def main() -> int:
         changed = [
             p for p in git("diff", "--name-only", f"{args.diff}...HEAD").splitlines() if p
         ]
-        code_changed = [p for p in changed if Path(p).suffix.lower() in CODE_EXT]
+        code_changed = [
+            p for p in changed
+            if Path(p).suffix.lower() in CODE_EXT and not is_vendored(p)
+        ]
         if code_changed:
             diff = git("diff", "-U0", f"{args.diff}...HEAD", "--", *code_changed)
             added = [
