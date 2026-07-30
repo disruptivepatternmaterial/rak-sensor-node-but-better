@@ -187,7 +187,7 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     // checksum convention as the request. The prior-art codec never checked the reply at
     // all, so there is nothing to copy here. If the first real pack reply is rejected,
     // compare the logged expected and received bytes before changing anything — the frame
-    // may simply be framed differently. Tracked in TODO.md.
+    // may simply be framed differently. Tracked in issue #5.
     uint8_t expected = 0;
     for (size_t i = body; i < records_end; i++) {
         expected ^= buf[i];

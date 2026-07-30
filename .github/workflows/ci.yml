@@ -68,7 +68,7 @@ jobs:
           fi
           python3 scripts/check_decoder_parity.py
 
-      - name: Preflight (secrets, links, null policy)
+      - name: Preflight (secrets, golden vectors, links, null policy)
         run: |
           DECODER=".fwm/LoRaWAN/payload/rak-wx-station-default.js"
           if [ -f "$DECODER" ]; then

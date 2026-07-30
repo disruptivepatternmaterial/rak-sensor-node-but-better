@@ -22,7 +22,7 @@ Next step when the hardware is in hand: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH
 | Versioning / release | [`docs/RELEASE.md`](docs/RELEASE.md) |
 | Decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
 | Payload schema | [`payload/schema.yaml`](payload/schema.yaml) |
-| Open items | [`TODO.md`](TODO.md) |
+| Open items | [GitHub Issues](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues) |
 
 ## Where things run
 

@@ -40,6 +40,14 @@ fi
 step "TTN formatter parity"
 if python3 scripts/check_decoder_parity.py; then :; else bad "decoder parity"; fi
 
+# --------------------------------------------------------------- golden vectors
+# Parity compares the encoder and the decoder field by field, which cannot see behavior
+# the schema does not describe -- the installation offset applied to wind direction, for
+# one. This runs real encoder output through the real decoder instead of comparing claims.
+# Skips itself where node is unavailable, which is the workstation.
+step "golden vectors"
+if python3 scripts/check_golden_vectors.py; then :; else bad "golden vectors"; fi
+
 # --------------------------------------------------------------- citations
 step "citations"
 if python3 scripts/check_citations.py; then :; else bad "citation discipline"; fi

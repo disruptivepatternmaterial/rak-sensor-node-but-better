@@ -59,7 +59,7 @@ struct BatteryReading {
     // this over one-wire using the same IPSO type as its own uplinks, which carry tenths —
     // but that has not been confirmed against hardware, and the pack's Modbus register for
     // the same measurement is whole degrees. If the first reading looks ten times too
-    // small, this is why. Tracked in TODO.md.
+    // small, this is why. Tracked in issue #4.
     Maybe<int16_t>  temperature; // x0.1 degC
 
     bool any() const

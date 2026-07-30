@@ -26,8 +26,8 @@ was not observed.
       5 V. It is easier to be wrong here than anywhere else on the bench, and the mistake
       is not recoverable.
 - [ ] **Pin 4 of the 5-pin socket is a 3.3 V reference.** Never tie it to 5 V. See
-      [`HARDWARE.md`](HARDWARE.md) — and note that the pinout is one of the items still to
-      be confirmed with a meter, in [`../TODO.md`](../TODO.md).
+      [`HARDWARE.md`](HARDWARE.md) — and note that the pinout is still to be confirmed with
+      a meter, because the two sources disagree about it (issue #6).
 
 ## Stage 1 — wind sensor only
 
@@ -60,8 +60,8 @@ becomes an intermittent everything later.
 
 **Expect:** four more fields — voltage, current, state of charge, temperature.
 
-Three things need confirming here, and only the hardware can answer them. All three are in
-[`../TODO.md`](../TODO.md):
+Three things need confirming here, and only the hardware can answer them — issues #3, #4,
+and #5 respectively:
 
 - **Current sign.** Let the pack charge in sunlight and watch which way the number moves.
   The firmware spec and the TTN decoder disagree about which direction means charging;

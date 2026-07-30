@@ -155,8 +155,7 @@ panel current alone. A transmit burst is the largest current the node ever draws
 the most likely thing to push a tired pack over that edge — which is why transmission is
 the first thing to go.
 
-Confirm the cutoff voltage on the bench and revisit both numbers. Tracked in
-[`../TODO.md`](../TODO.md).
+Confirm the cutoff voltage on the bench and revisit both numbers. Tracked in issue #7.
 
 Pack voltage, current, and SoC are readable over the BMS link (`FIRMWARE_SPEC.md` §2.2), so
 these are measurable rather than guessed. The **battery current sign convention is

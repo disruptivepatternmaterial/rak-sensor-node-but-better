@@ -106,7 +106,7 @@ path the value passes through unscaled. The encoder does this today and says so 
 **Still an assumption.** Nothing has confirmed the one-wire record's scale against hardware;
 it is inferred from the IPSO type. The first pack reply settles it — a value near 210 at
 room temperature means tenths and the code is right, while a value near 21 means whole
-degrees and the ×10 comes back. Tracked in `TODO.md`.
+degrees and the ×10 comes back. Tracked in issue #4.
 
 ## Citations
 

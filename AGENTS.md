@@ -15,6 +15,10 @@ automatically; this is the index and the short version.
 - Never commit secrets, `*.env`, keys, or live OTAA AppKeys.
 - No aspirational "deployed" claims without bench/TTN evidence — see [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 - Null sensor readings stay null — never fabricate zeros.
+- **Either solve it or file it.** Anything noticed and not fixed becomes a GitHub issue in
+  the same pass, with a number a comment can cite. Caveats delivered in chat and "one more
+  thing" trailers are not a record of anything — they are gone the moment the window
+  scrolls. Do not reintroduce a checklist file; the tracker is the one place.
 
 ## The rules
 

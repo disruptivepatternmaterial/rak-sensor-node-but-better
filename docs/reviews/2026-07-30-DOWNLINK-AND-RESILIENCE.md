@@ -3,7 +3,8 @@
 > **Point-in-time record.** Findings 1, 2, and 3 have since been closed in firmware:
 > command framing with a leading opcode (`src/radio.cpp`), session persistence across reset
 > (`src/session.cpp`), and a minimum interval raised to 1800 s to stay inside fair use
-> (`src/config.h`). The rest remain open and are tracked in [`../../TODO.md`](../../TODO.md).
+> (`src/config.h`). The rest remain open and are tracked as
+> [GitHub Issues](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues).
 > The findings below are left as written — they are the reasoning that led to those changes.
 
 - **Date:** 2026-07-30
