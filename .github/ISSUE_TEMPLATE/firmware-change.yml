@@ -1,0 +1,79 @@
+name: Firmware change
+description: A change to node behavior — sensors, LoRaWAN, power, or payload
+labels: ["firmware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Work starts as an issue, before code (`.cursor/rules/30-change-workflow.mdc`).
+        Citations are gathered here so review is not the first time anyone checks them.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong or missing today, and what does it cost in the field?
+    validations:
+      required: true
+
+  - type: input
+    id: spec
+    attributes:
+      label: Spec section
+      description: Which part of docs/FIRMWARE_SPEC.md or docs/HARDWARE.md governs this?
+      placeholder: "FIRMWARE_SPEC.md §2.1 — RK900-09 Modbus"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Sensors / Modbus
+        - Battery / BMS
+        - LoRaWAN / uplink
+        - Downlink / configuration
+        - Power / sleep
+        - Payload / TTN formatter
+        - Hardening (H1-H8)
+        - Build / tooling
+    validations:
+      required: true
+
+  - type: textarea
+    id: citations
+    attributes:
+      label: Citations
+      description: >
+        At least 3 across at least 2 categories. Prior art never stands alone behind a
+        register map, a timing value, or an RF parameter. Fetch each URL — do not cite
+        from memory.
+      value: |
+        - CITE(datasheet):
+        - CITE(spec):
+        - CITE(prior-art):
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance check
+      description: >
+        The observation that proves this works — the thing that gets recorded in
+        docs/EVIDENCE.md. Not "it compiles."
+      placeholder: "Unplug the RK900 mid-cycle; node still uplinks battery data and sleeps."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - label: Changes the payload (requires a paired forest-weather-machines formatter PR)
+        - label: Changes airtime or uplink cadence
+        - label: Changes sleep or power behavior
+        - label: Needs an ADR (expensive to reverse, or resolves a source conflict)

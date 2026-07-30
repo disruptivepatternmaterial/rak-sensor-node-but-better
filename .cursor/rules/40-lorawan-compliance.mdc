@@ -48,16 +48,24 @@ rounding detail.
 
 Therefore:
 
-- **Keep the payload small.** At DR0 the US915 application payload limit is 11 bytes
-  [CIT-LORA-RP002]; ADR will not always leave you at a high data rate. A payload that only
-  fits at DR3 is a payload that silently fails at the edge of coverage.
+- **Keep the payload small.** The US915 application payload limit is smallest at the
+  lowest data rate [CIT-LORA-RP002], and ADR will not always leave you at a high one. A
+  payload that only fits at a high DR is a payload that silently fails at the edge of
+  coverage.
+
+On TTN, US902-928 uplinks run **SF7BW125 to SF10BW125** on 903.9–905.3 MHz (plus 904.6
+SF8BW500), and **RX2 is 923.3 MHz at SF12BW500** [CIT-TTN-FREQ]. Note the uplink floor is
+SF10, not SF12 — do not carry EU-band intuitions across, because airtime-per-message and
+the resulting messages-per-day differ.
 - **Never enable confirmed uplinks.** Each one forces a downlink, drawing against the
   ~10/day downlink budget and consuming gateway TX time.
 - **Never retry a failed uplink immediately.** Bounded exponential backoff only
   (`FIRMWARE_SPEC.md` H4). The node must survive multi-day gateway outages without an
   airtime death spiral — the failure mode this project exists to avoid.
-- **Join must back off.** A tight join loop is the single most damaging thing a node can
-  do to a shared gateway (§3, H4).
+- **Join must back off, and must sleep between attempts.** A tight join loop is the most
+  damaging thing a node can do to a shared gateway (§3, H4) — and on this hardware it also
+  kills the battery, because a node stuck retrying a join **never sleeps at all**
+  [CIT-RAK-SLEEP]. See rule 50; this is one requirement, not two.
 - Under US915 frequency hopping, FCC limits dwell time per channel [CIT-FCC-15247]; the
   stack enforces this, but do not defeat it by pinning a single channel.
 

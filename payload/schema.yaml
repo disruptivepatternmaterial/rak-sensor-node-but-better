@@ -1,0 +1,173 @@
+# Payload schema — firmware-side source of truth for the uplink encoder.
+#
+# This file is one half of a two-repo contract. The other half is the TTN uplink
+# formatter in the forest-weather-machines repo. scripts/check_decoder_parity.py
+# compares them on every build and fails if they have drifted.
+#
+# Status: DRAFT. FIRMWARE_SPEC.md §6 requires this be frozen before soak testing.
+# Do not treat unresolved entries as decided.
+#
+# Rules: .cursor/rules/60-decoder-parity.mdc · Spec: docs/FIRMWARE_SPEC.md §6
+
+decoder:
+  repo: disruptivepatternmaterial/forest-weather-machines
+  path: LoRaWAN/payload/rak-wx-station-default.js
+  # Default lookup path; override with the FWM_REPO environment variable.
+  local_path: ~/Documents/GitHub/forest-weather-machines
+  pinned_commit: efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
+  pinned_sha256: 9c58c2b92193d412958401c9182109495ff748ff502b9d76369dc1f93a85777c
+  pinned_on: 2026-07-30
+  # Re-pin ONLY after re-verifying parity. Re-pinning to silence the gate is the
+  # exact failure this gate exists to prevent.
+
+encoding:
+  format: cayenne-lpp-style
+  # Byte layout per field: [channel][type][value ...big-endian]
+  # The decoder walks the buffer with no length prefix, so any size mismatch
+  # desynchronizes every field after it.
+  byte_order: big-endian
+  null_policy: omit-field
+  # A failed sensor read OMITS its channel entirely. It never encodes 0.
+  # AGENTS.md · FIRMWARE_SPEC.md §2.1
+
+# Fields this device emits. `decoded_key` is what lands in TTN after the formatter.
+fields:
+  - name: wind_speed
+    channel: 1
+    type: 190          # native RK900-09; type 158 (generic probe) also decodes correctly
+    size: 2
+    signed: false
+    divisor: 100
+    unit: m/s
+    decoded_key: wx_wind_speed
+    source: FIRMWARE_SPEC.md §2.1 reg 0x0000
+    status: proposed
+
+  - name: wind_direction
+    channel: 2
+    type: 191          # native; 159 also decodes correctly
+    size: 2
+    signed: false
+    divisor: 1
+    unit: deg
+    decoded_key: wx_wind_direction
+    source: FIRMWARE_SPEC.md §2.1 reg 0x0001
+    status: proposed
+    notes: >
+      Emit the RAW heading. The decoder applies WIND_DIR_OFFSET = 230 for the site
+      installation. Applying the offset in firmware as well double-corrects by 230
+      degrees. The decoder also nulls this field when wind_speed is 0 — firmware
+      must not pre-null it.
+
+  - name: temperature
+    channel: 3
+    type: 103
+    size: 2
+    signed: true
+    divisor: 10
+    unit: degC
+    decoded_key: wx_temperature
+    source: FIRMWARE_SPEC.md §2.1 reg 0x0002 (S16)
+    status: proposed
+
+  - name: humidity
+    channel: 4
+    type: 112          # MUST be 112, not 104 — see notes
+    size: 2
+    signed: false
+    divisor: 10
+    unit: "%RH"
+    decoded_key: wx_humidity
+    source: FIRMWARE_SPEC.md §2.1 reg 0x0003
+    status: proposed
+    notes: >
+      TRAP: FIRMWARE_SPEC.md §6 lists "Humidity 104/112" as if interchangeable. They
+      are not. Type 112 decodes to name "humidity_prec", giving key humidity_prec_4,
+      which CHANNEL_NAMES maps to wx_humidity. Type 104 decodes to name "humidity"
+      (1 byte, divisor 2), giving key humidity_4 — which is NOT in CHANNEL_NAMES and
+      falls through as a raw key, missing every downstream consumer. Use 112.
+
+  - name: pressure
+    channel: 5
+    type: 115
+    size: 2
+    signed: false
+    divisor: 10
+    unit: hPa
+    decoded_key: wx_barometer
+    source: FIRMWARE_SPEC.md §2.1 reg 0x0004
+    status: proposed
+
+  - name: batt_voltage
+    channel: 21
+    type: 186
+    size: 2
+    signed: false
+    divisor: 100
+    unit: V
+    decoded_key: batt_voltage
+    source: FIRMWARE_SPEC.md §2.2 reg 0x6000
+    status: proposed
+
+  - name: batt_current
+    channel: 22
+    type: 185
+    size: 2
+    signed: true
+    divisor: 100
+    unit: A
+    decoded_key: batt_current
+    source: FIRMWARE_SPEC.md §2.2 reg 0x6001
+    status: BLOCKED
+    notes: >
+      Sign convention is contradictory across sources. FIRMWARE_SPEC.md §2.2 states
+      negative = charging; the decoder header states positive = charging. See
+      docs/decisions/ADR-0002. Do not encode either convention until closed with
+      bench evidence.
+
+  - name: batt_soc
+    channel: 23
+    type: 184
+    size: 1
+    signed: false
+    divisor: 1
+    unit: "%"
+    decoded_key: batt_capacity
+    source: FIRMWARE_SPEC.md §2.2 reg 0x6002
+    status: proposed
+
+  - name: batt_temperature
+    channel: 24
+    type: 103
+    size: 2
+    signed: true
+    divisor: 10
+    unit: degC
+    decoded_key: batt_temperature
+    source: FIRMWARE_SPEC.md §2.2 reg 0x6009
+    status: proposed
+    notes: >
+      BMS reports whole degrees (scale x1) but type 103 carries divisor 10.
+      Firmware must multiply by 10 before encoding or the decoded value is 10x low.
+
+# Present in the decoder but NOT emitted by this device. Listed so the parity
+# checker does not flag them as missing.
+not_emitted:
+  - decoded_key: hub_voltage      # channel 77, type 187 — RAK2560 Sensor Hub only
+  - decoded_key: rak_serial       # channel 0,  type 126 — RAK2560 Sensor Hub only
+
+# Changes that would REQUIRE a paired formatter change in forest-weather-machines.
+# Landing any of these without the formatter change discards the whole uplink.
+requires_formatter_change:
+  - description: Firmware version reported in the uplink
+    reason: >
+      No channel/type currently carries a firmware version. docs/RELEASE.md wants
+      the running version observable from ingest, which needs a new decoder entry.
+    status: open
+  - description: Per-sensor validity flags
+    reason: >
+      FIRMWARE_SPEC.md §5 allows a battery-only or weather-only uplink "with validity
+      flags". The decoder has no flag type. Today, absence of a channel is the only
+      validity signal — which is sufficient, but only because fields are omitted, not
+      zeroed.
+    status: open

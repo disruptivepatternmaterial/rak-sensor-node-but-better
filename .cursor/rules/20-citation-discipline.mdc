@@ -62,11 +62,17 @@ art and the datasheet disagree, the datasheet wins and the disagreement gets wri
 ## Verify, don't recall
 
 - **Fetch the URL before citing it.** Do not cite from memory. Dead or hallucinated links
-  are worse than no citation, because they look authoritative in review.
+  are worse than no citation, because they look authoritative in review. During setup,
+  five of the URLs written from memory turned out to be 404s — including two that other
+  published specs cite. The corrections log at the end of `docs/CITATIONS.md` records them.
+- **Never commit an unverified entry.** Verify it or leave it out; `check_citations.py`
+  fails the build on `UNVERIFIED`. A registry that ships warnings teaches everyone to
+  ignore warnings, and then the one that matters gets ignored too.
 - Cite the **specific section or page**, not a doc hub homepage.
 - Record what the source actually establishes, in your own words, next to the citation.
-- Login-walled sources (some LoRa Alliance PDFs) are cited with the landing page and
-  flagged `[registration required]` in `docs/CITATIONS.md`.
+- If a source is genuinely unreachable (bot-blocked, login-walled), find a mirror or an
+  equivalent authority rather than committing a broken row — eCFR blocks automation, so
+  FCC 15.247 is cited via Cornell LII.
 - Local `sibling` citations pin a commit SHA — those repos move independently and an
   unpinned path is not reproducible.
 

@@ -82,9 +82,9 @@ Reads 0x0000-0x0004 at 4800 8N1, slave 0x01, FC 0x03, 1000 ms timeout,
 2 retries, then marks the sensor failed and continues the cycle.
 Missing reads encode as null — never zero.
 
-CITE(datasheet): RK900-09 register map — docs/FIRMWARE_SPEC.md §2.1
-CITE(spec): MODBUS Application Protocol v1.1b3 §6.3 (FC 0x03)
-CITE(prior-art): 4-20ma/ModbusMaster timeout handling
+CITE(datasheet): RK900-09 register map [CIT-RK900] — docs/FIRMWARE_SPEC.md §2.1
+CITE(spec): MODBUS Application Protocol V1.1b3 §6.3, FC 0x03 [CIT-MODBUS-APP]
+CITE(prior-art): ModbusMaster timeout handling [CIT-MODBUSMASTER]
 
 Refs #12
 ```

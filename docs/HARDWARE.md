@@ -23,7 +23,10 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 
 ## RAK9154 ports (critical)
 
-The pack has **two** load sockets ([`forest-weather-machines/rak-4-5-wire/docs/01-connector-reference.md`](../../forest-weather-machines/rak-4-5-wire/docs/01-connector-reference.md)):
+The pack has **two** load sockets. Connector reference:
+`forest-weather-machines/rak-4-5-wire/docs/01-connector-reference.md` [CIT-RAK45WIRE] —
+the sibling repo is cloned at `~/Documents/GitHub/forest-weather-machines`, not beside this
+repo, so it is cited rather than linked. See [`CITATIONS.md`](CITATIONS.md).
 
 ### A — 4-pin Gateway Load (SP11/P4) — BMS Modbus **preferred**
 

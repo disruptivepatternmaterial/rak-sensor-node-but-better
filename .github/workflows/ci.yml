@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Gates (citations, parity, secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The TTN formatter lives in a sibling repo. Parity cannot be proven without it.
+      # Requires an FWM_TOKEN secret with read access if that repo is private.
+      - name: Check out forest-weather-machines (TTN formatter)
+        id: fwm
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: disruptivepatternmaterial/forest-weather-machines
+          path: .fwm
+          token: ${{ secrets.FWM_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install pyyaml
+
+      - name: Citation discipline
+        run: python3 scripts/check_citations.py
+
+      - name: Citation minimums for this change
+        if: github.event_name == 'pull_request'
+        run: |
+          python3 scripts/check_citations.py \
+            --diff "origin/${{ github.base_ref }}"
+
+      - name: TTN formatter parity
+        env:
+          FWM_REPO: ${{ github.workspace }}/.fwm
+        run: |
+          if [ -d "$FWM_REPO" ]; then
+            python3 scripts/check_decoder_parity.py
+          else
+            echo "::warning title=Formatter parity NOT verified::Could not check out \
+          forest-weather-machines, so the payload contract is unproven. Add an FWM_TOKEN \
+          secret with read access to that repo."
+            # Unproven is tolerable only while nothing touching the payload changed.
+            if git diff --name-only "origin/${{ github.base_ref || 'main' }}...HEAD" \
+                 | grep -qE '^(payload/|src/|lib/|include/)'; then
+              echo "::error::This change touches the payload or firmware, so parity must \
+          be proven. Configure FWM_TOKEN."
+              exit 1
+            fi
+          fi
+
+      - name: Preflight (secrets, links, null policy)
+        env:
+          FWM_REPO: ${{ github.workspace }}/.fwm
+        run: |
+          if [ -d "$FWM_REPO" ]; then
+            scripts/preflight.sh
+          else
+            echo "Running the non-parity gates only; parity handled in the step above."
+            git ls-files -z | xargs -0 grep -nIE \
+              '(APPKEY|APP_KEY|APPEUI|APP_EUI|DEVEUI|DEV_EUI|NWKSKEY|APPSKEY)[[:space:]]*[:=][[:space:]]*[^ ]*[0-9A-Fa-f]{16}' \
+              | grep -viE '(example|template|placeholder|XXXX|0{16}|docs/|\.mdc:|schema\.yaml)' \
+              && { echo "::error::possible live credentials"; exit 1; } || true
+          fi
+
+  build:
+    name: Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for firmware
+        id: check
+        run: |
+          if [ -f platformio.ini ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No platformio.ini yet — WP1 has not created the skeleton. \
+          Nothing to compile."
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.present == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO
+        if: steps.check.outputs.present == 'true'
+        run: pip install platformio
+
+      - name: Cache PlatformIO
+        if: steps.check.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      # CI proves it compiles. It cannot prove behavior — the RAK4631 is on the
+      # Heliotrope Ridge build host, and only bench evidence closes H1-H8.
+      - name: Build
+        if: steps.check.outputs.present == 'true'
+        run: pio run

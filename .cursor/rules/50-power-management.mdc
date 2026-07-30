@@ -24,17 +24,32 @@ outweighs everything the radio does. Optimize sleep first, always.
 
 ## The RAK4631 sleep traps — these are the documented failure modes
 
-1. **UART left open pins current at milliamp scale.** You must `Serial.end()` (and
-   `Serial1.end()`) before sleeping, or the node draws ~mA forever and looks "fine" on the
-   bench for an hour while quietly dying in the field [CIT-RAK-SLEEP]. `FIRMWARE_SPEC.md` §5
-   step 7 makes this explicit. **This is the single most common way this class of node
-   fails.**
-2. **The RS-485 transceiver must be disabled between polls.** The RAK5802 driver draws
-   continuously if left enabled. Enable it in step 2 of the wake cycle, disable before
-   sleep.
-3. **A USB-attached debug session masks all of it.** Sleep-current measurements taken over
-   USB are meaningless. Measure on battery, and say so in `docs/EVIDENCE.md`.
-4. **Deep sleep must be System OFF-class, not a busy `delay()`.** A `delay()` loop keeps
+1. **A node that cannot join never sleeps.** Per the WisBlock-API author: _"If you
+   initialize LoRaWAN, but cannot connect to a LoRaWAN server, the MCU will never sleep,
+   because it is retrying to join"_ [CIT-RAK-SLEEP]. This is the worst failure mode this
+   project has, because it couples directly to the deployment scenario: the gateway goes
+   down, the node cannot join, it stops sleeping, and it flattens the battery in days
+   instead of months — then stays dark even after the gateway returns. **Join backoff (H4)
+   is therefore a power requirement, not just an airtime courtesy.** Joining must be
+   bounded, and the node must sleep between join attempts.
+2. **Sleeping the MCU does not sleep the radio.** `sd_power_mode_set(NRF_POWER_MODE_LOWPWR)`
+   puts the nRF52 to sleep but leaves the SX1262 running; `Radio.sleep()` is required as
+   well [CIT-RAK-SLEEP]. A reporter measured 6 mA with the radio left awake.
+3. **Entering sleep does not disable peripherals — you must do it yourself.** The nRF52
+   leaves UART, SPI, TWI, and USBD enabled across sleep unless explicitly shut down
+   [CIT-NRF-POWER]. Measured consequence: **1.2 mA / 890 µA falling to 10 µA** once UART,
+   SPI, and USBD were disabled [CIT-NRF-PERIPH-SLEEP]. This is why `Serial.end()` and
+   `Serial1.end()` before sleep are mandatory (`FIRMWARE_SPEC.md` §5 step 7,
+   `LIBRARIES.md` item 23) — the difference is two orders of magnitude, and it does not
+   show up in a short bench test.
+4. **The RS-485 transceiver must be disabled between polls.** The RAK5802 driver draws
+   continuously if left enabled [CIT-RAK5802]. Enable it in step 2 of the wake cycle,
+   disable before sleep.
+5. **A USB-attached debug session masks all of it.** Sleep-current measurements taken over
+   USB are meaningless. Measure on battery — the documented approach is a Nordic PPK2 in
+   source-meter mode on the base board's battery connector [CIT-RAK-SLEEP] — and say so in
+   `docs/EVIDENCE.md`.
+6. **Deep sleep must be System OFF-class, not a busy `delay()`.** A `delay()` loop keeps
    the core clocked [CIT-NRF-POWER]. Retained state that must survive sleep is documented
    in `docs/POWER_BUDGET.md`.
 

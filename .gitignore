@@ -10,3 +10,20 @@ compile_commands.json
 *.pem
 *.key
 .particle_env.yaml
+
+# Build artifacts — rebuilt from source, never committed
+*.uf2
+*.hex
+*.bin
+*.elf
+*.map
+
+# Tooling
+__pycache__/
+*.pyc
+.fwm/
+
+# Raw bench captures. Summaries and verdicts belong in docs/EVIDENCE.md;
+# multi-megabyte serial logs and scope traces do not belong in git.
+evidence/raw/
+*.log
