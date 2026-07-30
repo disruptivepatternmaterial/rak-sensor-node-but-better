@@ -71,8 +71,14 @@ cmd_sync() {
   local_sha=$(git rev-parse HEAD)
   echo "${DIM}   local  ${branch} @ ${local_sha:0:7}${NC}"
 
-  info "Pushing $branch"
-  git push origin "$branch"
+  # Relayed through the build host rather than pushed straight to GitHub. This
+  # workstation's git credentials belong to the work account, which has no write access to
+  # the personal repo, so a direct push returns HTTP 403. push.sh sends the branch to the
+  # build host over SSH and lets it do the GitHub push with its own credentials.
+  # Background: docs/ENVIRONMENTS.md, "Two GitHub identities".
+  info "Pushing $branch via the build host relay"
+  "$(dirname "${BASH_SOURCE[0]}")/push.sh" >/dev/null \
+    || die "relay push failed -- run scripts/push.sh directly to see why."
 
   # The user sometimes works directly on the build host or a laptop. Never clobber
   # work that exists only over there.

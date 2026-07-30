@@ -10,6 +10,26 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Added
 
+- **The firmware, in modules.** `src/` now holds the actual node rather than a blink test:
+  `sensors/rk900` (Modbus over the RAK5802), `sensors/battery` (RAK9154 over the Sensor Hub
+  one-wire link), `payload` (encoder pinned to the TTN decoder), `radio` (join, send,
+  downlink, capped backoff), `power` (watchdog and sleep), `config` (settings that survive
+  a reset), and a `main.cpp` that is just the cycle. Each module owns one failure domain.
+- **Staged build environments** — `stage1` (wind sensor only), `stage2` (+ battery),
+  `stage3` (+ radio, still awake and printing), `rak4631` (everything, including sleep).
+  Same source throughout; each build adds exactly one new way to fail, so a problem on new
+  hardware has a short suspect list. All four compile.
+- **Battery temperature is decoded.** The sibling bench project only handled IPSO types
+  184, 185, and 186 and documented one-wire as having no temperature. It does: type 103 is
+  in the stream and their parser was discarding it as an unrecognized record. Ours reads
+  all four, so pack temperature is available on the one-wire path after all — which matters
+  on a heated pack in winter.
+- Notable behaviors, each written against a documented failure: joins are bounded and never
+  tight-loop (the way this board's battery disappears during a gateway outage), backoff is
+  capped and never gives up, the watchdog pauses while asleep so a short hang-detection
+  timeout can coexist with an hour-long interval, the USB peripheral is disabled before
+  sleep, and settings are written to flash only when they change.
+
 - [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md) — **the RAK9154 goes on the
   one-wire path, and the RAK5802 is dedicated to the RK900 at a fixed 4800.** Closes open
   decision #1 and removes the shared-bus baud-switching problem entirely rather than
