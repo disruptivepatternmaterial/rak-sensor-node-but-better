@@ -28,9 +28,23 @@ constexpr uint8_t kUplinkPort  = 2;
 constexpr uint8_t kCmdSetInterval   = 0x01;
 constexpr uint8_t kCmdRequestStatus = 0x03;
 
+// The Things Network listens on US915 sub-band 2 — the eight 125 kHz channels 8 to 15,
+// plus the 500 kHz channel 65. The region defines 72 channels in total, so leaving the MAC
+// to use all of them means most transmissions land where nothing is listening.
+constexpr uint8_t kSubBand = 2;
+
 // Bounded join attempt. If the gateway is not there, the answer is to sleep and try later,
 // not to keep the radio awake hunting for it.
 constexpr uint32_t kJoinTimeoutMs = 30000;
+
+// Margin added after the second receive window closes, covering clock drift between the
+// node and the gateway plus the time the MAC needs to finish handling anything received.
+constexpr uint32_t kRxWindowMarginMs = 1500;
+
+// Used only if the MAC cannot report its receive delays. Chosen to cover the 5 s delay the
+// network assigns rather than the 1 s specification default: waiting too long costs a
+// little current, while waking too early misses every downlink the node will ever get.
+constexpr uint32_t kRxWindowFallbackMs = 7000;
 
 // How many join requests the MAC sends per lmh_join() call. The library expects the
 // application to supply this. One, deliberately: retrying inside the MAC keeps the radio
@@ -137,6 +151,18 @@ bool Radio::begin()
 
     if (lmh_init(&s_callbacks, s_params, true, CLASS_A, LORAMAC_REGION_US915) != 0) {
         LOGLN(F("   radio   : MAC init failed"));
+        return false;
+    }
+
+    // US915 defines 72 channels, and the network listens on eight of them. Without this
+    // the MAC picks from all 72, so most transmissions go out on frequencies no gateway is
+    // tuned to — joins fail for no visible reason, and after a session restore the node
+    // would report every uplink as sent while roughly seven in eight reached nobody.
+    //
+    // Set on every boot rather than persisted, because it is a property of the network
+    // this node talks to, not of the session it happens to hold.
+    if (!lmh_setSubBandChannels(kSubBand)) {
+        LOGF("   radio   : could not select sub-band %u\n", kSubBand);
         return false;
     }
 
@@ -251,10 +277,31 @@ bool Radio::send(const Payload &p)
     // roughly once a month at the default interval.
     session::maybe_save_counter();
 
-    // Class A opens its two receive windows immediately after the uplink. Staying awake
-    // through them is the only chance to hear anything at all.
-    delay(3000);
+    // Class A opens two receive windows after each uplink, and those windows are the only
+    // downlink opportunity this node ever gets. Sleeping before the second one closes
+    // means the transceiver is powered down while the answer is being sent — the setting
+    // never arrives, and from a distance the downlink simply looks ignored.
+    //
+    // The delay is read from the MAC rather than assumed. The specification default is one
+    // second, but the network assigns five in the join accept, so a fixed short wait would
+    // silently miss every downlink on a real network while looking correct against the
+    // specification.
+    delay(rx_window_ms());
     return true;
+}
+
+uint32_t Radio::rx_window_ms() const
+{
+    MibRequestConfirm_t req;
+    memset(&req, 0, sizeof(req));
+    req.Type = MIB_RECEIVE_DELAY_2;
+
+    if (LoRaMacMibGetRequestConfirm(&req) != LORAMAC_STATUS_OK ||
+        req.Param.ReceiveDelay2 == 0) {
+        return kRxWindowFallbackMs;
+    }
+
+    return req.Param.ReceiveDelay2 + kRxWindowMarginMs;
 }
 
 bool Radio::take_downlink(DownlinkCommand &out)

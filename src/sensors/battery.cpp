@@ -199,10 +199,15 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     }
 
     // Records are { sensor id, IPSO type, value }, with the value width implied by the
-    // type. An unknown type has an unknown width, so the parser cannot skip it cleanly —
-    // it advances one byte and re-syncs on the next thing it recognizes. That is safe only
-    // because the surrounding frame has already been verified; on unchecked bytes the same
-    // scan will manufacture readings out of noise.
+    // type. An unknown type therefore has an unknown width, and there is no way to find
+    // where the next record begins.
+    //
+    // Parsing stops there instead of guessing. Skipping a byte at a time would leave the
+    // scan pointing into the middle of a value and read the tail of one record as the head
+    // of another — producing a voltage or temperature that looks entirely plausible and is
+    // simply wrong. A pack that reports a number nobody can challenge is worse than one
+    // that reports nothing, so whatever was decoded before the unknown record is kept and
+    // the rest is abandoned.
     size_t i = records;
     while (i + 2 < records_end) {
         const uint8_t type = buf[i + 1];
@@ -222,7 +227,10 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
             out.temperature.set((int16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
             i += 4;
         } else {
-            i++;
+            // Worth logging: it means the pack sends something this build does not know
+            // about, and every record behind it is being discarded.
+            LOGF("   battery : unknown record type %u — stopping here\n", type);
+            break;
         }
     }
 

@@ -19,7 +19,7 @@ constexpr char kPath[] = "/session.bin";
 // key derivation changes — reading an old layout as a new one would produce a session that
 // looks valid and cannot possibly work.
 constexpr uint32_t kMagic   = 0x4C575353; // "LWSS"
-constexpr uint16_t kVersion = 1;
+constexpr uint16_t kVersion = 2;
 
 struct Stored {
     uint32_t magic;
@@ -30,6 +30,13 @@ struct Stored {
     uint8_t  app_skey[16];
     uint32_t uplink_counter;
     uint32_t downlink_counter;
+
+    // The receive-window delays the network assigned during the join. These arrive in the
+    // join accept, so a restored session has never seen them and the MAC would fall back
+    // to the specification default of one second — while the network answers at five.
+    // Every downlink would miss, silently, for as long as the restored session lasts.
+    uint32_t rx_delay1_ms;
+    uint32_t rx_delay2_ms;
 };
 
 // Highest counter value written to flash so far. Held in RAM so the periodic save knows
@@ -96,6 +103,11 @@ bool collect(Stored &s)
         s.downlink_counter = req.Param.DownLinkCounter;
     }
 
+    // Zero is stored when the MAC cannot report a delay, and restore treats zero as
+    // "leave whatever the MAC already has" rather than forcing an impossible value.
+    s.rx_delay1_ms = mib_get(MIB_RECEIVE_DELAY_1, req) ? req.Param.ReceiveDelay1 : 0;
+    s.rx_delay2_ms = mib_get(MIB_RECEIVE_DELAY_2, req) ? req.Param.ReceiveDelay2 : 0;
+
     s.magic   = kMagic;
     s.version = kVersion;
     return true;
@@ -111,6 +123,8 @@ bool mib_set_u32(Mib_t type, uint32_t value)
     case MIB_DEV_ADDR:        req.Param.DevAddr = value; break;
     case MIB_UPLINK_COUNTER:  req.Param.UpLinkCounter = value; break;
     case MIB_DOWNLINK_COUNTER:req.Param.DownLinkCounter = value; break;
+    case MIB_RECEIVE_DELAY_1: req.Param.ReceiveDelay1 = value; break;
+    case MIB_RECEIVE_DELAY_2: req.Param.ReceiveDelay2 = value; break;
     default: return false;
     }
     return LoRaMacMibSetRequestConfirm(&req) == LORAMAC_STATUS_OK;
@@ -168,6 +182,16 @@ bool restore()
     // The downlink counter only affects receiving. Losing it costs at most one ignored
     // downlink, so it is not worth abandoning an otherwise good session over.
     (void)mib_set_u32(MIB_DOWNLINK_COUNTER, s.downlink_counter);
+
+    // Restoring these is what keeps the downlink path alive across a reset. Without them
+    // the MAC listens one second after each uplink while the network answers at five, so
+    // the node would transmit normally and never hear a reply again.
+    if (s.rx_delay1_ms != 0) {
+        (void)mib_set_u32(MIB_RECEIVE_DELAY_1, s.rx_delay1_ms);
+    }
+    if (s.rx_delay2_ms != 0) {
+        (void)mib_set_u32(MIB_RECEIVE_DELAY_2, s.rx_delay2_ms);
+    }
 
     memset(&req, 0, sizeof(req));
     req.Type                  = MIB_NETWORK_JOINED;

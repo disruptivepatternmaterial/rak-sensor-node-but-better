@@ -3,6 +3,9 @@
 - **Status:** **Open** — blocks the payload freeze required by `FIRMWARE_SPEC.md` §6
 - **Date:** 2026-07-30
 - **Affects:** `payload/schema.yaml`, `docs/FIRMWARE_SPEC.md` §2.2 and §6, the encoder (WP6)
+- **Amended 2026-07-30:** conflict 3's decision was made when the pack was expected to be
+  read over Modbus. ADR-0004 moved it to the one-wire path, which changes the answer — see
+  the amendment at the end of this record.
 
 ## Context
 
@@ -84,6 +87,26 @@ than being resolved by preference.
 **Needed to close conflict 1:** with the pack under a known load and then under charge,
 read `0x6001` directly and record the observed sign in `docs/EVIDENCE.md` alongside the
 pack's actual state. Cross-check against `rak-4-5-wire` bench captures [CIT-RAK45WIRE].
+
+## Amendment — conflict 3 after ADR-0004
+
+Conflict 3 was decided against `FIRMWARE_SPEC.md` §2.2 register `0x6009`, which is a Modbus
+register carrying whole degrees. Multiplying by ten was the right answer for that source.
+
+ADR-0004 then moved the pack onto the one-wire path, and that path does not expose Modbus
+registers at all — it returns IPSO records, the same encoding the pack uses in its own
+LoRaWAN uplinks, where type 103 already means tenths of a degree. Applying the ×10 to a
+value that is already scaled would put the reading ten times high, which is the same class
+of defect this record was written to prevent, in the opposite direction.
+
+**Amended decision.** The ×10 applies only if the pack is read over Modbus. On the one-wire
+path the value passes through unscaled. The encoder does this today and says so at
+`src/payload.cpp`, and `src/reading.h` declares the field in tenths accordingly.
+
+**Still an assumption.** Nothing has confirmed the one-wire record's scale against hardware;
+it is inferred from the IPSO type. The first pack reply settles it — a value near 210 at
+room temperature means tenths and the code is right, while a value near 21 means whole
+degrees and the ×10 comes back. Tracked in `TODO.md`.
 
 ## Citations
 

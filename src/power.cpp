@@ -65,37 +65,65 @@ void sleep_seconds(uint32_t seconds)
     // it were still listening, which is one of the two documented ways this board's
     // battery life disappears.
     Radio.Sleep();
+
+    // Putting the transceiver to sleep does not stop the bus that talks to it. The
+    // controller on this chip stays clocked once started, and measurements put a bus left
+    // running at close to a milliamp — an order of magnitude more than everything else the
+    // node draws while asleep, and enough to turn a solar-sustained deployment into one
+    // that slowly loses ground through a cloudy stretch.
+    SPI_LORA.end();
 #endif
 
 #if FEATURE_CONSOLE
     Serial.flush();
 #endif
 
-    // Closing the USB serial device is required, not tidy-up. The USB peripheral keeps its
-    // clock and its pull-up alive otherwise, and the measured difference between leaving
-    // it on and shutting it down is roughly a milliamp — far more than everything the node
-    // spends on actually taking a reading.
-    Serial.end();
+    // Someone with a cable attached is diagnosing the node, and shutting the console down
+    // between cycles would disconnect them at the first sleep — leaving the field-repair
+    // case worse off than the deployment it is meant to protect. Unattended, there is no
+    // host to disconnect, so the saving is taken.
+    const bool console_in_use = (bool)Serial;
 
-    // Peripherals are per-instance; the ones this node touches are closed by their owners
-    // when a read finishes. This disables the USB device itself, which nothing else owns.
-    // Written straight to the register: the core's USB stack has no public "power this
-    // down" call, and leaving the peripheral enabled is the single largest sleep-current
-    // mistake available on this chip.
-    NRF_USBD->ENABLE = 0;
+    if (!console_in_use) {
+        // Closing the USB serial device is required, not tidy-up. The USB peripheral keeps
+        // its clock and its pull-up alive otherwise, and the measured difference between
+        // leaving it on and shutting it down is roughly a milliamp — far more than
+        // everything the node spends on actually taking a reading.
+        Serial.end();
+
+        // Peripherals are per-instance; the ones this node touches are closed by their
+        // owners when a read finishes. This disables the USB device itself, which nothing
+        // else owns. Written straight to the register: the core's USB stack has no public
+        // "power this down" call, and leaving the peripheral enabled is the single largest
+        // sleep-current mistake available on this chip.
+        NRF_USBD->ENABLE = 0;
+    }
 
     // FreeRTOS underlies the Arduino core here, so a delay parks this task and the idle
     // task drops the CPU into its low-power state until the tick that wakes us. Split into
     // one-second slices so the interval stays well inside the tick counter's range at any
     // configured length.
+    //
+    // This reaches the chip's lighter sleep state, not its deepest one — the deepest state
+    // restarts the chip on wake, which would mean rejoining the network or reconstructing
+    // the session from flash every interval. The difference is a couple of microamps
+    // against a pack measured in amp-hours, so the simpler behavior is worth keeping until
+    // a bench measurement says otherwise.
     for (uint32_t i = 0; i < seconds; i++) {
         delay(1000);
     }
 
+#if FEATURE_RADIO
+    // Back before anything can talk to the transceiver again.
+    SPI_LORA.begin();
+#endif
+
 #if FEATURE_CONSOLE
-    // Bring the console back for the awake portion. With no host attached this enumerates
-    // and goes nowhere, which costs a little current only while awake.
-    Serial.begin(115200);
+    if (!console_in_use) {
+        // Bring the console back for the awake portion. With no host attached this
+        // enumerates and goes nowhere, which costs a little current only while awake.
+        Serial.begin(115200);
+    }
 #endif
 }
 

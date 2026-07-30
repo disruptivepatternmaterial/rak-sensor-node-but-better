@@ -144,11 +144,14 @@ fields:
     divisor: 10
     unit: degC
     decoded_key: batt_temperature
-    source: FIRMWARE_SPEC.md §2.2 reg 0x6009
+    source: ADR-0002 amendment (one-wire path per ADR-0004)
     status: proposed
     notes: >
-      BMS reports whole degrees (scale x1) but type 103 carries divisor 10.
-      Firmware must multiply by 10 before encoding or the decoded value is 10x low.
+      Scale depends on how the pack is read. The Modbus register 0x6009 reports whole
+      degrees and would need a x10 before encoding. The one-wire path used today returns
+      IPSO type 103 records, which already carry tenths, so the value passes through
+      unscaled. Inferred from the IPSO type, not yet confirmed against hardware: at room
+      temperature a reading near 210 confirms tenths, near 21 means the x10 is needed.
 
 # Present in the decoder but NOT emitted by this device. Listed so the parity
 # checker does not flag them as missing.

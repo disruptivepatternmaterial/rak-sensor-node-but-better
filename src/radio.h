@@ -73,6 +73,11 @@ class Radio {
     uint32_t consecutive_failures() const { return m_failures; }
 
   private:
+    // How long to stay awake after an uplink so both Class A receive windows can open.
+    // Read from the MAC, because the network assigns a longer delay than the
+    // specification default and a node that sleeps too early never hears a downlink.
+    uint32_t rx_window_ms() const;
+
     bool m_joined   = false;
     bool m_started  = false;
     uint32_t m_failures = 0;
