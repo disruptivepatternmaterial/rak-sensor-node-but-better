@@ -11,7 +11,8 @@
  *   minus a 3200 offset, which is what makes them fit in one byte).
  * CITE(prior-art): [CIT-MESHTASTIC-9154] Meshtastic's RAK9154Sensor — the battery probe
  *   enumerates as probe id 0x01, with the master as 0x00.
- * CITE(sibling): [CIT-RAK45WIRE] rak-4-5-wire/firmware/nanoc6-onewire-poll — clean-room
+ * CITE(sibling): [CIT-RAK45WIRE] rak-4-5-wire/firmware/nanoc6-onewire-poll at
+ *   forest-weather-machines efc0e3c — clean-room
  *   codec this one follows for framing and bit timing. It decoded only three TLV types;
  *   this implementation adds temperature, which the protocol carries as type 103 and that
  *   codec silently discarded as unrecognized.

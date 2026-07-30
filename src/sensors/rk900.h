@@ -10,8 +10,9 @@
  *   holding registers 0x0000-0x0004, and the per-register scaling applied by the encoder.
  * CITE(datasheet): [CIT-RAK5802] the RS-485 module sits in the IO slot on Serial1; its
  *   transceiver is fed from the switched 3V3_S rail controlled by WB_IO2.
- * CITE(sibling): [CIT-FWM-RAK2560] the deployed RAK2560 Sensor Hub reads this same sensor
- *   with these same settings, so the values are field-proven rather than datasheet-only.
+ * CITE(sibling): [CIT-FWM-RAK2560] at forest-weather-machines efc0e3c — the deployed
+ *   RAK2560 Sensor Hub reads this same sensor with these same settings, so the values are
+ *   field-proven rather than datasheet-only.
  */
 
 #pragma once

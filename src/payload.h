@@ -12,8 +12,9 @@
  * scripts/check_decoder_parity.py fails the build when the two drift apart.
  *
  * CITE(spec): [CIT-CAYENNE-LPP] the channel/type TLV convention and big-endian values.
- * CITE(sibling): [CIT-FWM-DECODER] rak-wx-station-default.js — the decoder that has to
- *   understand every byte produced here, including its per-type widths and divisors.
+ * CITE(sibling): [CIT-FWM-DECODER] rak-wx-station-default.js at forest-weather-machines
+ *   efc0e3c — the decoder that has to understand every byte produced here, including its
+ *   per-type widths and divisors.
  * CITE(datasheet): [CIT-RK900] source scaling for the weather registers, which decides
  *   how much conversion has to happen before encoding.
  */
