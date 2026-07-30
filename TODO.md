@@ -29,9 +29,10 @@ One running list. Anything that would otherwise be an "oh, one more thing" belon
 
 ## Before it goes in the woods
 
-- [ ] **LoRaWAN session persistence.** A reset currently discards the session and rejoins.
-      Finding 2 of
-      [the resilience review](docs/reviews/2026-07-30-DOWNLINK-AND-RESILIENCE.md).
+- [ ] **Confirm session persistence on hardware.** The code is written
+      (`src/session.cpp`), but "it compiles" is not "it works". Reset the board during
+      stage 3 of [the first-flash checklist](docs/FIRST_FLASH.md) and confirm it resumes
+      without a second join.
 - [ ] **Freeze the payload.** `payload/schema.yaml` is still marked draft.
 - [ ] **24-hour bench soak, then a 7-day shadow deployment** somewhere reachable.
 

@@ -4,11 +4,14 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 ## Status
 
-🚧 **Not deployed.** Specs, plan, and project scaffolding only — no firmware in-tree, hardware on order, nothing measured. Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) has entries to back it.
+🚧 **Not deployed.** The firmware is written and compiles for all four build stages on the build host, but it has never run on hardware — nothing here has been measured, and no reading has ever been taken. Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) has entries to back it.
+
+Next step when the hardware is in hand: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md).
 
 | Doc | Path |
 |---|---|
 | Firmware contract | [`docs/FIRMWARE_SPEC.md`](docs/FIRMWARE_SPEC.md) |
+| First flash / bring-up | [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md) |
 | Hardware / wiring | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
 | Libraries & examples | [`docs/LIBRARIES.md`](docs/LIBRARIES.md) |
 | Build plan | [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md) |
@@ -19,6 +22,7 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 | Versioning / release | [`docs/RELEASE.md`](docs/RELEASE.md) |
 | Decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
 | Payload schema | [`payload/schema.yaml`](payload/schema.yaml) |
+| Open items | [`TODO.md`](TODO.md) |
 
 ## Where things run
 
@@ -29,11 +33,24 @@ Two machines, and they are not interchangeable. Full detail in [`docs/ENVIRONMEN
 - **Git is the only transport between them.**
 
 ```bash
-scripts/preflight.sh      # all local gates (same as CI)
-scripts/remote.sh check   # build host reachability + toolchain
-scripts/build.sh          # preflight + sync + compile on the build host
-scripts/flash.sh          # build + USB flash on the build host (confirms first)
+scripts/preflight.sh          # all local gates (same as CI)
+scripts/remote.sh check       # build host reachability + toolchain
+scripts/build.sh              # preflight + sync + compile on the build host
+scripts/flash.sh              # build + USB flash on the build host (confirms first)
+scripts/flash.sh --env stage1 # flash one bring-up stage instead of the full image
 ```
+
+## Build stages
+
+Four images, so a subsystem can be brought up alone and a failure has one candidate cause rather than six. Tests for the payload encoder and the Modbus checksum run on the build host with no board attached (`pio test -e native`).
+
+| Environment | Contains |
+|---|---|
+| `stage1` | Wind sensor only, awake, printing over USB |
+| `stage2` | Adds the battery reader |
+| `stage3` | Adds the radio — still awake, so the join is watchable |
+| `rak4631` | Full image: sleep and watchdog on |
+| `native` | Off-target tests, no hardware |
 
 ## Working discipline
 
