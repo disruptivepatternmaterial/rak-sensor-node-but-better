@@ -54,6 +54,22 @@ only a measurement recorded here closes it.
 
 Newest first.
 
+### 2026-07-30 — The build host and CI disagreed on the same commit
+
+- **Commit:** `24c5d5e` (failing) → `fe3fc47` (passing)
+- **Host:** Heliotrope Ridge and GitHub Actions, same source
+- **Measured:** `pio test -e native` on both.
+- **Observation:** the build host reported 20 of 20 tests passing on a commit where CI
+  failed to compile them at all. Two causes, found in order: a stale object file in
+  `.pio/build/native` that survived a header change and hid a missing include, and
+  `src/features.h` shadowing the C library's own `<features.h>` once `src/` was on the
+  include path.
+- **Verdict:** the build host alone is **not** sufficient evidence for the off-target tests.
+  Its result was wrong and confidently so.
+- **Notes:** `scripts/build.sh` now wipes the native build directory and runs the tests
+  before compiling, and the header is renamed `build_features.h`. On-target builds were
+  never affected — the shadowing needs `-I src`, which only the test environment sets.
+
 ### 2026-07-30 — Release 0.2.0: all four stages build, off-target tests pass
 
 - **Commit:** `80de312` (tagged `v0.2.0`)

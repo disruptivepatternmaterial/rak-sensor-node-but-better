@@ -8,6 +8,25 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-07-30
+
+Supersedes 0.2.0, which was tagged at a commit that does not pass CI. Use this one.
+
+### Fixed
+
+- **The off-target tests build again** (`src/build_features.h`, renamed from
+  `src/features.h`). The C library has its own `features.h` and includes it from inside
+  nearly every system header. The test build puts `src/` on the include path, so the C
+  library found ours and compiled without any of its own configuration — producing hundreds
+  of errors inside `stdio.h`, `stdint.h`, and `cmath`, not one of which named the file
+  responsible. The header no longer pulls in `Arduino.h` on a machine that has no Arduino.
+- **`scripts/build.sh` runs the off-target tests before compiling**, wiping their build
+  directory first. A stale object had been hiding a missing include, which is why the build
+  host reported success on a commit CI rejected. A green build host that disagrees with CI
+  is worse than a red one, because it is the machine nobody re-checks.
+- **`scripts/push.sh` relays tags.** A release tag left behind on the workstation leaves the
+  GitHub release pointing at a commit nobody can fetch.
+
 ## [0.2.0] — 2026-07-30
 
 First release with firmware in the tree. It compiles for all four bring-up stages and its
