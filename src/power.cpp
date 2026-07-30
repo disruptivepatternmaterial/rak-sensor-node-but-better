@@ -99,4 +99,24 @@ void sleep_seconds(uint32_t seconds)
 #endif
 }
 
+void Brownout::update(bool voltage_valid, uint16_t centivolts)
+{
+    if (!voltage_valid) {
+        return; // no news is not good news; hold the previous decision
+    }
+
+    if (!m_engaged && centivolts <= kTxInhibitCentivolts) {
+        m_engaged = true;
+        LOGF("   power   : %u.%02u V — holding transmissions to protect the pack\n",
+             centivolts / 100, centivolts % 100);
+        return;
+    }
+
+    if (m_engaged && centivolts >= kTxResumeCentivolts) {
+        m_engaged = false;
+        LOGF("   power   : %u.%02u V — recovered, resuming\n", centivolts / 100,
+             centivolts % 100);
+    }
+}
+
 } // namespace power

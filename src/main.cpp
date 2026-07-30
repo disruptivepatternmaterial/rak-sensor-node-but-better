@@ -44,10 +44,11 @@ constexpr uint32_t kWatchdogSeconds = 120;
 // waiting forever would make a perfectly healthy board look dead.
 constexpr uint32_t kConsoleWaitMs = 3000;
 
-Config  config;
-Radio   radio;
-RK900   weather_sensor;
-Battery battery_sensor(kBatteryPin);
+Config           config;
+Radio            radio;
+RK900            weather_sensor;
+Battery          battery_sensor(kBatteryPin);
+power::Brownout  brownout;
 
 uint32_t cycle = 0;
 
@@ -113,6 +114,12 @@ void loop()
 #if FEATURE_BATTERY
     pack = battery_sensor.read();
     power::watchdog_feed();
+
+    // Spec H3. Below the threshold the node keeps waking and reading but stops spending
+    // energy on transmission, because a transmit burst is the largest current it ever
+    // draws and the pack's protection circuit disconnecting is the one failure that
+    // requires somebody to walk in.
+    brownout.update(pack.voltage.valid, pack.voltage.value);
 #endif
 
     // Built to fit what the current data rate allows. The network decides that rate, and
@@ -132,7 +139,12 @@ void loop()
     uint32_t sleep_for = config.interval_seconds();
 
 #if FEATURE_RADIO
-    if (payload.empty()) {
+    if (!brownout.transmit_allowed()) {
+        // Deliberately still reading the sensors and still waking on schedule. The pack
+        // recovers on sunlight, not on being left alone, and the node has to notice the
+        // moment it can transmit again.
+        LOGLN(F("   uplink  : held — pack too low to transmit"));
+    } else if (payload.empty()) {
         // Both sensors silent. Still worth waking on schedule — the fault may clear, and
         // an empty uplink would tell the network nothing it does not already infer from
         // the silence.
@@ -141,7 +153,7 @@ void loop()
         if (radio.send(payload)) {
             DownlinkCommand cmd;
             if (radio.take_downlink(cmd)) {
-                if (cmd.set_interval) {
+                if (cmd.set_interval && brownout.flash_write_allowed()) {
                     config.set_interval_seconds(cmd.interval_value);
                 }
                 if (cmd.request_status) {

@@ -45,4 +45,48 @@ bool reset_was_watchdog();
 // has elapsed and the console is usable again.
 void sleep_seconds(uint32_t seconds);
 
+// Pack voltage thresholds, in hundredths of a volt to match what the pack reports.
+//
+// The pack is nominally 10.8 V, which is three lithium cells in series. Full is about
+// 12.6 V, empty is about 9.0 V, and the pack's own protection circuit disconnects
+// somewhere below that. These numbers are set to keep the node clear of that disconnect,
+// not to squeeze out the last uplink.
+//
+// The reasoning is asymmetric on purpose. Missing a day of readings is an inconvenience.
+// Letting the pack reach protection cutoff is a hike, because a disconnected pack may not
+// restart from panel current alone — and a transmit burst is the largest current this node
+// ever draws, so it is the most likely thing to drag a tired pack over that edge.
+//
+// ASSUMPTION: cell chemistry and count are inferred from the 10.8 V nominal rating, and the
+// pack's actual cutoff has not been measured. Confirm both, then revisit. Recorded as TBD
+// in docs/POWER_BUDGET.md.
+constexpr uint16_t kTxInhibitCentivolts = 960;  // 3.2 V per cell — stop transmitting
+constexpr uint16_t kTxResumeCentivolts  = 1020; // 3.4 V per cell — and start again
+
+// Decides whether the node may transmit or write to flash, given what the pack reports.
+//
+// Separate thresholds for stopping and resuming, because a pack sitting exactly at the
+// limit would otherwise transmit, sag below it, recover, and transmit again — burning the
+// remaining energy on the oscillation itself.
+class Brownout {
+  public:
+    // Feeds in the latest pack voltage. When the pack does not answer, the previous
+    // decision stands: an unreadable battery is not evidence of a healthy one, and
+    // silently resuming transmission on missing data would defeat the whole gate.
+    void update(bool voltage_valid, uint16_t centivolts);
+
+    // False when the pack is too low to spend energy on a transmission.
+    bool transmit_allowed() const { return !m_engaged; }
+
+    // False when a write could be interrupted by the pack sagging. A half-written
+    // configuration or session file is worse than a stale one, because it survives the
+    // reset and keeps breaking every boot afterwards.
+    bool flash_write_allowed() const { return !m_engaged; }
+
+    bool engaged() const { return m_engaged; }
+
+  private:
+    bool m_engaged = false;
+};
+
 } // namespace power

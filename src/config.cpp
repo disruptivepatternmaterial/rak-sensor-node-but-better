@@ -16,6 +16,15 @@ constexpr char kPath[] = "/config.bin";
 constexpr uint32_t kMagic   = 0x524B534E; // "RKSN"
 constexpr uint16_t kVersion = 1;
 
+// Boots between writes of the boot counter. Writing every boot is fine while the node is
+// healthy — a handful of writes a year — but the counter matters most in exactly the
+// situation where it is dangerous: a node stuck resetting is booting continuously, and
+// writing flash on each pass adds wear and a corruption window to a device already in
+// trouble. Persisting periodically caps that. The cost is that the count can under-report
+// by up to this many after a reset, which does not affect what it is for: noticing that
+// the number climbs at all.
+constexpr uint32_t kBootPersistEvery = 8;
+
 struct Stored {
     uint32_t magic;
     uint16_t version;
@@ -39,10 +48,11 @@ void Config::begin()
     }
 
     // The boot counter is the cheapest possible watchdog diagnostic: if it climbs between
-    // uplinks, something is resetting the node. Written once per boot, which at an hourly
-    // interval is far below anything that would wear the flash.
+    // uplinks, something is resetting the node.
     m_boots++;
-    save();
+    if ((m_boots % kBootPersistEvery) == 0) {
+        save();
+    }
 
     LOGF("   config  : interval %lu s, boot #%lu\n", (unsigned long)m_interval,
          (unsigned long)m_boots);
@@ -115,7 +125,16 @@ bool Config::set_interval_seconds(uint32_t seconds)
     }
 
     m_interval = seconds;
-    save();
+
+    // A failed write is worth reporting rather than swallowing: the node will honor the
+    // new interval until the next reset and then silently revert to the old one, which
+    // from a distance looks like the downlink was ignored days later for no reason.
+    if (!save()) {
+        LOGF("   config  : interval %lu s active but NOT saved — reverts on reset\n",
+             (unsigned long)m_interval);
+        return false;
+    }
+
     LOGF("   config  : interval now %lu s\n", (unsigned long)m_interval);
     return true;
 }
