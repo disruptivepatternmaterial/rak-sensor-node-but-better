@@ -1,6 +1,7 @@
 # ADR-0003 — Arduino + WisBlock-API-V2 as the firmware framework
 
-- **Status:** Accepted
+- **Status:** **Superseded in part by [ADR-0005](ADR-0005-direct-sx126x.md)** — the Arduino
+  and PlatformIO half of this decision stands; WisBlock-API-V2 was not adopted.
 - **Date:** 2026-07-30
 - **Closes:** open decision #4 in `plans/P0_HARDENED_NODE.md`
 - **Affects:** `platformio.ini`, `src/`, every work package from WP1 onward
