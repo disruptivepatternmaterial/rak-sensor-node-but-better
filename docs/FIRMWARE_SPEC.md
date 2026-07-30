@@ -141,7 +141,8 @@ GNSS, RTC module, Meshtastic field image, RAK13002 (IO breakout; conflicts with 
 
 ## 9. Verification commands (when code exists)
 
-- Compile: PlatformIO env for `wiscore_rak4631`
+- Compile: PlatformIO env `rak4631` (board id `rak4630`, from the vendored RAK definition
+  in `rakwireless/` — the RAK4631 is not in the PlatformIO board registry)
 - Bench: one successful RK900 frame + one BMS frame + one TTN uplink
 - Downlink: change interval; confirm next cycle timing
 - Fault: unplug RK900; unplug BMS data; assert continued sleep/wake

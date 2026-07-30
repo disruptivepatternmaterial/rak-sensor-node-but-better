@@ -18,8 +18,20 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | Antenna | Blade 915 RP-SMA (if needed) | **926019** |
 | Enclosure | Unify 150×100×45 M8+RP-SMA **no solar** | **910406** |
 | Buck | 12 V → 5 V | (separate) |
+| Power source | RAK9154 Solar Battery Lite, **large-panel variant** | — |
 
 **Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, Solar Unify **910421**, AS923 kit **119012**.
+
+**"No solar" describes the enclosure, not the system.** The 910406 shell has no panel
+mounting, but the RAK9154 is itself solar-recharged: 56.16 Wh pack, integrated 18 V charge
+controller, BMS, and heater, with a 10 W panel in the regular variant
+[CIT-RAK9154-SOLAR]. This deployment uses the large panel. The distinction was previously
+stated wrong in [`POWER_BUDGET.md`](POWER_BUDGET.md) and matters a great deal to the
+design — see that page.
+
+**Select the buck on its no-load quiescent current.** It is a 24/7 load in parallel with
+everything the firmware does, and a part drawing several milliamps at idle would exceed the
+node's entire average draw on its own.
 
 ## RAK9154 ports (critical)
 
@@ -28,7 +40,11 @@ The pack has **two** load sockets. Connector reference:
 the sibling repo is cloned at `~/Documents/GitHub/forest-weather-machines`, not beside this
 repo, so it is cited rather than linked. See [`CITATIONS.md`](CITATIONS.md).
 
-### A — 4-pin Gateway Load (SP11/P4) — BMS Modbus **preferred**
+### A — 4-pin Gateway Load (SP11/P4) — BMS Modbus — **fallback only**
+
+Superseded by [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md): the battery uses the
+one-wire path on socket B. This socket stays unused and available if one-wire proves
+unreliable on the bench.
 
 | Pin | Signal |
 |---|---|
@@ -39,7 +55,7 @@ repo, so it is cited rather than linked. See [`CITATIONS.md`](CITATIONS.md).
 
 Modbus slave **0x6E**, **9600** 8N1. Register map: FIRMWARE_SPEC §2.2 / RAK2560 settings §5d.
 
-### B — 5-pin Sensor Hub Load (SP11/P5) — power + optional one-wire
+### B — 5-pin Sensor Hub Load (SP11/P5) — power + one-wire — **chosen**
 
 | Pin | Signal | Notes |
 |---|---|---|
@@ -55,11 +71,19 @@ Modbus slave **0x6E**, **9600** 8N1. Register map: FIRMWARE_SPEC §2.2 / RAK2560
 
 4-wire: V+, GND, A, B → RAK5802 @ **4800**. Probe IO optional as junction box only.
 
-## P0 wiring recommendation
+## P0 wiring — decided
 
-1. Buck from P+ (either socket) → WisBlock 5 V.  
-2. RAK5802 → RK900 @ 4800.  
-3. Battery: either (a) one-wire on 5-pin to a single GPIO/UART half-duplex, or (b) Modbus on 4-pin with **baud switch** on same 5802 between 4800/9600. Document the chosen option in the PR that implements it.
+Per [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md). The two sensors are on **separate
+buses**, so neither can interfere with or block the other.
+
+1. Buck from P+ (either socket) → WisBlock 5 V. Select on no-load quiescent draw.
+2. RAK5802 → RK900 only, fixed **4800** 8N1, slave `0x01`. No baud switching.
+3. RAK9154 → **one-wire half-duplex** on the 5-pin socket, TXD/RXD bridged, via the SP11
+   adapter cable. Watch pin 4 (`3V3_In`): tie to 3V3, **never 5 V**.
+4. Leave the 4-pin Gateway Load socket unused — it is the documented fallback.
+
+The earlier shared-bus option with a 4800/9600 baud switch is **rejected**; the rationale
+is in the ADR.
 
 ## Enclosure
 

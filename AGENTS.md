@@ -66,16 +66,24 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 0 | LED + USB serial | compiles; not yet run on hardware |
 | 1 | RK900 Modbus over RAK5802 @ 4800 | not started |
 | 2 | OTAA join + first uplink | not started; needs a TTN device |
-| 3 | RAK9154 battery telemetry | not started; blocked on the bus decision |
+| 3 | RAK9154 battery telemetry over one-wire | not started; unblocked by ADR-0004 |
 
 ## Open blockers
 
 - [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — battery current sign
   is contradictory between the spec and the live decoder. Blocks the payload freeze. Do not
   guess it.
-- **The RS-485 bus carries two different baud rates.** RK900 is 4800, the RAK9154 is 9600,
-  and there is one RAK5802 transceiver. Either switch baud between polls or move the
-  battery to the one-wire path. Unresolved — `docs/HARDWARE.md` §"P0 wiring recommendation".
-  Blocks Stage 3, not Stage 1 or 2.
 - Remaining open decisions are in [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
-  Decision #4 (framework) is closed by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).
+  Decision #1 (BMS bus) is closed by [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md);
+  decision #4 (framework) by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).
+
+## The deployment goal, in one line
+
+Unattended in the woods **indefinitely**, on a solar-recharged RAK9154. Nobody is going to
+walk out and power-cycle it. Two consequences that outrank feature work:
+
+- **Prefer deleting a failure mode over handling one.** ADR-0004 chose two separate sensor
+  buses over one shared bus for exactly this reason.
+- **Never let the pack reach a state it cannot recover from by itself.** Stop transmitting
+  early and keep sleeping. A lost day of data is free; a hike is not.
+  See [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md).

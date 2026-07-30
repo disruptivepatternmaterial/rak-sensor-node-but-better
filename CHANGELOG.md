@@ -10,6 +10,42 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Added
 
+- [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md) — **the RAK9154 goes on the
+  one-wire path, and the RAK5802 is dedicated to the RK900 at a fixed 4800.** Closes open
+  decision #1 and removes the shared-bus baud-switching problem entirely rather than
+  handling it. Two separate buses mean a hung sensor cannot block the other, which matters
+  because the battery reading is the one that says whether the node is about to die.
+  Unblocks Stage 3; `docs/HARDWARE.md` wiring updated to match.
+- [`docs/reviews/2026-07-30-DOWNLINK-AND-RESILIENCE.md`](docs/reviews/2026-07-30-DOWNLINK-AND-RESILIENCE.md)
+  — spec review against multi-day gateway outages. Nine findings; the load-bearing ones are
+  that a reboot currently discards the LoRaWAN session (join storm on every watchdog
+  reset), the watchdog cannot be stopped once started on the nRF52840 yet the sleep interval
+  is downlink-settable, and ADR makes an outage progressively more expensive. Sequenced
+  against the bring-up stages; none of it blocks Stages 0–1.
+- `CIT-NRF-WDT` and `CIT-RAK9154-SOLAR` in [`docs/CITATIONS.md`](docs/CITATIONS.md).
+
+### Changed
+
+- **`docs/POWER_BUDGET.md` said the system had no solar. It was wrong.** The claim
+  conflated the *enclosure* having no panel (Unify 910406) with the *system* having none —
+  but the RAK9154 is solar-recharged, with a 10 W panel in the regular variant, an
+  integrated 18 V charge controller, and a heater [CIT-RAK9154-SOLAR]. The deployment uses
+  the large panel. The page is rewritten around the right question: not "how long until it
+  dies" but "can it ride out the longest stretch with a snow-covered panel and still
+  recover on its own". Adds the heater as an unbudgeted winter load outside firmware
+  control, and defines the low-voltage cutoff as a **recoverability guarantee** — RAK warns
+  of malfunction on cold-start from an empty battery, and a node that needs a physical
+  visit has failed regardless of why.
+- **Cut the proposed downlink command set from seven commands to two** (set interval, and
+  a read-only status request). The original proposal optimized for configurability; the
+  deployment goal is that nobody ever touches it, which argues for fewer remote levers, not
+  more. Command framing is still specified so the option stays open, but reboot, force
+  rejoin, sensor enable/disable, and a settable battery cutoff are dropped — the last one
+  because a remotely settable cutoff is a remote way to flatten a pack that may not
+  self-recover.
+- `AGENTS.md` — records the never-touch deployment goal and the two rules that follow from
+  it; drops the resolved RS-485 bus blocker.
+
 - **Stage 0 firmware skeleton — the project compiles for real hardware for the first time.**
   [`platformio.ini`](platformio.ini) plus [`src/main.cpp`](src/main.cpp): LED and USB serial
   only, no radio, no Modbus, no sleep. Builds clean on the build host at RAM 4.9% and flash
