@@ -31,6 +31,12 @@ constexpr uint8_t kCmdRequestStatus = 0x03;
 // not to keep the radio awake hunting for it.
 constexpr uint32_t kJoinTimeoutMs = 30000;
 
+// How many join requests the MAC sends per lmh_join() call. The library expects the
+// application to supply this. One, deliberately: retrying inside the MAC keeps the radio
+// powered with no gap, whereas returning after a single attempt lets this class sleep
+// between tries. Same number of attempts over a day, a small fraction of the current.
+#define JOINREQ_NBTRIALS 1
+
 // Backoff bounds. The cap is deliberately below the default reporting interval so a
 // recovering network is noticed promptly, and the growth stops the node spending its whole
 // energy budget transmitting into an outage.
