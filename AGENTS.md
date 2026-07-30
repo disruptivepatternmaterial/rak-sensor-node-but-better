@@ -35,7 +35,14 @@ scripts/preflight.sh          # all local gates (same as CI)
 scripts/remote.sh check       # build host reachability + toolchain
 scripts/build.sh              # preflight + sync + compile on the build host
 scripts/flash.sh              # build + USB flash on the build host (confirms first)
+scripts/push.sh               # push to GitHub (this machine cannot push directly)
 ```
+
+- **Two GitHub identities, and this machine has the wrong one.** The git CLI, all three
+  SSH keys, and the keychain credential authenticate as the work account, which gets 403
+  on this repo. Use `scripts/push.sh`, which relays through the build host. Do not "fix"
+  the remote URL. Commits from the user that you did not write are **normal** — they push
+  from their IDE, which has a separate GitHub sign-in. Fetch and carry on.
 
 - **This machine cannot compile or flash.** No PlatformIO, no device on USB, `$HOME` is
   read-only. Everything that touches hardware runs on Heliotrope Ridge

@@ -75,6 +75,32 @@ Never `scp` or `rsync` source between machines. That produces an untracked diver
 cannot be reproduced later, which is exactly the state that makes field firmware
 unexplainable.
 
+## Two GitHub identities
+
+You have a work account and a personal one, and they land in different places. Written
+down here so nobody — human or agent — has to work it out again.
+
+| Where | Authenticates as | Push to `disruptivepatternmaterial`? |
+|---|---|---|
+| Workstation git CLI, all three SSH keys, and the keychain credential | `ntableman_sfemu` | **No** — HTTP 403 |
+| Your IDE, using its own GitHub sign-in | personal | Yes |
+| Heliotrope Ridge build host | `disruptivepatternmaterial` | Yes |
+
+Verified 2026-07-30: `id_rsa`, `id_ed25519_gh`, and `id_ed25519_particle` all return
+`Hi ntableman_sfemu!` from `ssh -T git@github.com`. Your IDE can push because its GitHub
+sign-in is separate from the git CLI's credentials.
+
+The practical effects:
+
+- **An agent on this machine cannot `git push origin`.** It has to relay through the build
+  host. `scripts/push.sh` does exactly that and is the only thing an agent should use.
+- **`gh` on this machine talks as the work account.** For CI status, run `gh` on the build
+  host.
+- **You pushing mid-session is normal.** Agents are told to expect unfamiliar commits on
+  `origin/main` and just fetch and carry on, rather than treating them as a mystery. Be
+  aware the reverse also happens: committing from the IDE can capture an agent's
+  half-finished working tree and send a failing gate to CI.
+
 ## Commands
 
 ```bash
@@ -86,6 +112,7 @@ scripts/remote.sh run '<cmd>' # run inside the remote repo under a login shell
 scripts/preflight.sh          # local gates (same as CI)
 scripts/build.sh              # preflight + sync + remote compile
 scripts/flash.sh              # build + USB flash on the build host (asks to confirm)
+scripts/push.sh               # push to GitHub, relayed via the build host's identity
 ```
 
 Overridable: `BUILD_HOST`, `REMOTE_REPO`, `FWM_REPO`.

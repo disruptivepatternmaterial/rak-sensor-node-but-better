@@ -63,6 +63,33 @@ Never `scp`, `rsync`, or paste files between machines — that creates an untrac
 divergence nobody can reproduce later. If the build host has local commits, stop and
 surface it; do not rebase or discard the user's work on the other machine.
 
+## Two GitHub identities — this is normal, not an anomaly
+
+The user has a work account and a personal account. This is settled; do not re-derive it
+every session, and **do not treat commits you did not write as suspicious.** It is the
+user's repository and they push to it directly.
+
+| Where | Authenticates as | Can push to `disruptivepatternmaterial`? |
+|---|---|---|
+| Workstation git CLI + all three SSH keys + keychain credential | `ntableman_sfemu` (work) | **No** — HTTP 403 |
+| The user's IDE (its own GitHub sign-in, not shared with the git CLI) | personal | Yes |
+| Heliotrope Ridge build host | `disruptivepatternmaterial` | Yes |
+
+So an agent on the workstation **cannot** `git push origin`. This is a credential fact,
+not a broken remote — do not "fix" it by editing the remote URL or the git config.
+
+Use `scripts/push.sh`, which relays through the build host: it pushes the branch to a
+non-checked-out ref there, fast-forwards the build host's `main`, and pushes to GitHub
+over SSH as `disruptivepatternmaterial`.
+
+Two consequences worth internalizing:
+
+- **Unfamiliar commits on `origin/main` are expected.** The user commits from their IDE,
+  sometimes mid-session and sometimes capturing an agent's in-progress working tree.
+  Fetch, look, and continue. Do not narrate it as a mystery.
+- **The user's IDE can commit your unfinished work.** A failing gate can therefore reach
+  CI before you have fixed it. Fix forward; do not rewrite the pushed history.
+
 ## Reporting
 
 Every build, flash, or soak result must state **which host** it ran on and **which commit
