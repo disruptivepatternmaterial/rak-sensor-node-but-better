@@ -138,10 +138,24 @@ that has to be walked to is a failure of the entire design goal.
 
 | Threshold | Value | Behavior |
 |---|---|---|
-| TX inhibit | TBD | Skip uplink, keep sleeping (H3). Deliberately conservative — reserve energy for recovery |
-| Flash-write inhibit | TBD | Never write during sag — corrupts stored session/interval (H3, H5) |
-| Deep-idle floor | TBD | Below this, do nothing but sleep and re-check. Let the panel win |
-| Recovery hysteresis | TBD | Prevents oscillating at the threshold |
+| TX inhibit | **9.60 V** (3.2 V/cell) | Skip uplink, keep sleeping and reading (H3). Implemented in `power::Brownout` |
+| Flash-write inhibit | **9.60 V** | Same trigger. A half-written config or session file survives the reset and breaks every boot after (H3, H5) |
+| Deep-idle floor | Not separate | Below the inhibit the node already does nothing but wake, read, and re-check. A further tier would only add a state to get stuck in |
+| Recovery hysteresis | **10.20 V** (3.4 V/cell) | Without a gap the pack transmits, sags below the limit, recovers, and transmits again — spending the remainder on the oscillation |
+
+**These are inferred, not measured.** The 10.8 V nominal rating implies three lithium cells
+in series, which puts full at about 12.6 V and empty near 9.0 V, with the pack's own
+protection circuit somewhere below that. Neither the cell count nor the actual cutoff has
+been confirmed against the hardware.
+
+The asymmetry is deliberate. Missing a day of readings is an inconvenience; letting the
+pack reach protection cutoff is a hike, because a disconnected pack may not restart from
+panel current alone. A transmit burst is the largest current the node ever draws, so it is
+the most likely thing to push a tired pack over that edge — which is why transmission is
+the first thing to go.
+
+Confirm the cutoff voltage on the bench and revisit both numbers. Tracked in
+[`../TODO.md`](../TODO.md).
 
 Pack voltage, current, and SoC are readable over the BMS link (`FIRMWARE_SPEC.md` §2.2), so
 these are measurable rather than guessed. The **battery current sign convention is

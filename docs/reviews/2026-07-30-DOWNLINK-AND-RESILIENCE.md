@@ -1,5 +1,11 @@
 # Spec review — downlink surface and multi-day outage resilience
 
+> **Point-in-time record.** Findings 1, 2, and 3 have since been closed in firmware:
+> command framing with a leading opcode (`src/radio.cpp`), session persistence across reset
+> (`src/session.cpp`), and a minimum interval raised to 1800 s to stay inside fair use
+> (`src/config.h`). The rest remain open and are tracked in [`../../TODO.md`](../../TODO.md).
+> The findings below are left as written — they are the reasoning that led to those changes.
+
 - **Date:** 2026-07-30
 - **Reviewed:** `docs/FIRMWARE_SPEC.md` §3, §4, §5, §7 against `.cursor/rules/40-lorawan-compliance.mdc`, `.cursor/rules/50-power-management.mdc`, and the citation registry
 - **Not reviewed:** firmware. Stage 0 is a blink and a serial banner; there is nothing to review yet.

@@ -125,8 +125,11 @@ A result without both is not evidence and does not belong in
 
 ## Known state (2026-07-30)
 
-- Both clones at `5307d1d`, specs only, no firmware in-tree.
-- No RAK4631 on the build host USB yet — hardware on order, so `flash.sh` will correctly
-  refuse until it arrives.
+- Firmware is in-tree and compiles on the build host for all four stages
+  (`stage1`, `stage2`, `stage3`, `rak4631`). Off-target tests run there too:
+  `pio test -e native`.
+- Nothing has run on hardware. No reading has ever been taken.
+- No RAK4631 on the build host USB yet, so `flash.sh` will correctly refuse until one is
+  plugged in. Bring-up order: [`FIRST_FLASH.md`](FIRST_FLASH.md).
 - Also cloned on the build host and useful as references: `WisBlock-Seismic-Sensor`,
   `WisBlock-Solar-Env-Sensor`.

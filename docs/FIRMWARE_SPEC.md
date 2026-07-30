@@ -87,13 +87,21 @@ TTN app: reuse `my-app-tobi` unless ingest requires a new app (decision in plan 
 | Item | Value |
 |---|---|
 | Default interval | **3600 s** |
-| Allowed | **300–86400 s** inclusive |
+| Allowed | **1800–86400 s** inclusive |
 | Downlink port | **fPort 10**. A fixed port so traffic on any other port cannot be mistaken for a configuration change |
 | Downlink format | `opcode` uint8, then arguments |
 | `0x01` set interval | followed by `interval_s` uint32 BE — 5 bytes total |
 | `0x03` request status | no arguments — 1 byte. Answered by shortening the wait so the next scheduled uplink arrives promptly, rather than transmitting a second time |
 | Apply | next wake after RX; persist to flash |
 | Invalid downlink | ignore; keep previous |
+
+**The minimum was raised from 300 s to 1800 s** to stay inside the network's fair-use
+allowance of roughly 30 seconds of transmit time per device per day [CIT-TTN-FUP]. One
+11-byte uplink at the slowest US915 data rate takes about 370 ms, so 300 s intervals would
+mean 288 uplinks and roughly 107 seconds of airtime — over three times the allowance. At
+1800 s it is under 18 seconds even at the slowest rate. Adaptive data rate puts the nodes
+with the weakest coverage on that rate, which is exactly this deployment, so the worst case
+is the one to design against.
 
 The leading opcode replaces an earlier plan for a bare 4-byte interval. A bare integer has
 no room to express any other request, so adding one later would have meant guessing at a

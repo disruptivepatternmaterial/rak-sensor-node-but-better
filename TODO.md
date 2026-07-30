@@ -28,6 +28,11 @@ One running list. Anything that would otherwise be an "oh, one more thing" belon
 - [ ] **5-pin socket pinout.** `docs/HARDWARE.md` says pin 4 is a 3.3 V reference; the
       sibling repo says pins 4 and 5 are RS-485. Confirm with a meter before trusting
       either, and correct whichever is wrong.
+- [ ] **Pack cutoff voltage and cell count.** The low-voltage gate stops transmitting at
+      9.60 V and resumes at 10.20 V, inferred from the 10.8 V nominal rating implying three
+      cells. Neither the cell count nor the pack's actual protection cutoff has been
+      confirmed. Measure both and revisit `power.h` and
+      [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md).
 - [ ] **Sleep current.** Measure it. Everything in `docs/POWER_BUDGET.md` downstream of this
       number is a placeholder until then.
 - [ ] **Heater draw.** The pack's heater is not under firmware control and may dominate the

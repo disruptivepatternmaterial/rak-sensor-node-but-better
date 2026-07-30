@@ -24,7 +24,17 @@
 
 // Bounds from docs/FIRMWARE_SPEC.md §4. The lower bound is a network-airtime limit rather
 // than anything the hardware cares about.
-constexpr uint32_t kIntervalMinSeconds     = 300;
+//
+// 1800 s, not the 300 s originally specified. The network's fair-use allowance is about 30
+// seconds of transmit time per device per day, and one 11-byte uplink at the slowest US915
+// data rate takes roughly 370 ms of that. At 300 s the node would transmit 288 times a day
+// — around 107 seconds of airtime, more than three times the allowance. At 1800 s it is
+// under 18 seconds even at the slowest rate, and comfortably lower at every faster one.
+//
+// The slow rate is not a corner case. Adaptive data rate moves nodes with weak coverage
+// down, so the node most likely to sit at the worst rate is the remote one this design is
+// for. A guard that only holds in good coverage would be no guard at all.
+constexpr uint32_t kIntervalMinSeconds     = 1800;
 constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 3600;
 
