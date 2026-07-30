@@ -15,26 +15,24 @@
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
 
-// CITE(datasheet): The RAK4631 variant defines LED_GREEN = PIN_LED1 and gives the
-//   active level as LED_STATE_ON — rakwireless/variants/rak4630/variant.h lines 70-79,
-//   vendored from RAKwireless [CIT-RAK-PIO-BSP]. The active level is read from the
-//   variant rather than assumed, because it is not the same on every WisBlock base.
+// CITE(datasheet): [CIT-RAK-PIO-BSP] rakwireless/variants/rak4630/variant.h lines 70-79
+//   define LED_GREEN = PIN_LED1 and give the active level as LED_STATE_ON.
+// The active level is read from the variant rather than assumed, because it is not the
+// same on every WisBlock base board.
 static const uint8_t kStatusLed = LED_GREEN;
 
-// CITE(datasheet): The RAK4631's nRF52840 provides USB device support directly; there
-//   is no separate USB-to-serial bridge chip on the module [CIT-RAK4631]. The console
-//   therefore runs over USB CDC, where the host ignores the line rate — this value
-//   only has to match monitor_speed in platformio.ini.
+// CITE(datasheet): [CIT-RAK4631] the RAK4631's nRF52840 provides USB device support
+//   directly — there is no separate USB-to-serial bridge chip on the module.
+// The console therefore runs over USB CDC, where the host ignores the line rate. This
+// value only has to match monitor_speed in platformio.ini.
 static const unsigned long kConsoleBaud = 115200;
 
-// CITE(prior-art): Adafruit TinyUSB supplies the CDC device class used above
-//   [CIT-TINYUSB]. It must be linked with lib_archive = no or the port never
-//   enumerates and the board looks dead after a successful flash
-//   [CIT-PIO-RAK4631-USB].
-//
+// CITE(prior-art): [CIT-TINYUSB] Adafruit TinyUSB supplies the USB CDC device class.
+// CITE(prior-art): [CIT-PIO-RAK4631-USB] it must be linked with lib_archive = no, or the
+//   port never enumerates and the board looks dead after a successful flash.
 // A deployed node boots with no USB host attached. Blocking forever on the port is the
-// standard way to make a working headless board look bricked, so the wait is bounded
-// and boot continues regardless.
+// standard way to make a working headless board look bricked, so the wait is bounded and
+// boot continues either way.
 static const unsigned long kConsoleWaitMs = 5000;
 
 static const char kFirmwareVersion[] = "0.0.1+stage0";

@@ -57,7 +57,12 @@ fi
 
 echo
 echo "${BLUE}== flash ==${NC}"
-if scripts/remote.sh run "pio run -t upload --upload-port ${PORT}"; then
+# The board definition sets use_1200bps_touch with wait_for_upload_port, so the node
+# reboots into its bootloader and re-enumerates under a DIFFERENT port partway through
+# (rakwireless/boards/rak4630.json). Pinning --upload-port to the pre-touch name can
+# therefore point at a port that no longer exists, so we only pass it when the operator
+# explicitly asked for one and otherwise let PlatformIO track the port across the reset.
+if scripts/remote.sh run "pio run -t upload ${PORT:+--upload-port $PORT}"; then
   echo
   echo "${GREEN}=== FLASH OK ===${NC}"
   echo "host:   Heliotrope Ridge"
