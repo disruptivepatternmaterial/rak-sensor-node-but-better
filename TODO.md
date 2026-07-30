@@ -34,7 +34,17 @@ One running list. Anything that would otherwise be an "oh, one more thing" belon
       confirmed. Measure both and revisit `power.h` and
       [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md).
 - [ ] **Sleep current.** Measure it. Everything in `docs/POWER_BUDGET.md` downstream of this
-      number is a placeholder until then.
+      number is a placeholder until then. Two things to confirm while the meter is on it:
+      that shutting the radio's bus down before sleep actually removed the milliamp it was
+      costing, and how much is left on the table by using the chip's lighter sleep state
+      instead of its deepest. The deepest state restarts the chip on wake, so adopting it
+      means rebuilding the session every interval — only worth doing if the measured gap
+      justifies it.
+- [ ] **Downlink round trip.** The receive-window wait is now taken from the MAC rather than
+      assumed, and the assigned delays are stored with the session. Send an interval change
+      from the console, confirm it applies, then reset the node and send another to prove
+      the restored session still hears downlinks. Until that is done the fix is reasoned,
+      not demonstrated.
 - [ ] **Heater draw.** The pack's heater is not under firmware control and may dominate the
       winter budget. Measure once it is cold enough to switch on.
 

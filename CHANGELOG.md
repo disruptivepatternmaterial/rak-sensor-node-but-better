@@ -8,6 +8,45 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-30
+
+First release with firmware in the tree. It compiles for all four bring-up stages and its
+off-target tests pass, but **no part of it has run on hardware** — the board arrived today
+and nothing has been flashed. Treat every behavior below as reasoned from the datasheets
+and the reviews, not demonstrated. [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md) is the
+order to bring it up in, and [`docs/EVIDENCE.md`](docs/EVIDENCE.md) is where the results
+belong.
+
+### Fixed
+
+- **The node now transmits on the channels the network is listening to** (`src/radio.cpp`).
+  US915 defines 72 channels; The Things Network uses eight of them. Nothing restricted the
+  radio to those eight, so it spread its transmissions across all 72 and roughly seven in
+  eight reached no gateway at all. Joins would have failed repeatedly for no visible
+  reason, and the node would have reported every uplink as sent. Found independently by two
+  reviewers, which is the only reason it was caught before the hardware arrived.
+- **Downlinks can actually arrive** (`src/radio.cpp`, `src/session.cpp`). The node waited
+  three seconds after each uplink before sleeping, against a network that answers after
+  five — so the radio was powered down while the reply was being sent, and no downlink
+  could ever have been received. The wait is now read from the radio stack instead of
+  assumed, and the network's assigned timing is stored alongside the session, because a
+  node resuming from flash never sees the join handshake that carries it and would
+  otherwise revert to the wrong timing after every reset.
+- **A milliamp reclaimed during sleep** (`src/power.cpp`). Putting the transceiver to sleep
+  did not stop the bus that talks to it, which stayed clocked at close to a milliamp — more
+  than everything else the node draws while asleep combined. The console is now left
+  running when a host is actually plugged in, so diagnosing the node in the field no longer
+  disconnects the person doing it at the first sleep.
+- **The pack parser stops rather than guessing** (`src/sensors/battery.cpp`). An
+  unrecognized record has an unknown length, and stepping through it a byte at a time read
+  the tail of one reading as the head of the next — producing a voltage or temperature that
+  looks entirely plausible and is wrong. It now keeps what it decoded and stops.
+- **Battery temperature scale corrected in the documentation**
+  ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md), `payload/schema.yaml`).
+  The ×10 decision was made when the pack was to be read over Modbus; ADR-0004 moved it to
+  the one-wire path, where the value already arrives scaled. Applying the old rule would
+  have put every reading ten times high. The code was already right; the records were not.
+
 ### Added
 
 - **The LoRaWAN session survives a reset** (`src/session.cpp`). Previously any reset — a

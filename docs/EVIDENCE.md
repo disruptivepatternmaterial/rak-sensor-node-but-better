@@ -54,6 +54,32 @@ only a measurement recorded here closes it.
 
 Newest first.
 
+### 2026-07-30 — Release 0.2.0: all four stages build, off-target tests pass
+
+- **Commit:** `80de312` (tagged `v0.2.0`)
+- **Host:** Heliotrope Ridge (PlatformIO 6.1.19)
+- **Measured:** build output and host-run unit tests. **Nothing was run on hardware.**
+- **Observation:**
+
+  Field image (`rak4631`):
+
+      RAM:   [=         ]   9.9% (used 24536 bytes from 248832 bytes)
+      Flash: [==        ]  23.8% (used 193672 bytes from 815104 bytes)
+
+  All four environments report `SUCCESS`: `stage1`, `stage2`, `stage3`, `rak4631`.
+  `pio test -e native` — 20 test cases, 20 passed. `scripts/preflight.sh` PASS.
+
+- **Verdict:** PASS for a narrow claim — the release builds and its host-testable parts
+  behave.
+- **Notes:** The four-reviewer pass that preceded this release found, among other things,
+  that the radio was not restricted to the channels the network listens on, and that the
+  node slept before the network's reply window opened. Both are corrected here and **both
+  corrections are unverified** — they are reasoned from the regional parameters and the
+  radio stack's own reported timing, not observed. The first join and the first downlink
+  are what settle them. Same caveat applies to the low-voltage gate, the session
+  persistence, the pack frame validation, and the sleep-current change: all compile, none
+  have been exercised. H1–H8 remain open.
+
 ### 2026-07-30 — Full firmware compiles for all four stages; off-target tests pass
 
 - **Commit:** `146d99e`

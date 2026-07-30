@@ -74,8 +74,9 @@ runtime_hours = usable_pack_capacity_mAh / I_avg_mA
 
 | Phase | Duration | Current | Source | Status |
 |---|---|---|---|---|
-| Sleep (System OFF class) | ~`t_cycle` | TBD | [CIT-NRF-POWER] + measured | ⬜ |
+| Sleep (chip's lighter sleep state, not its deepest) | ~`t_cycle` | TBD | [CIT-NRF-POWER] + measured | ⬜ |
 | Sleep **with radio left awake** (defect case) | — | ~6 mA observed | [CIT-RAK-SLEEP] | reference |
+| Sleep **with the radio's bus left running** (defect case) | — | ~0.9 mA observed | [CIT-NRF-PERIPH-SLEEP] | reference — closed in `power.cpp` |
 | Failed-join retry loop (defect case) | unbounded | never sleeps | [CIT-RAK-SLEEP] | reference |
 | MCU wake + init | TBD | TBD | measured | ⬜ |
 | RS-485 enabled, RK900 poll | ≤ 1 s per txn, ≤ 2 retries (`FIRMWARE_SPEC.md` §2.1) | TBD — includes RAK5802 transceiver | [CIT-RAK5802] + measured | ⬜ |
