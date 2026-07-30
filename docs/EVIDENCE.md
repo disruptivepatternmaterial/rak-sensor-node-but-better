@@ -52,7 +52,29 @@ only a measurement recorded here closes it.
 
 ## Log
 
-Newest first. No entries yet — hardware is on order and there is no firmware in-tree.
+Newest first.
+
+### 2026-07-30 — Stage 0 compiles for the RAK4631 on two independent machines
+
+- **Commit:** `7ae56ec`
+- **Host:** Heliotrope Ridge (PlatformIO 6.1.19) and GitHub Actions `ubuntu-latest`
+- **Measured:** build output only. **Nothing was run on hardware.**
+- **Observation:**
+
+  Identical on both machines:
+
+      RAM:   [          ]   4.9% (used 12280 bytes from 248832 bytes)
+      Flash: [=         ]   9.4% (used 76748 bytes from 815104 bytes)
+      [SUCCESS]
+
+- **Verdict:** PASS, for a narrow claim — the toolchain, the vendored board definition,
+  and the Adafruit nRF52 framework combination produce a linkable image, and they do so
+  reproducibly on a machine that has never seen the project before. Byte-identical sizes
+  across two hosts indicate the build does not depend on local machine state, which was
+  the specific risk in RAK's alternative "copy files into `~/.platformio`" approach.
+- **Notes:** This closes none of H1–H8. It says nothing about whether the board runs,
+  enumerates USB, joins, sleeps, or draws the current we hope. The first real evidence
+  comes from flashing hardware and reading the serial banner.
 
 <!-- Template:
 
