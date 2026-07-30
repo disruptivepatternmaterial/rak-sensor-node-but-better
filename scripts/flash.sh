@@ -11,6 +11,11 @@
 #   scripts/flash.sh                 confirm interactively
 #   scripts/flash.sh --yes           skip the prompt (CI / repeat bench cycles)
 #   scripts/flash.sh --port /dev/cu.usbmodemXXXX
+#   scripts/flash.sh --env stage1    flash one of the staged bring-up images
+#
+# The --env flag exists for first bring-up (docs/FIRST_FLASH.md), where each stage adds a
+# single subsystem so that a failure has exactly one candidate cause. Defaults to the full
+# image.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,18 +25,26 @@ die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 
 ASSUME_YES=0
 PORT=""
+ENV_NAME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --yes|-y) ASSUME_YES=1; shift ;;
-    --port)   PORT="${2:?--port needs a value}"; shift 2 ;;
+    --yes|-y)  ASSUME_YES=1; shift ;;
+    --port)    PORT="${2:?--port needs a value}"; shift 2 ;;
+    --env|-e)  ENV_NAME="${2:?--env needs a value}"; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 [[ -f platformio.ini ]] || die "no platformio.ini -- there is no firmware to flash yet (WP1 not started)."
 
+if [[ -n "$ENV_NAME" ]]; then
+  grep -q "^\[env:${ENV_NAME}\]" platformio.ini \
+    || die "no environment named '${ENV_NAME}' in platformio.ini.
+      Available: $(grep -o '^\[env:[^]]*\]' platformio.ini | sed 's/\[env:\(.*\)\]/\1/' | tr '\n' ' ')"
+fi
+
 echo "${BLUE}== build ==${NC}"
-scripts/build.sh
+scripts/build.sh ${ENV_NAME:+-e "$ENV_NAME"}
 
 SHA=$(git rev-parse HEAD)
 SHORT=${SHA:0:7}
@@ -45,6 +58,7 @@ DETECTED=$(scripts/remote.sh run 'ls /dev/cu.usbmodem* 2>/dev/null | head -1' | 
       Hardware may simply not have arrived yet -- README status is 'not deployed'."
 
 echo "${DIM}   port:   ${PORT:-${DETECTED} (auto)}${NC}"
+echo "${DIM}   env:    ${ENV_NAME:-rak4631 (full image)}${NC}"
 echo "${DIM}   commit: ${SHORT}${NC}"
 
 if [[ "$ASSUME_YES" -ne 1 ]]; then
@@ -62,7 +76,7 @@ echo "${BLUE}== flash ==${NC}"
 # (rakwireless/boards/rak4630.json). Pinning --upload-port to the pre-touch name can
 # therefore point at a port that no longer exists, so we only pass it when the operator
 # explicitly asked for one and otherwise let PlatformIO track the port across the reset.
-if scripts/remote.sh run "pio run -t upload ${PORT:+--upload-port $PORT}"; then
+if scripts/remote.sh run "pio run ${ENV_NAME:+-e $ENV_NAME} -t upload ${PORT:+--upload-port $PORT}"; then
   echo
   echo "${GREEN}=== FLASH OK ===${NC}"
   echo "host:   Heliotrope Ridge"
