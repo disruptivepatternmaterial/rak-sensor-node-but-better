@@ -8,6 +8,31 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Real encoder bytes are checked through the real decoder** (`scripts/check_golden_vectors.py`,
+  `tools/`). The existing parity gate compares the encoder to the schema and the schema to
+  the decoder, which cannot catch anything the schema does not describe — the decoder
+  applies a 230-degree installation offset to wind direction, and no schema field says so.
+  This gate compiles the encoder, takes the bytes it would transmit, and runs them through
+  the JavaScript that ingest actually runs. It catches a right type on a wrong channel,
+  which is the failure ADR-0002 called out as silently missing its consumer. Runs on the
+  build host and in CI; skips on the workstation, which has no node.
+
+### Fixed
+
+- **Modbus notices a gap inside a reply** (`src/sensors/modbus.cpp`). Bytes arriving after
+  a pause were concatenated onto the previous frame, and the pair was rejected on its
+  checksum a full second later, reported as a timeout. The gap is now measured against the
+  protocol's own end-of-frame silence, so a truncated reply is rejected immediately and
+  retried while the line is still quiet.
+
+### Changed
+
+- **Open items moved to GitHub Issues** and `TODO.md` retired. A checklist in the repo and
+  a tracker drift apart, and then neither is worth reading. Code comments cite issue
+  numbers now.
+
 ## [0.2.1] — 2026-07-30
 
 Supersedes 0.2.0, which was tagged at a commit that does not pass CI. Use this one.
