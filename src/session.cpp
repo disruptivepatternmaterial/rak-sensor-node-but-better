@@ -155,9 +155,19 @@ bool restore()
 
     // The stored counter is already ahead of anything transmitted, which is the whole
     // point — resuming at or below a used value would have the network discard the uplinks
-    // silently while the node reported success.
-    mib_set_u32(MIB_UPLINK_COUNTER, s.uplink_counter);
-    mib_set_u32(MIB_DOWNLINK_COUNTER, s.downlink_counter);
+    // silently while the node reported success. That silent-discard behavior is exactly
+    // why a failure here cannot be shrugged off: the node would look healthy, report
+    // success on every send, and reach nobody. Better to throw the session away and join
+    // fresh, which costs one handshake and is guaranteed to work.
+    if (!mib_set_u32(MIB_UPLINK_COUNTER, s.uplink_counter)) {
+        LOGLN(F("   session : frame counter rejected — discarding, will join fresh"));
+        forget();
+        return false;
+    }
+
+    // The downlink counter only affects receiving. Losing it costs at most one ignored
+    // downlink, so it is not worth abandoning an otherwise good session over.
+    (void)mib_set_u32(MIB_DOWNLINK_COUNTER, s.downlink_counter);
 
     memset(&req, 0, sizeof(req));
     req.Type                  = MIB_NETWORK_JOINED;

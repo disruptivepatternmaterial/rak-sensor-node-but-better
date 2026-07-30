@@ -29,7 +29,9 @@ enum class BatteryResult : uint8_t {
     Ok = 0,
     NoReply,     // silent line — unplugged, or the pack's BMS is asleep
     ShortFrame,  // saw bytes but never a complete frame
-    NoRecords,   // frame arrived but held nothing we understand
+    BadFrame,    // no delimiter, or a declared length that does not fit what arrived
+    BadChecksum, // arrived intact-looking but does not verify — treated as no data
+    NoRecords,   // frame verified but held nothing we understand
 };
 
 const char *battery_result_name(BatteryResult r);
@@ -49,7 +51,13 @@ class Battery {
     size_t receive(uint8_t *buf, size_t cap);
     void   tx_byte(uint8_t b);
     int    rx_byte(uint32_t timeout_us);
-    void   parse(const uint8_t *buf, size_t len, BatteryReading &out);
+
+    // Verifies the frame before believing any of it, then fills `out`. Returns the reason
+    // when it refuses. Validation matters more here than it looks: an unverified record
+    // scan will happily turn line noise into a plausible pack voltage, and a wrong battery
+    // reading is worse than none — it is the number a human uses to decide whether the
+    // node needs rescuing.
+    BatteryResult parse(const uint8_t *buf, size_t len, BatteryReading &out);
 
     uint8_t       m_pin;
     BatteryResult m_last = BatteryResult::NoReply;

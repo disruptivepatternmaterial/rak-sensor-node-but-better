@@ -19,6 +19,12 @@ One running list. Anything that would otherwise be an "oh, one more thing" belon
 - [ ] **Battery temperature scale.** Encoded as tenths of a degree. If the first reading
       comes back around 2 °C on a 20 °C bench, it is whole degrees and needs multiplying by
       ten in `src/payload.cpp`.
+- [ ] **Battery reply checksum convention.** The parser assumes the pack's reply is
+      checksummed the same way as the request — XOR of everything between the delimiter and
+      the checksum byte. The prior-art codec never checked the reply, so there was nothing
+      to copy. If stage 2 reports `bad checksum`, the raw frame is logged in hex alongside
+      the expected and received bytes; compare them before changing the parser, because the
+      reply may simply be framed differently.
 - [ ] **5-pin socket pinout.** `docs/HARDWARE.md` says pin 4 is a 3.3 V reference; the
       sibling repo says pins 4 and 5 are RS-485. Confirm with a meter before trusting
       either, and correct whichever is wrong.

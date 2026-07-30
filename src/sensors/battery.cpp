@@ -45,10 +45,12 @@ constexpr size_t kHeaderBytes = 6;
 const char *battery_result_name(BatteryResult r)
 {
     switch (r) {
-    case BatteryResult::Ok:         return "ok";
-    case BatteryResult::NoReply:    return "no reply";
-    case BatteryResult::ShortFrame: return "short frame";
-    case BatteryResult::NoRecords:  return "no records";
+    case BatteryResult::Ok:          return "ok";
+    case BatteryResult::NoReply:     return "no reply";
+    case BatteryResult::ShortFrame:  return "short frame";
+    case BatteryResult::BadFrame:    return "bad frame";
+    case BatteryResult::BadChecksum: return "bad checksum";
+    case BatteryResult::NoRecords:   return "no records";
     }
     return "?";
 }
@@ -148,39 +150,73 @@ size_t Battery::receive(uint8_t *buf, size_t cap)
     return n;
 }
 
-void Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out)
+BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out)
 {
-    size_t i = 0;
-    while (i < len && buf[i] != kDelimiter) {
-        i++;
+    size_t start = 0;
+    while (start < len && buf[start] != kDelimiter) {
+        start++;
     }
-    if (i >= len) {
-        return;
+    if (start >= len) {
+        return BatteryResult::BadFrame;
     }
-    i++; // step past the delimiter
 
-    if (i + kHeaderBytes >= len) {
-        return;
+    // Everything after the delimiter, excluding the trailing checksum byte.
+    const size_t body = start + 1;
+    if (body + kHeaderBytes >= len) {
+        return BatteryResult::BadFrame;
     }
-    i += kHeaderBytes;
+
+    // The header's fifth byte is the declared payload length, counting the records that
+    // follow the payload-type byte. Trusting it is what stops the record scan from running
+    // off into whatever trailing noise the line picked up.
+    const size_t declared    = buf[body + 4];
+    const size_t records     = body + kHeaderBytes;
+    const size_t records_end = records + declared;
+
+    // The checksum sits immediately after the records. If the declared length disagrees
+    // with how many bytes actually arrived, the frame is not trustworthy regardless of
+    // what the records look like.
+    if (records_end >= len) {
+        return BatteryResult::BadFrame;
+    }
+
+    // Same convention as the request: XOR of every byte between the delimiter and the
+    // checksum itself.
+    //
+    // ASSUMPTION, not yet confirmed against hardware: that the pack's reply uses the same
+    // checksum convention as the request. The prior-art codec never checked the reply at
+    // all, so there is nothing to copy here. If the first real pack reply is rejected,
+    // compare the logged expected and received bytes before changing anything — the frame
+    // may simply be framed differently. Tracked in TODO.md.
+    uint8_t expected = 0;
+    for (size_t i = body; i < records_end; i++) {
+        expected ^= buf[i];
+    }
+
+    if (expected != buf[records_end]) {
+        LOGF("   battery : checksum %02X, expected %02X\n", buf[records_end], expected);
+        return BatteryResult::BadChecksum;
+    }
 
     // Records are { sensor id, IPSO type, value }, with the value width implied by the
     // type. An unknown type has an unknown width, so the parser cannot skip it cleanly —
-    // it advances one byte and re-syncs on the next thing it recognizes. That is why an
-    // unhandled type does not merely go missing, it can also swallow the record after it.
-    while (i + 2 < len) {
+    // it advances one byte and re-syncs on the next thing it recognizes. That is safe only
+    // because the surrounding frame has already been verified; on unchecked bytes the same
+    // scan will manufacture readings out of noise.
+    size_t i = records;
+    while (i + 2 < records_end) {
         const uint8_t type = buf[i + 1];
 
         if (type == kIpsoCapacity) {
             out.soc.set(buf[i + 2]);
             i += 3;
-        } else if (type == kIpsoDcCurrent && (i + 3) < len) {
+        } else if (type == kIpsoDcCurrent && (i + 3) < records_end) {
             out.current.set((int16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
             i += 4;
-        } else if (type == kIpsoDcVoltage && (i + 3) < len) {
+        } else if (type == kIpsoDcVoltage && (i + 3) < records_end) {
             out.voltage.set((uint16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
             i += 4;
-        } else if (type == kIpsoTemperature && (i + 3) < len) {
+        } else if (type == kIpsoTemperature && (i + 3) < records_end) {
             // Type 103 is the same code the pack's own LoRaWAN uplinks use for
             // temperature, carried as a signed 16-bit value.
             out.temperature.set((int16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
@@ -189,6 +225,8 @@ void Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out)
             i++;
         }
     }
+
+    return out.any() ? BatteryResult::Ok : BatteryResult::NoRecords;
 }
 
 BatteryReading Battery::read()
@@ -209,8 +247,18 @@ BatteryReading Battery::read()
     } else if (n < 8) {
         m_last = BatteryResult::ShortFrame;
     } else {
-        parse(rx, n, out);
-        m_last = out.any() ? BatteryResult::Ok : BatteryResult::NoRecords;
+        m_last = parse(rx, n, out);
+    }
+
+    // A frame that arrived but did not verify is the one case worth dumping in full. It is
+    // the difference between "the pack is not answering" and "the pack is answering in a
+    // shape this parser does not expect", and those need completely different fixes.
+    if (m_last == BatteryResult::BadFrame || m_last == BatteryResult::BadChecksum) {
+        LOG(F("   battery : raw"));
+        for (size_t i = 0; i < n; i++) {
+            LOGF(" %02X", rx[i]);
+        }
+        LOGLN("");
     }
 
     // Leave the pin as a plain input. Holding the pull-up enabled costs current through
