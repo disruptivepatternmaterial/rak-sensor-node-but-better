@@ -15,6 +15,10 @@
 
 #pragma once
 
+// The logging macros below expand to Serial calls, so anything that logs needs this —
+// pulling it in here means no module has to remember.
+#include <Arduino.h>
+
 #ifndef FEATURE_RK900
 #define FEATURE_RK900 1
 #endif
