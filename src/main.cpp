@@ -99,21 +99,34 @@ void loop()
 
     LOGF("[cycle %lu]\n", (unsigned long)++cycle);
 
-    Payload payload;
+    WeatherReading weather;
+    BatteryReading pack;
 
     // Each sensor is read independently and neither can prevent the other from being
     // read. A sensor that fails contributes no fields rather than zeroes, so a gap in the
     // data is visible as a gap instead of arriving as a plausible wrong number.
 #if FEATURE_RK900
-    const WeatherReading weather = weather_sensor.read();
-    payload.add(weather);
+    weather = weather_sensor.read();
     power::watchdog_feed();
 #endif
 
 #if FEATURE_BATTERY
-    const BatteryReading pack = battery_sensor.read();
-    payload.add(pack);
+    pack = battery_sensor.read();
     power::watchdog_feed();
+#endif
+
+    // Built to fit what the current data rate allows. The network decides that rate, and
+    // at its slowest only 11 of the 35 bytes fit — so the encoder fills the space in
+    // priority order rather than producing an uplink that would simply be refused.
+    Payload payload;
+#if FEATURE_RADIO
+    payload.build(weather, pack, radio.max_payload());
+    if (payload.dropped() > 0) {
+        LOGF("   uplink  : %u field(s) dropped to fit %u bytes\n", payload.dropped(),
+             (unsigned)radio.max_payload());
+    }
+#else
+    payload.build(weather, pack);
 #endif
 
     uint32_t sleep_for = config.interval_seconds();

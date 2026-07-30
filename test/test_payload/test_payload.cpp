@@ -153,6 +153,103 @@ void test_encoder_respects_capacity()
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(kMaxPayloadBytes, p.length());
 }
 
+// Helper: every field valid, which is the normal case and the largest payload.
+static void fill(WeatherReading &w, BatteryReading &b)
+{
+    w.wind_speed.set(342);
+    w.wind_direction.set(197);
+    w.temperature.set(215);
+    w.humidity.set(655);
+    w.pressure.set(10132);
+
+    b.voltage.set(1247);
+    b.current.set(-85);
+    b.soc.set(87);
+    b.temperature.set(180);
+}
+
+// The whole reason build() exists. The slowest US915 data rate allows 11 application
+// bytes, and the network chooses that rate — typically for the nodes hardest to reach.
+// An oversized uplink is refused outright rather than truncated, so without a budget the
+// node in the worst coverage is the one that goes completely silent.
+void test_build_fits_slowest_data_rate()
+{
+    WeatherReading w;
+    BatteryReading b;
+    fill(w, b);
+
+    Payload p;
+    p.build(w, b, kMinDataRatePayloadBytes);
+
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(kMinDataRatePayloadBytes, p.length());
+    TEST_ASSERT_FALSE(p.empty());
+    TEST_ASSERT_GREATER_THAN_UINT8(0, p.dropped());
+}
+
+// At the smallest budget the uplink must still say whether the node is dying and carry the
+// two readings the station exists to take. Exactly 11 bytes: state of charge, wind speed,
+// air temperature.
+void test_tight_budget_keeps_the_important_fields()
+{
+    WeatherReading w;
+    BatteryReading b;
+    fill(w, b);
+
+    Payload p;
+    p.build(w, b, kMinDataRatePayloadBytes);
+
+    TEST_ASSERT_EQUAL_UINT32(11, p.length());
+    TEST_ASSERT_EQUAL_UINT8(23, p.bytes()[0]);  // state of charge
+    TEST_ASSERT_EQUAL_UINT8(184, p.bytes()[1]);
+    TEST_ASSERT_EQUAL_UINT8(1, p.bytes()[3]);   // wind speed
+    TEST_ASSERT_EQUAL_UINT8(190, p.bytes()[4]);
+    TEST_ASSERT_EQUAL_UINT8(3, p.bytes()[7]);   // air temperature
+    TEST_ASSERT_EQUAL_UINT8(103, p.bytes()[8]);
+}
+
+// With room for everything, nothing is dropped and the length matches the documented
+// maximum. If this figure moves, the DR0 arithmetic above has to be revisited.
+void test_build_with_full_budget_drops_nothing()
+{
+    WeatherReading w;
+    BatteryReading b;
+    fill(w, b);
+
+    Payload p;
+    p.build(w, b);
+
+    TEST_ASSERT_EQUAL_UINT32(kMaxPayloadBytes, p.length());
+    TEST_ASSERT_EQUAL_UINT8(0, p.dropped());
+}
+
+// A budget cannot resurrect a sensor that did not answer. Silence still produces nothing.
+void test_build_with_no_valid_readings_is_empty()
+{
+    WeatherReading w;
+    BatteryReading b;
+
+    Payload p;
+    p.build(w, b, kMinDataRatePayloadBytes);
+
+    TEST_ASSERT_TRUE(p.empty());
+    TEST_ASSERT_EQUAL_UINT8(0, p.dropped());
+}
+
+// A budget too small for even one field must produce an empty payload, not a partial
+// record. Half a field would desynchronize the decoder for the rest of the message.
+void test_absurdly_small_budget_emits_nothing_partial()
+{
+    WeatherReading w;
+    BatteryReading b;
+    fill(w, b);
+
+    Payload p;
+    p.build(w, b, 2);
+
+    TEST_ASSERT_TRUE(p.empty());
+    TEST_ASSERT_GREATER_THAN_UINT8(0, p.dropped());
+}
+
 void test_clear_resets_buffer()
 {
     Payload        p;
@@ -177,6 +274,11 @@ int main()
     RUN_TEST(test_soc_is_one_byte);
     RUN_TEST(test_full_uplink_layout);
     RUN_TEST(test_encoder_respects_capacity);
+    RUN_TEST(test_build_fits_slowest_data_rate);
+    RUN_TEST(test_tight_budget_keeps_the_important_fields);
+    RUN_TEST(test_build_with_full_budget_drops_nothing);
+    RUN_TEST(test_build_with_no_valid_readings_is_empty);
+    RUN_TEST(test_absurdly_small_budget_emits_nothing_partial);
     RUN_TEST(test_clear_resets_buffer);
     return UNITY_END();
 }

@@ -44,6 +44,11 @@ constexpr uint32_t kJoinTimeoutMs = 30000;
 constexpr uint32_t kBackoffFirstSeconds = 60;
 constexpr uint32_t kBackoffMaxSeconds   = 3600;
 
+// Consecutive send failures before the session is treated as dead. Rejoining is expensive
+// and only helps when the network has genuinely forgotten the node, so it should follow a
+// pattern rather than a single event.
+constexpr uint32_t kFailuresBeforeRejoin = 3;
+
 uint8_t s_dev_eui[8]  = OTAA_DEVEUI;
 uint8_t s_app_eui[8]  = OTAA_APPEUI;
 uint8_t s_app_key[16] = OTAA_APPKEY;
@@ -184,6 +189,26 @@ bool Radio::ensure_joined()
     return m_joined;
 }
 
+size_t Radio::max_payload() const
+{
+    LoRaMacTxInfo_t info = {0, 0};
+
+    // Asking about a zero-length frame returns the allowance without judging the size.
+    // The call reports an error when nothing can currently be sent at all, but it still
+    // fills in the sizes, so the values are usable either way.
+    (void)LoRaMacQueryTxPossible(0, &info);
+
+    const size_t allowed = info.MaxPossiblePayload;
+
+    // A zero here means the MAC had nothing to say — most likely it is not joined yet.
+    // Assume the worst rate rather than the best: too small drops a few fields, too large
+    // gets the whole uplink refused.
+    if (allowed == 0) {
+        return kMinDataRatePayloadBytes;
+    }
+    return (allowed > kMaxPayloadBytes) ? kMaxPayloadBytes : allowed;
+}
+
 bool Radio::send(const Payload &p)
 {
     if (!m_joined || p.empty()) {
@@ -201,13 +226,21 @@ bool Radio::send(const Payload &p)
         LOGF("   radio   : send failed (%d), backoff %lu s\n", (int)status,
              (unsigned long)backoff_seconds());
 
-        // A send failing after a successful join usually means the session is no longer
-        // good — the network may have forgotten it while the node was unreachable. Drop
-        // the joined state so the next cycle rejoins instead of failing the same way
-        // forever, and discard the stored copy so a reset in the meantime does not restore
-        // the same dead session.
-        m_joined = false;
-        session::forget();
+        // Deliberately NOT rejoining on a single failure. The library reports one generic
+        // error for every cause — a busy MAC, a payload too large for the current data
+        // rate, a momentary refusal — so a failure says nothing about whether the session
+        // is still good. Rejoining on the first one turns a recoverable hiccup into a
+        // rejoin on every cycle, which is the most expensive loop this node can enter and
+        // does not fix any of those causes anyway.
+        //
+        // Several in a row is different: that pattern does suggest the network has
+        // forgotten the session, and a rejoin is the only way out.
+        if (m_failures >= kFailuresBeforeRejoin) {
+            LOGF("   radio   : %lu failures in a row — dropping the session and rejoining\n",
+                 (unsigned long)m_failures);
+            m_joined = false;
+            session::forget();
+        }
         return false;
     }
 

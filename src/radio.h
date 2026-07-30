@@ -26,6 +26,7 @@
 
 #include "payload.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 // What a downlink asked for. Deliberately tiny: this node is meant to run untouched, so
@@ -47,6 +48,15 @@ class Radio {
     bool ensure_joined();
 
     bool joined() const { return m_joined; }
+
+    // How many application bytes the current data rate allows. Adaptive data rate means
+    // the network moves the node between rates, and the allowance at the slowest one is
+    // 11 bytes against a full payload of 35. An oversized uplink is not truncated — it is
+    // refused — so the payload has to be built to fit whatever this returns.
+    //
+    // Falls back to the slowest rate's allowance if the MAC cannot answer, because
+    // guessing small costs a few fields and guessing large costs the entire uplink.
+    size_t max_payload() const;
 
     // Sends one unconfirmed uplink. Unconfirmed because an acknowledgement costs a
     // downlink from the gateway, and the network's daily downlink allowance is small

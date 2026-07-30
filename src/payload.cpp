@@ -20,6 +20,7 @@ constexpr uint8_t kChBattTemp  = 24, kTyBattTemp  = 103;
 void Payload::put_u8(uint8_t channel, uint8_t type, uint8_t value)
 {
     if (!room_for(3)) {
+        m_dropped++;
         return;
     }
     m_buf[m_len++] = channel;
@@ -30,6 +31,7 @@ void Payload::put_u8(uint8_t channel, uint8_t type, uint8_t value)
 void Payload::put_u16(uint8_t channel, uint8_t type, uint16_t value)
 {
     if (!room_for(4)) {
+        m_dropped++;
         return;
     }
     m_buf[m_len++] = channel;
@@ -102,6 +104,44 @@ void Payload::add(const BatteryReading &b)
     // degrees and would need a factor of ten here — worth confirming against a known
     // ambient reading the first time the pack answers, since a wrong guess shows up as a
     // plausible-looking temperature that is off by 10x.
+    if (b.temperature.valid) {
+        put_s16(kChBattTemp, kTyBattTemp, b.temperature.value);
+    }
+}
+
+void Payload::build(const WeatherReading &w, const BatteryReading &b, size_t budget)
+{
+    clear();
+    m_budget = (budget == 0 || budget > kMaxPayloadBytes) ? kMaxPayloadBytes : budget;
+
+    // Priority order. The first three are the ones that fit even at the slowest data rate:
+    // whether the node is dying, and the two readings the station exists to take.
+    if (b.soc.valid) {
+        put_u8(kChBattSoc, kTyBattSoc, b.soc.value);
+    }
+    if (w.wind_speed.valid) {
+        put_u16(kChWindSpeed, kTyWindSpeed, w.wind_speed.value);
+    }
+    if (w.temperature.valid) {
+        put_s16(kChAirTemp, kTyAirTemp, w.temperature.value);
+    }
+
+    // Everything past here is dropped first when the link is slow.
+    if (b.voltage.valid) {
+        put_u16(kChBattVolts, kTyBattVolts, b.voltage.value);
+    }
+    if (w.wind_direction.valid) {
+        put_u16(kChWindDir, kTyWindDir, w.wind_direction.value);
+    }
+    if (w.humidity.valid) {
+        put_u16(kChHumidity, kTyHumidity, w.humidity.value);
+    }
+    if (w.pressure.valid) {
+        put_u16(kChPressure, kTyPressure, w.pressure.value);
+    }
+    if (b.current.valid) {
+        put_s16(kChBattAmps, kTyBattAmps, b.current.value);
+    }
     if (b.temperature.valid) {
         put_s16(kChBattTemp, kTyBattTemp, b.temperature.value);
     }
