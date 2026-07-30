@@ -1,6 +1,7 @@
 #include "radio.h"
 
 #include "features.h"
+#include "session.h"
 
 #if FEATURE_RADIO
 
@@ -135,6 +136,12 @@ bool Radio::begin()
     }
 
     m_started = true;
+
+    // A session saved before the last reset makes this boot a non-event: the node is
+    // already joined and can send its next reading without needing the gateway to be
+    // reachable for a handshake first.
+    m_joined = session::restore();
+
     return true;
 }
 
@@ -164,6 +171,10 @@ bool Radio::ensure_joined()
     if (m_joined) {
         LOGF("   radio   : joined after %lu ms\n", (unsigned long)(millis() - start));
         m_failures = 0;
+
+        // Store it immediately. A join that is never saved has to be repeated after the
+        // next reset, which is the situation this exists to avoid.
+        session::save();
     } else {
         m_failures++;
         LOGF("   radio   : join failed (attempt %lu, next try in %lu s)\n",
@@ -193,13 +204,19 @@ bool Radio::send(const Payload &p)
         // A send failing after a successful join usually means the session is no longer
         // good — the network may have forgotten it while the node was unreachable. Drop
         // the joined state so the next cycle rejoins instead of failing the same way
-        // forever.
+        // forever, and discard the stored copy so a reset in the meantime does not restore
+        // the same dead session.
         m_joined = false;
+        session::forget();
         return false;
     }
 
     m_failures = 0;
     LOGF("   radio   : sent %u bytes on port %u\n", (unsigned)len, kUplinkPort);
+
+    // Periodically advance the stored frame counter. Almost always a no-op; it writes
+    // roughly once a month at the default interval.
+    session::maybe_save_counter();
 
     // Class A opens its two receive windows immediately after the uplink. Staying awake
     // through them is the only chance to hear anything at all.
