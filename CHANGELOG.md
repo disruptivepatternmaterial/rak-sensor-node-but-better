@@ -10,6 +10,24 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Added
 
+- **The LoRaWAN session survives a reset** (`src/session.cpp`). Previously any reset — a
+  watchdog recovery, a brownout, a battery swap — threw away the session and forced a
+  rejoin, which needs a gateway reachable at that moment. A node that reset during an
+  outage therefore stayed silent even after the outage ended. It now wakes up already
+  joined and sends its next reading. The frame counter is stored with a forward margin
+  rather than on every uplink: writing each time would wear a flash page out in about a
+  year at hourly reporting, and resuming below an already-used counter has the network
+  discard the uplinks while the node reports success.
+- **Tests that run without hardware** (`pio test -e native`, 15 cases, passing). The
+  payload encoder and the Modbus checksum are pure computation, and both fail silently in
+  the field: a field encoded one byte too wide shifts everything after it and the uplink
+  decodes into plausible wrong numbers, while a wrong checksum makes a working sensor look
+  unplugged. The checksum tests are pinned to published Modbus reference values, so they
+  confirm the convention rather than merely being self-consistent.
+- **[`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md)** — bring-up in the order that isolates
+  faults, one subsystem per stage, with the specific symptom-to-cause mapping for each.
+  `scripts/flash.sh` gained `--env` to make that ordering actually reachable; it previously
+  always flashed the full image.
 - **The firmware, in modules.** `src/` now holds the actual node rather than a blink test:
   `sensors/rk900` (Modbus over the RAK5802), `sensors/battery` (RAK9154 over the Sensor Hub
   one-wire link), `payload` (encoder pinned to the TTN decoder), `radio` (join, send,
