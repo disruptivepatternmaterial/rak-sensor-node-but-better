@@ -54,6 +54,32 @@ only a measurement recorded here closes it.
 
 Newest first.
 
+### 2026-07-30 — Full firmware compiles for all four stages; off-target tests pass
+
+- **Commit:** `146d99e`
+- **Host:** Heliotrope Ridge (PlatformIO 6.1.19)
+- **Measured:** build output and host-run unit tests. **Nothing was run on hardware.**
+- **Observation:**
+
+  Field image (`rak4631`):
+
+      RAM:   [=         ]   9.9% (used 24536 bytes from 248832 bytes)
+      Flash: [==        ]  23.6% (used 192744 bytes from 815104 bytes)
+
+  All four environments report `SUCCESS`: `stage1`, `stage2`, `stage3`, `rak4631`.
+
+  `pio test -e native` — 20 test cases, 20 passed, covering the payload encoder
+  (including the 11-byte worst-case data rate budget) and the Modbus checksum
+  (pinned to published reference values).
+
+- **Verdict:** PASS for a narrow claim. The full firmware links, every bring-up stage
+  still builds, and the two pieces of pure computation behave correctly on a host.
+- **Notes:** This closes none of H1–H8. Nothing here proves the node reads a sensor, joins
+  a network, sleeps, or draws the current the budget assumes. The low-voltage gate, the
+  session persistence, and the battery frame validation added on this date are all
+  **unexercised** — they compile and are untested against hardware. First real evidence
+  comes from [`FIRST_FLASH.md`](FIRST_FLASH.md).
+
 ### 2026-07-30 — Stage 0 compiles for the RAK4631 on two independent machines
 
 - **Commit:** `7ae56ec`

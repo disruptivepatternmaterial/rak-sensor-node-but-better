@@ -47,6 +47,27 @@ One running list. Anything that would otherwise be an "oh, one more thing" belon
 - [ ] **Freeze the payload.** `payload/schema.yaml` is still marked draft.
 - [ ] **24-hour bench soak, then a 7-day shadow deployment** somewhere reachable.
 
+## Raised by code review, not yet done
+
+- [ ] **Confirm sleep is real sleep.** `power::sleep_seconds()` relies on the Arduino core's
+      `delay()` parking the task so the idle task can drop the CPU into a low-power state.
+      That is the documented behavior, but whether the FreeRTOS tick wakes the CPU every
+      millisecond in this configuration has not been checked. If it does, sleep current
+      will be far above target. Measuring it at stage 4 answers the question directly.
+- [ ] **Modbus inter-character timeout.** A gap inside a reply is not detected, so bytes
+      arriving late are concatenated into one frame. The CRC catches this and the
+      transaction retries, so the effect is a wasted attempt rather than bad data — but
+      timestamping each byte would turn it into a clean reject.
+- [ ] **A golden-vector test through the real decoder.** The parity gate now checks the
+      encoder against the schema and the schema against the decoder, which is a complete
+      chain by inspection. Running actual firmware bytes through the JavaScript would
+      prove it end to end rather than link by link.
+- [ ] **Restore shorter intervals safely.** The minimum is 1800 s because that is safe at
+      the slowest data rate. A guard that computes airtime from the current data rate could
+      allow shorter intervals when coverage is good, without ever breaching fair use.
+- [ ] **Confirm a downlink was applied.** There is no acknowledgement, so a setting change
+      is invisible until the next uplink's timing implies it.
+
 ## Needs a matching change to the TTN decoder
 
 Neither is required to ship; both are quality-of-life once the node is remote.
