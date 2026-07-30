@@ -53,6 +53,7 @@ fi
 echo
 echo "${BLUE}-- 1/2 workstation -> build host --${NC}"
 git push "${BUILD_HOST}:${REMOTE_PATH}" "HEAD:${RELAY_REF}" -f
+git push "${BUILD_HOST}:${REMOTE_PATH}" --tags 2>/dev/null || true
 
 echo
 echo "${BLUE}-- 2/2 build host -> github --${NC}"
@@ -69,6 +70,9 @@ ssh "$BUILD_HOST" "zsh -l -c '
     exit 1
   fi
   git push ${GH_SSH} main
+  # Tags travel with the branch. A release tag that stays on the workstation leaves the
+  # GitHub release pointing at nothing, and the version in the changelog unreachable.
+  git push ${GH_SSH} --tags
   git branch -D ${RELAY_REF##refs/heads/} -q
 '" || die "relay failed. The build host may have diverged; check it before retrying."
 
