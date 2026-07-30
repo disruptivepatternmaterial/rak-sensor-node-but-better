@@ -109,8 +109,22 @@ jobs:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
+      # The payload encoder and the Modbus checksum are pure computation, so they can be
+      # tested here. Both fail silently on hardware — a mis-sized payload field shifts
+      # every field after it and decodes into plausible wrong numbers, and a wrong
+      # checksum makes a working sensor look unplugged — which is exactly the class of bug
+      # that should never reach a device nobody can visit.
+      - name: Tests
+        if: steps.check.outputs.present == 'true'
+        run: pio test -e native
+
+      # Every staged image has to keep compiling, not just the field one. The stages exist
+      # so a fault during bring-up has a single candidate cause; a stage that no longer
+      # builds is only discovered at the moment it is needed, standing next to the
+      # hardware.
+      #
       # CI proves it compiles. It cannot prove behavior — the RAK4631 is on the
       # Heliotrope Ridge build host, and only bench evidence closes H1-H8.
-      - name: Build
+      - name: Build every stage
         if: steps.check.outputs.present == 'true'
-        run: pio run
+        run: pio run -e stage1 -e stage2 -e stage3 -e rak4631
