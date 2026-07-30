@@ -11,9 +11,13 @@ constexpr size_t kMaxRegisters = 21;
 constexpr size_t kMaxFrame     = 5 + (kMaxRegisters * 2);
 
 // CITE(spec): [CIT-MODBUS-SERIAL] frames are separated by silence of at least 3.5
-//   character times. One character is 11 bits on the wire (start + 8 data + parity slot +
-//   stop), so the gap in microseconds is 3.5 * 11 * 1e6 / baud. Rounded up, and floored at
-//   1750 us as the standard requires for rates above 19200.
+//   character times, floored at 1750 us for rates above 19200.
+//
+// The standard's character is 11 bits because its default framing carries a parity bit.
+// This link runs 8N1, which is 10 bits, so 11 overstates the gap by a tenth. That is
+// deliberate: the cost is 0.7 ms of extra silence per transaction at 4800 baud, and the
+// benefit is margin against a slave whose idea of the gap is slightly longer than ours.
+// Waiting too long is invisible; not waiting long enough corrupts the next frame.
 uint32_t frame_gap_us(uint32_t baud)
 {
     const uint32_t gap = (uint32_t)((3.5f * 11.0f * 1000000.0f) / (float)baud) + 1;
@@ -90,8 +94,24 @@ ModbusResult ModbusMaster::transact(uint8_t slave, uint16_t start, uint8_t count
     }
 
     // CITE(spec): [CIT-MODBUS-APP] an error reply sets the high bit of the function code
-    //   and carries a one-byte exception code.
+    //   and carries a one-byte exception code, in a five-byte frame.
+    //
+    // Verified before it is believed, because an exception is treated as a final answer
+    // and stops the retries. A single corrupted byte with the high bit set would otherwise
+    // end the transaction and throw away every weather field for that cycle — the sensor
+    // would look like it was refusing, when it never said anything of the kind.
     if (resp[1] & 0x80) {
+        if (got < 5) {
+            return ModbusResult::BadFrame;
+        }
+
+        const uint16_t want = modbus_crc16(resp, 3);
+        const uint16_t have = (uint16_t)resp[3] | ((uint16_t)resp[4] << 8);
+        if (resp[0] != slave || want != have) {
+            return ModbusResult::BadFrame; // retryable — probably line noise, not a refusal
+        }
+
+        LOGF("      modbus exception 0x%02X from slave %u\n", resp[2], slave);
         return ModbusResult::Exception;
     }
 
