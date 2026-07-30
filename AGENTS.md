@@ -5,4 +5,5 @@
 - Cross-check RAK9154 against `forest-weather-machines/rak-4-5-wire` (local sibling).
 - Never commit secrets, `*.env`, keys, or live OTAA AppKeys.
 - No aspirational “deployed” claims without bench/TTN evidence.
-- Null sensor readings stay null — never fabricate zeros.
+- Null sensor readings stay null — never fabricate zeros
+- All proposals need proof, citation, or demand a base in device best practices from the manufacturer

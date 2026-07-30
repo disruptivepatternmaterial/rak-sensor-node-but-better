@@ -1,0 +1,72 @@
+---
+description: Heartbeat and staleness protocol for agents. Prevents silent stalls, unbounded runs, and repeat-failure loops.
+alwaysApply: true
+---
+
+# Agent liveness — the agent gets a watchdog too
+
+This firmware requires a hardware watchdog (`FIRMWARE_SPEC.md` H1) because a hung
+Modbus read must never take the node down for a month. The same reasoning applies to
+the agent loop: **a stalled agent burns the user's time silently.** These rules are the
+software watchdog for the working session.
+
+## The heartbeat contract
+
+| Interval | Obligation |
+|---|---|
+| **Every 2–4 minutes** | Emit a user-visible progress line: what is running, what came back, what is next. Not a tool call — actual text the user reads. |
+| **5 minutes with no new output** | The task is **STALE**. Stop waiting. Diagnose, kill, or report. |
+| **Before ending a turn** | State what is still running in the background, if anything. |
+
+"No new output" means no new stdout/stderr from the process **and** no new user-visible
+text from the agent. A long-running compile that is actively printing is alive. A
+subagent that has said nothing for 5 minutes is stale even if it is technically running.
+
+## Bounding every call — do this at launch, not after it hangs
+
+- **Never** issue an unbounded blocking call. Every `Shell` call gets a `block_until_ms`
+  sized to the expected runtime, capped at **240000 (4 min)**. Anything expected to run
+  longer goes to the background (`block_until_ms: 0`) and is polled.
+- **Every subagent prompt must carry an explicit time budget** and the instruction:
+  _"At N minutes, stop and return partial findings."_ A partial verified answer beats a
+  complete unverified one and beats a 30-minute silence. Launch research subagents with
+  `run_in_background: true` and poll, rather than blocking the session on them.
+- **Long jobs emit sentinels.** Builds, soaks, and flashes print a stable line
+  (`=== BUILD OK ===`, `=== FLASH OK ===`, `=== SOAK HEARTBEAT <n> ===`) so progress is
+  greppable and `notify_on_output` can watch for it.
+- **Soak tests are the exception to the 5-minute rule** — a 24-hour soak
+  (`FIRMWARE_SPEC.md` H8) is expected to be quiet. It must still emit a heartbeat line on
+  a fixed interval, and the agent must not block the session waiting for it. Record the
+  pid, tell the user, and move on.
+
+## When something goes stale
+
+Work the list in order. Do not skip to "try again."
+
+1. Read the terminal file / transcript to capture what actually happened.
+2. Get the `pid` from the output-file header.
+3. Decide: is it hung, or slow-but-working? Slow-but-working has new bytes on the stream.
+4. If hung, kill it and **report to the user what was learned before the kill** — partial
+   evidence is still evidence.
+5. Never silently relaunch the identical command and hope.
+
+## Bounded retries — the anti-loop rule
+
+**Two attempts maximum without new evidence.** An attempt only counts as new if something
+actually changed: a different error, a fresh diagnostic, a corrected assumption, a new
+source read. Re-running the same failing command with the same inputs is not a second
+attempt, it is the first attempt repeated.
+
+After two failed attempts, **stop and surface it.** Report what was tried, what the
+failure was, the most likely cause, and the options. Use `AskQuestion` when the path
+forward is genuinely the user's call. Getting stuck is acceptable; getting stuck quietly
+is not.
+
+## Hard stops — escalate to the user immediately, do not improvise
+
+- Physical-hardware blockers: device not on USB, hardware not yet delivered, cable unknown.
+- Anything requiring a credential, token, or OTAA key that is not already on the build host.
+- A destructive or irreversible action: flashing over known-good field firmware, force-push,
+  tag deletion, bootloader/softdevice writes.
+- Contradictions between `docs/` specs and observed hardware behavior. Specs are the
+  contract; a conflict is a decision for the user, never an agent guess.

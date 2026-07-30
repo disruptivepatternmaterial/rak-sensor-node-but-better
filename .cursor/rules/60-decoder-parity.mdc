@@ -1,0 +1,73 @@
+---
+description: Every build must verify the firmware payload against the live TTN JavaScript formatter and call out when the formatter needs to change. Release-blocking.
+globs: ["src/**", "lib/**", "include/**", "payload/**", "docs/FIRMWARE_SPEC.md"]
+---
+
+# TTN formatter parity — checked on every build
+
+The firmware encoder and the TTN uplink formatter are **two halves of one contract that
+live in two different repositories.** Nothing but this gate keeps them together.
+
+Formatter of record:
+`forest-weather-machines/LoRaWAN/payload/rak-wx-station-default.js`
+(pinned by path and commit SHA in `payload/schema.yaml`).
+
+## Why this is release-blocking, not advisory
+
+The decoder throws on the first unrecognized type byte:
+
+```js
+if (!type) { throw new Error("Unknown sensor type: " + typeId); }
+```
+
+`decodeUplink` catches that and returns `{ data: {} }`. So a single unknown type ID does
+not degrade one field — **it discards the entire uplink.** A drifted encoder does not
+produce partial data or an obvious error; it produces silence, from a node that is
+transmitting perfectly, on a battery you cannot recharge. The failure is invisible until
+someone notices the dashboard has been flat for a week.
+
+Channel numbers are equally load-bearing. `CHANNEL_NAMES` maps `name_channel` pairs
+(`wind_speed_1`, `temperature_3`, `dc_voltage_batt_21`, …). Emit the right type on the
+wrong channel and the value decodes but lands under a raw key like `temperature_9`,
+missing every downstream consumer. **Channel and type IDs are contract, not preference.**
+
+## The gate
+
+`scripts/check_decoder_parity.py` runs inside `scripts/preflight.sh`, `scripts/build.sh`,
+and CI. It:
+
+1. Locates the decoder (`FWM_REPO` env var, else the default sibling path).
+2. Parses `WX_TYPES` and `CHANNEL_NAMES` out of the JavaScript.
+3. Compares them against `payload/schema.yaml`, the firmware-side source of truth.
+4. Compares the decoder's current content hash against the hash pinned in the schema.
+
+It fails the build on any of:
+
+- Firmware emits a **(channel, type)** pair the decoder does not map → data silently dropped.
+- A type's **size, sign, or divisor** disagrees between schema and decoder → wrong values.
+- The decoder file **changed upstream** since the pinned hash → parity must be re-verified.
+- The decoder file **cannot be found** → parity is unproven, so it is not proven safe.
+
+## When the gate fires, say so plainly
+
+Report which side must change, and never "fix" it by loosening the schema:
+
+| Situation | Correct action |
+|---|---|
+| Firmware needs a field the decoder cannot decode | **The formatter must change.** Call it out explicitly, open an issue on `forest-weather-machines`, and land the paired formatter change **before** flashing a field node. |
+| Decoder changed upstream, firmware is still correct | Re-verify, then re-pin the hash and SHA in `payload/schema.yaml` in its own commit. |
+| Schema and decoder disagree on scaling | Stop. This is a data-integrity bug. Resolve against the manufacturer register map (`FIRMWARE_SPEC.md` §2) and ADR the outcome. |
+
+Re-pinning the hash to make the gate quiet, without actually reconciling the payload, is
+the one thing this gate exists to prevent.
+
+## Decoder-side behavior the firmware must not duplicate
+
+- **Wind direction offset is the decoder's job.** It applies `WIND_DIR_OFFSET = 230`.
+  Firmware sends the **raw** heading (`FIRMWARE_SPEC.md` §2.1). Applying the offset in both
+  places double-corrects by 230° and looks plausible enough to ship.
+- **Zero-wind null policy is the decoder's job.** It nulls `wind_direction` when
+  `wind_speed === 0`. Firmware does not pre-null it.
+- **Battery current sign is unresolved.** The decoder header says positive = charging;
+  `FIRMWARE_SPEC.md` §2.2 says negative = charging. See ADR-0002 — do not encode either
+  convention until it is closed with bench evidence.

@@ -1,0 +1,87 @@
+---
+description: LoRaWAN US915 Class A compliance — airtime budget, ADR, receive windows, and downlink handling. Applies to firmware and payload code.
+globs: ["src/**", "lib/**", "include/**", "payload/**", "docs/FIRMWARE_SPEC.md", "platformio.ini"]
+---
+
+# LoRaWAN compliance — US915 Class A
+
+Airtime is a shared resource and TTN is free infrastructure someone else pays for. A
+misbehaving node degrades every other node on the gateway. Treat these as hard limits,
+not targets. Citation keys in brackets resolve in `docs/CITATIONS.md`.
+
+## Fixed parameters — do not change without an ADR
+
+| Parameter | Value | Source |
+|---|---|---|
+| Region | US915 | `FIRMWARE_SPEC.md` §3 |
+| Class | **A only** | §3, §8 — Class C is an explicit non-goal |
+| Activation | OTAA | §3 |
+| ADR | ON | §3 |
+| Confirmed uplink | **OFF** | §3 |
+| Default interval | 3600 s | §4 |
+| Allowed interval | 300–86400 s inclusive | §4 |
+
+Class C is a non-goal because it holds the receiver open, which is incompatible with the
+months-unattended power budget (rule 50).
+
+## Class A is why the node is reachable only after it talks
+
+A Class A device opens **exactly two short receive windows, RX1 and RX2, after each
+uplink** [CIT-LW-LINK]. There is no other time the network can reach it. Three
+consequences the firmware must respect:
+
+1. **A downlink cannot arrive on demand.** An interval change lands on the next uplink at
+   the earliest, which at the 86400 s maximum is up to a day later. Never write logic
+   that waits on a downlink.
+2. **The RX windows must not be missed.** Do not sleep, reconfigure RS-485, or start a
+   Modbus transaction between TX and the close of RX2. Poll sensors *before* the uplink —
+   this is why `FIRMWARE_SPEC.md` §5 orders the cycle poll → TX → RX → sleep.
+3. **Downlink is not acknowledgement.** Silence is the normal case, not an error.
+
+## Airtime budget — the constraint that sets the interval floor
+
+TTN Fair Use allows roughly **30 seconds of uplink airtime per device per day** and
+**about 10 downlinks per device per day** [CIT-TTN-FUP]. The 300 s minimum interval in
+`FIRMWARE_SPEC.md` §4 is 288 uplinks/day, so **every uplink must stay near or under ~100 ms
+of airtime** to fit the budget. That is a real design constraint on payload size, not a
+rounding detail.
+
+Therefore:
+
+- **Keep the payload small.** At DR0 the US915 application payload limit is 11 bytes
+  [CIT-LORA-RP002]; ADR will not always leave you at a high data rate. A payload that only
+  fits at DR3 is a payload that silently fails at the edge of coverage.
+- **Never enable confirmed uplinks.** Each one forces a downlink, drawing against the
+  ~10/day downlink budget and consuming gateway TX time.
+- **Never retry a failed uplink immediately.** Bounded exponential backoff only
+  (`FIRMWARE_SPEC.md` H4). The node must survive multi-day gateway outages without an
+  airtime death spiral — the failure mode this project exists to avoid.
+- **Join must back off.** A tight join loop is the single most damaging thing a node can
+  do to a shared gateway (§3, H4).
+- Under US915 frequency hopping, FCC limits dwell time per channel [CIT-FCC-15247]; the
+  stack enforces this, but do not defeat it by pinning a single channel.
+
+## Downlink handling — validate, then persist
+
+The interval downlink is `interval_s` as a **uint32 big-endian** on a dedicated fPort
+(`FIRMWARE_SPEC.md` §4). Required behavior:
+
+1. Check the fPort. Ignore other ports.
+2. Check the length is exactly 4 bytes. Wrong length → ignore.
+3. Range-check **300–86400 inclusive**. Out of range → ignore and keep the previous value.
+4. Persist to flash so it survives power loss (H5), then apply on the **next** wake (§4).
+5. **Never** let a downlink drive the interval outside the allowed range, and never let a
+   malformed downlink reset it to a default. Invalid input keeps the previous value — an
+   unreachable node with a bad interval is a hike-in recovery.
+
+Flash wear matters: only write when the value actually changed, and never write during a
+brownout (H3).
+
+## Uplink content
+
+Nulls stay null. A failed Modbus read omits the field or encodes the null sentinel — it
+never encodes `0` (`AGENTS.md`, `FIRMWARE_SPEC.md` §2.1). A zero wind speed and a dead
+anemometer must never be indistinguishable downstream.
+
+One sensor failing does not suppress the uplink; send what was read, with validity flags
+(§5). Payload channel and type IDs are governed by rule 60 — they are not free choices.

@@ -1,0 +1,73 @@
+---
+description: Power management contract for a months-unattended node — sleep path, peripheral shutdown, brownout, and the known RAK4631 sleep-current traps.
+globs: ["src/**", "lib/**", "include/**", "platformio.ini", "docs/POWER_BUDGET.md", "docs/FIRMWARE_SPEC.md"]
+---
+
+# Power management — the node has to still be alive in March
+
+Success is "hike in, months unattended" (`plans/P0_HARDENED_NODE.md`). The node is on a
+battery pack with no solar in the ordered BOM (`HARDWARE.md` — Unify 910406, **no
+solar**). Average current, not peak current, decides whether the node survives the winter.
+
+**Sleep current dominates the budget.** At a 3600 s interval the node is awake for a few
+seconds and asleep for essentially the whole hour. A single stray milliamp in sleep
+outweighs everything the radio does. Optimize sleep first, always.
+
+## Non-negotiables
+
+| ID | Requirement | Source |
+|---|---|---|
+| H2 | Deep sleep between cycles; radio sleeps in Class A | `FIRMWARE_SPEC.md` §7 |
+| H3 | Brownout: no flash thrash; skip TX if voltage critically low | §7 |
+| H5 | Interval and keys survive power loss | §7 |
+| — | `Serial.end()` before sleep | see trap below |
+
+## The RAK4631 sleep traps — these are the documented failure modes
+
+1. **UART left open pins current at milliamp scale.** You must `Serial.end()` (and
+   `Serial1.end()`) before sleeping, or the node draws ~mA forever and looks "fine" on the
+   bench for an hour while quietly dying in the field [CIT-RAK-SLEEP]. `FIRMWARE_SPEC.md` §5
+   step 7 makes this explicit. **This is the single most common way this class of node
+   fails.**
+2. **The RS-485 transceiver must be disabled between polls.** The RAK5802 driver draws
+   continuously if left enabled. Enable it in step 2 of the wake cycle, disable before
+   sleep.
+3. **A USB-attached debug session masks all of it.** Sleep-current measurements taken over
+   USB are meaningless. Measure on battery, and say so in `docs/EVIDENCE.md`.
+4. **Deep sleep must be System OFF-class, not a busy `delay()`.** A `delay()` loop keeps
+   the core clocked [CIT-NRF-POWER]. Retained state that must survive sleep is documented
+   in `docs/POWER_BUDGET.md`.
+
+## Wake cycle discipline
+
+Follow `FIRMWARE_SPEC.md` §5 exactly: pet WDT → enable RS-485 → poll RK900 → poll BMS →
+build and TX → handle RX1/RX2 → persist → shut peripherals down → sleep.
+
+Every path out of the cycle — including every error and timeout path — must reach the
+sleep step. **An early `return` that skips peripheral shutdown is a battery leak**, and it
+will not show up in a short bench test. A hung Modbus read must hit the watchdog (H1) and
+reset rather than spin: a reset costs one cycle, a spin costs the deployment.
+
+Bounded work only. Modbus transactions cap at 1000 ms with 2 retries (§2.1); a missing
+sensor marks failed and the cycle continues (H6, H7). No unbounded waits, anywhere.
+
+## Brownout
+
+Below the critical threshold: **do not transmit and do not write flash.** TX is the
+largest current draw and a brownout mid-flash-write corrupts the stored interval and keys
+(H3, H5). Log the state, sleep, and re-evaluate next wake. Repeated flash writes during a
+sagging battery are the classic way to lose a node permanently.
+
+The pack reports voltage, current, and SoC over the BMS link (§2.2), so the threshold is
+measurable — but note the **unresolved sign convention for battery current**, logged in
+ADR-0002. Do not write charge/discharge logic against the sign until that ADR is closed.
+
+## Changing anything power-related
+
+Any change to sleep, peripheral enable/disable, timing, or TX behavior must:
+
+1. Cite the manufacturer figure for the claim (`datasheet`, rule 20).
+2. Update `docs/POWER_BUDGET.md` with the recalculated average current and projected
+   runtime.
+3. Record a **measured** sleep current in `docs/EVIDENCE.md` before the change is called
+   done. A calculated budget is a hypothesis; only a measurement closes it.
