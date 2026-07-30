@@ -1,6 +1,6 @@
 #include "config.h"
 
-#include "features.h"
+#include "build_features.h"
 
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>

@@ -1,6 +1,6 @@
 #include "session.h"
 
-#include "features.h"
+#include "build_features.h"
 
 #if FEATURE_RADIO
 

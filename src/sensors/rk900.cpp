@@ -1,6 +1,6 @@
 #include "rk900.h"
 
-#include "../features.h"
+#include "../build_features.h"
 
 namespace {
 

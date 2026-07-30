@@ -1,6 +1,6 @@
 #include "modbus.h"
 
-#include "../features.h"
+#include "../build_features.h"
 
 namespace {
 

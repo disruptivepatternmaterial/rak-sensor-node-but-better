@@ -13,6 +13,14 @@
  * is the hardest state to debug, so nothing else should still be in question by then.
  */
 
+/*
+ * Named build_features.h, not features.h. The C library has its own <features.h> and
+ * includes it from inside almost every system header. The off-target test build puts src/
+ * on the include path, so a file named features.h here is found instead — and the C
+ * library then compiles without any of its own configuration macros. The result is
+ * hundreds of errors inside stdio.h, stdint.h, and cmath, none of which mention this file.
+ */
+
 #pragma once
 
 // The logging macros below expand to Serial calls, so anything that logs needs this —

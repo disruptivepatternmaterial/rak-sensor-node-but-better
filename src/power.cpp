@@ -1,6 +1,6 @@
 #include "power.h"
 
-#include "features.h"
+#include "build_features.h"
 
 #include <Arduino.h>
 

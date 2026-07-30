@@ -5,7 +5,7 @@
  * lives in one of the modules, so that when something misbehaves in the field there is
  * exactly one place to look for each kind of problem.
  *
- * Subsystems are switched on by the build environment (see features.h), so the same
+ * Subsystems are switched on by the build environment (see build_features.h), so the same
  * source can be flashed as wind-sensor-only, then with the battery, then with the radio,
  * then with sleep. Each build adds one new way to fail.
  *
@@ -18,7 +18,7 @@
 #include <Adafruit_TinyUSB.h>
 
 #include "config.h"
-#include "features.h"
+#include "build_features.h"
 #include "payload.h"
 #include "power.h"
 #include "radio.h"
