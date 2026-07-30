@@ -44,38 +44,37 @@ jobs:
           python3 scripts/check_citations.py \
             --diff "origin/${{ github.base_ref }}"
 
+      # forest-weather-machines is private, and the default workflow token is scoped to
+      # this repository, so the checkout above normally fails here. It still creates the
+      # .fwm directory before failing, which is why this sets FWM_REPO only when the
+      # decoder is actually present -- testing for the directory silently pointed the
+      # gate at an empty folder and reported the decoder as missing.
+      #
+      # Without the live repo the checker falls back to the pinned copy in
+      # payload/reference/ and says so in its output. That verifies the field-by-field
+      # contract but not upstream drift; the build host, which has the sibling cloned,
+      # is what proves the formatter has not moved.
       - name: TTN formatter parity
-        env:
-          FWM_REPO: ${{ github.workspace }}/.fwm
         run: |
-          if [ -d "$FWM_REPO" ]; then
-            python3 scripts/check_decoder_parity.py
+          DECODER=".fwm/LoRaWAN/payload/rak-wx-station-default.js"
+          if [ -f "$DECODER" ]; then
+            export FWM_REPO="${{ github.workspace }}/.fwm"
+            echo "Using the live decoder from forest-weather-machines."
           else
-            echo "::warning title=Formatter parity NOT verified::Could not check out \
-          forest-weather-machines, so the payload contract is unproven. Add an FWM_TOKEN \
-          secret with read access to that repo."
-            # Unproven is tolerable only while nothing touching the payload changed.
-            if git diff --name-only "origin/${{ github.base_ref || 'main' }}...HEAD" \
-                 | grep -qE '^(payload/|src/|lib/|include/)'; then
-              echo "::error::This change touches the payload or firmware, so parity must \
-          be proven. Configure FWM_TOKEN."
-              exit 1
-            fi
+            echo "::warning title=Parity checked against the pinned copy::\
+          forest-weather-machines was not reachable, so upstream drift is unverified \
+          here. Add an FWM_TOKEN secret with read access to that repo to check the live \
+          formatter."
           fi
+          python3 scripts/check_decoder_parity.py
 
       - name: Preflight (secrets, links, null policy)
-        env:
-          FWM_REPO: ${{ github.workspace }}/.fwm
         run: |
-          if [ -d "$FWM_REPO" ]; then
-            scripts/preflight.sh
-          else
-            echo "Running the non-parity gates only; parity handled in the step above."
-            git ls-files -z | xargs -0 grep -nIE \
-              '(APPKEY|APP_KEY|APPEUI|APP_EUI|DEVEUI|DEV_EUI|NWKSKEY|APPSKEY)[[:space:]]*[:=][[:space:]]*[^ ]*[0-9A-Fa-f]{16}' \
-              | grep -viE '(example|template|placeholder|XXXX|0{16}|docs/|\.mdc:|schema\.yaml)' \
-              && { echo "::error::possible live credentials"; exit 1; } || true
+          DECODER=".fwm/LoRaWAN/payload/rak-wx-station-default.js"
+          if [ -f "$DECODER" ]; then
+            export FWM_REPO="${{ github.workspace }}/.fwm"
           fi
+          scripts/preflight.sh
 
   build:
     name: Compile

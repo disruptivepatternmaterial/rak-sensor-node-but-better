@@ -185,8 +185,20 @@ def _build(rows, start, end, indent):
 
 # ------------------------------------------------------------------------ decoder
 
-def find_decoder(schema: dict) -> Path | None:
-    """Locate the formatter. FWM_REPO wins, then the schema's local_path."""
+VENDORED_DECODER = REPO_ROOT / "payload" / "reference" / "rak-wx-station-default.js"
+
+
+def find_decoder(schema: dict) -> tuple[Path | None, str]:
+    """Locate the formatter.
+
+    Prefers a live checkout of forest-weather-machines, because only the live file can
+    reveal that the decoder moved upstream. Falls back to the pinned copy vendored in
+    payload/reference/ so the gate still runs where that repo is not reachable -- most
+    importantly GitHub Actions, since forest-weather-machines is private and the default
+    workflow token is scoped to this repository alone.
+
+    Returns (path, source) where source is "live" or "pinned".
+    """
     rel = schema["decoder"]["path"]
     roots = []
     if os.environ.get("FWM_REPO"):
@@ -196,8 +208,10 @@ def find_decoder(schema: dict) -> Path | None:
     roots.append(REPO_ROOT.parent / "forest-weather-machines")
     for root in roots:
         if root and (root / rel).is_file():
-            return root / rel
-    return None
+            return root / rel, "live"
+    if VENDORED_DECODER.is_file():
+        return VENDORED_DECODER, "pinned"
+    return None, "none"
 
 
 def parse_wx_types(js: str) -> dict:
@@ -246,11 +260,13 @@ def main() -> int:
         return 1
     schema = load_yaml(args.schema)
 
-    decoder_path = find_decoder(schema)
+    decoder_path, decoder_source = find_decoder(schema)
     if decoder_path is None:
         print(f"{RED}FAIL{RESET} decoder not found: {schema['decoder']['path']}")
         print("      Parity is unproven, which is not the same as proven safe.")
-        print("      Clone forest-weather-machines or set FWM_REPO=/path/to/repo")
+        print("      Clone forest-weather-machines, set FWM_REPO=/path/to/repo, or")
+        print(f"      restore the pinned copy at "
+              f"{VENDORED_DECODER.relative_to(REPO_ROOT)}")
         return 1
 
     js = decoder_path.read_text(encoding="utf-8")
@@ -258,12 +274,27 @@ def main() -> int:
     pinned_sha = str(schema["decoder"].get("pinned_sha256", "")).strip()
 
     print(f"{DIM}   decoder: {decoder_path}{RESET}")
+    print(f"{DIM}   source:  {decoder_source}{RESET}")
 
     if args.repin:
         print(f"\n   pinned_sha256: {actual_sha}\n")
         return 0
 
     failures, warnings = [], []
+
+    if decoder_source == "pinned":
+        # The vendored copy matches the pin by construction, so gate 1 below is
+        # vacuous here. Say so plainly rather than letting a green result imply more
+        # than it proves: the field-by-field contract IS checked, but the question
+        # "did the formatter move upstream?" is unanswerable without the live repo.
+        warnings.append(
+            "Checked against the PINNED copy in payload/reference/, not a live "
+            "checkout.\n"
+            "        The field-by-field contract is verified. Upstream drift is NOT --\n"
+            "        forest-weather-machines was not reachable here. A run with the\n"
+            "        sibling repo present (the build host, or any local clone) is what\n"
+            "        proves the formatter has not moved."
+        )
 
     # --- Gate 1: has the formatter changed upstream?
     if actual_sha != pinned_sha:

@@ -58,6 +58,16 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   code, whose provenance is a pinned commit and file hashes rather than inline citations.
   Without this, RAK's variant header alone would emit dozens of un-sourced-constant
   warnings and train everyone to ignore the gate.
+- **The TTN formatter parity gate could never pass in CI.** `forest-weather-machines` is
+  private and the default workflow token is scoped to this repository, so the sibling
+  checkout always failed — but `actions/checkout` creates its target directory before
+  failing, so the workflow's `[ -d ]` test passed on an empty folder and the gate then
+  hard-failed on a missing decoder. A gate that always fails gets switched off, which is
+  precisely how the payload contract would have broken quietly later. The workflow now
+  tests for the decoder file itself, and [`payload/reference/`](payload/reference/) holds
+  a byte-identical pinned copy so the field-by-field contract is verifiable anywhere. The
+  checker prefers a live checkout, prints `source: live` or `source: pinned`, and warns
+  that a pinned run cannot detect upstream drift.
 
 ### Known issues
 
