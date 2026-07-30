@@ -81,9 +81,23 @@ ModbusResult ModbusMaster::transact(uint8_t slave, uint16_t start, uint8_t count
 
     // Read until the frame is complete or the ceiling expires. Deliberately not
     // `while (!available())` — that is the shape that hangs forever when a sensor dies.
+    //
+    // The gap between bytes is watched as well as the total. Modbus ends a frame at three
+    // and a half character times of silence, so a longer gap means the reply finished and
+    // whatever arrives next belongs to a different frame. Without this check the two get
+    // concatenated and the result is rejected on its checksum — the same outcome, but a
+    // whole second later, and reported as a timeout rather than as the framing error it is.
+    const uint32_t gap_limit_us = frame_gap_us(m_baud);
+    uint32_t       last_byte_us = micros();
+
     while ((millis() - start_ms) < kReplyTimeoutMs && got < expected) {
         if (m_serial.available()) {
-            resp[got++] = (uint8_t)m_serial.read();
+            resp[got++]  = (uint8_t)m_serial.read();
+            last_byte_us = micros();
+        } else if (got > 0 && (micros() - last_byte_us) > gap_limit_us) {
+            // The slave stopped talking mid-frame. Retrying immediately is better than
+            // waiting out the ceiling, because the line is already quiet.
+            return ModbusResult::BadFrame;
         } else {
             delay(1);
         }
