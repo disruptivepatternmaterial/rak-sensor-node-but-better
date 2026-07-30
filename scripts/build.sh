@@ -44,6 +44,14 @@ scripts/remote.sh run "rm -rf .pio/build/native && pio test -e native" \
 
 echo
 
+# Preflight skips this on the workstation, which has no node. The build host has both node
+# and a live checkout of the decoder, so this is the machine where the encoder's real bytes
+# can be pushed through the real formatter.
+scripts/remote.sh run "python3 scripts/check_golden_vectors.py" \
+  || { echo; echo "=== GOLDEN VECTORS FAILED ==="; echo "commit: ${SHA}"; exit 1; }
+
+echo
+
 # Sentinels keep long runs greppable and let notify_on_output watch progress
 # (.cursor/rules/00-agent-liveness.mdc).
 if scripts/remote.sh run "pio run ${*:-}"; then
