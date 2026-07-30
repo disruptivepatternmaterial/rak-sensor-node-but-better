@@ -40,13 +40,11 @@ echo
 echo "${BLUE}== target ==${NC}"
 scripts/remote.sh devices
 
-if [[ -z "$PORT" ]]; then
-  PORT=$(scripts/remote.sh run 'ls /dev/cu.usbmodem* 2>/dev/null | head -1' | tr -d '\r\n' || true)
-fi
-[[ -n "$PORT" ]] || die "no RAK4631 found on the build host USB. Plug it in, or pass --port.
+DETECTED=$(scripts/remote.sh run 'ls /dev/cu.usbmodem* 2>/dev/null | head -1' | tr -d '\r\n' || true)
+[[ -n "$PORT" || -n "$DETECTED" ]] || die "no RAK4631 found on the build host USB. Plug it in, or pass --port.
       Hardware may simply not have arrived yet -- README status is 'not deployed'."
 
-echo "${DIM}   port:   ${PORT}${NC}"
+echo "${DIM}   port:   ${PORT:-${DETECTED} (auto)}${NC}"
 echo "${DIM}   commit: ${SHORT}${NC}"
 
 if [[ "$ASSUME_YES" -ne 1 ]]; then
