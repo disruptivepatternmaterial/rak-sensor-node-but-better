@@ -21,6 +21,7 @@
 
 #include "../reading.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 enum class BatteryResult : uint8_t {

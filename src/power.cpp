@@ -79,7 +79,10 @@ void sleep_seconds(uint32_t seconds)
 
     // Peripherals are per-instance; the ones this node touches are closed by their owners
     // when a read finishes. This disables the USB device itself, which nothing else owns.
-    nrf_usbd_disable(NRF_USBD);
+    // Written straight to the register: the core's USB stack has no public "power this
+    // down" call, and leaving the peripheral enabled is the single largest sleep-current
+    // mistake available on this chip.
+    NRF_USBD->ENABLE = 0;
 
     // FreeRTOS underlies the Arduino core here, so a delay parks this task and the idle
     // task drops the CPU into its low-power state until the tick that wakes us. Split into
