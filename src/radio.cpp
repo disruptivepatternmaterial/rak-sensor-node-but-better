@@ -271,7 +271,11 @@ bool Radio::take_downlink(DownlinkCommand &out)
 
     const uint8_t opcode = s_rx_buf[0];
 
-    if (opcode == kCmdSetInterval && s_rx_len >= 5) {
+    // Exact lengths, not minimums. A command that changes how often the node reports
+    // should be ignored when it does not look exactly as expected — a message of the wrong
+    // length is not a command with extra bytes, it is a message we have misunderstood, and
+    // acting on half of it is worse than ignoring all of it.
+    if (opcode == kCmdSetInterval && s_rx_len == 5) {
         out.set_interval = true;
         out.interval_value = ((uint32_t)s_rx_buf[1] << 24) | ((uint32_t)s_rx_buf[2] << 16) |
                              ((uint32_t)s_rx_buf[3] << 8) | (uint32_t)s_rx_buf[4];

@@ -88,9 +88,18 @@ TTN app: reuse `my-app-tobi` unless ingest requires a new app (decision in plan 
 |---|---|
 | Default interval | **3600 s** |
 | Allowed | **300–86400 s** inclusive |
-| Downlink | binary: `interval_s` uint32 BE on a dedicated fPort (lock fPort in impl) |
-| Apply | next wake after RX; persist to flash/retained |
+| Downlink port | **fPort 10**. A fixed port so traffic on any other port cannot be mistaken for a configuration change |
+| Downlink format | `opcode` uint8, then arguments |
+| `0x01` set interval | followed by `interval_s` uint32 BE — 5 bytes total |
+| `0x03` request status | no arguments — 1 byte. Answered by shortening the wait so the next scheduled uplink arrives promptly, rather than transmitting a second time |
+| Apply | next wake after RX; persist to flash |
 | Invalid downlink | ignore; keep previous |
+
+The leading opcode replaces an earlier plan for a bare 4-byte interval. A bare integer has
+no room to express any other request, so adding one later would have meant guessing at a
+message's meaning from its length — and a node already in the woods cannot be taught the
+new rule. An unrecognized opcode is ignored, so a command added later reaches an older node
+harmlessly instead of being misread.
 
 ## 5. Wake cycle (single iteration)
 
