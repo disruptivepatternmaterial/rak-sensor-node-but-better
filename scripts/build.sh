@@ -34,6 +34,16 @@ if [[ ! -f platformio.ini ]]; then
   exit 0
 fi
 
+# The off-target tests build the same sources on the host, so they catch anything the
+# firmware picks up from the Arduino core without asking for it. The build directory is
+# removed first: a stale object survived a missing include once and let the build host pass
+# while CI failed on the same commit, which is the worst possible split — the machine that
+# says yes is the one nobody re-checks.
+scripts/remote.sh run "rm -rf .pio/build/native && pio test -e native" \
+  || { echo; echo "=== TESTS FAILED ==="; echo "commit: ${SHA}"; exit 1; }
+
+echo
+
 # Sentinels keep long runs greppable and let notify_on_output watch progress
 # (.cursor/rules/00-agent-liveness.mdc).
 if scripts/remote.sh run "pio run ${*:-}"; then
