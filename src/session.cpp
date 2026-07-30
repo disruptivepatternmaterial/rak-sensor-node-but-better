@@ -161,9 +161,9 @@ bool restore()
 
     memset(&req, 0, sizeof(req));
     req.Type                  = MIB_NETWORK_JOINED;
-    req.Param.IsNetworkJoined = LORAMAC_HANDSHAKE_ONGOING;
-    // The enum's "joined" member differs across library versions; setting the address and
-    // keys is what actually makes the session usable, so a failure here is not fatal.
+    req.Param.IsNetworkJoined = JOIN_OK;
+    // Setting the address and keys is what actually makes the session usable; this only
+    // stops the MAC from insisting on a handshake first, so a failure here is not fatal.
     (void)LoRaMacMibSetRequestConfirm(&req);
 
     s_saved_counter_ceiling = s.uplink_counter;
