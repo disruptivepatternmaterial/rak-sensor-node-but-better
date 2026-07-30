@@ -17,7 +17,15 @@
 
 // The logging macros below expand to Serial calls, so anything that logs needs this —
 // pulling it in here means no module has to remember.
+//
+// Guarded because the off-target tests build the same sources on a workstation, where
+// there is no Arduino at all. Without the guard the payload encoder and the checksum
+// cannot be tested off the board, which is precisely the code most worth testing that way:
+// both fail silently in the field, producing plausible wrong numbers rather than an
+// obvious fault.
+#if defined(ARDUINO)
 #include <Arduino.h>
+#endif
 
 #ifndef FEATURE_RK900
 #define FEATURE_RK900 1
@@ -46,7 +54,7 @@
 #define FEATURE_CONSOLE 1
 #endif
 
-#if FEATURE_CONSOLE
+#if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)
 #define LOGF(...)     Serial.printf(__VA_ARGS__)
@@ -54,6 +62,12 @@
 #define LOG(x)        do {} while (0)
 #define LOGLN(x)      do {} while (0)
 #define LOGF(...)     do {} while (0)
+#endif
+
+#if !defined(ARDUINO)
+// The encoder wraps string literals in F() to keep them out of RAM on the board. Off the
+// board there is no such distinction, so it becomes the identity.
+#define F(x) x
 #endif
 
 #define FIRMWARE_VERSION "0.2.0"
