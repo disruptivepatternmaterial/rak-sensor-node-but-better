@@ -64,10 +64,10 @@
 #define LOGF(...)     do {} while (0)
 #endif
 
-#if !defined(ARDUINO)
-// The encoder wraps string literals in F() to keep them out of RAM on the board. Off the
-// board there is no such distinction, so it becomes the identity.
-#define F(x) x
-#endif
+// Deliberately no off-target definition of Arduino's F(). Off the board the logging macros
+// discard their argument without expanding it, so nothing needs F() to exist — and
+// defining a single-letter macro before the system headers are read breaks them, because
+// the C library uses F as a parameter name in its own macros. That mistake turned into a
+// wall of errors inside stdio.h and cmath that pointed nowhere near this file.
 
 #define FIRMWARE_VERSION "0.2.0"
