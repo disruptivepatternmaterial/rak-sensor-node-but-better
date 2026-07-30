@@ -6,7 +6,10 @@
 # git and compiles remotely. The workstation has no PlatformIO by design; see
 # .cursor/rules/10-environments.mdc.
 #
-# Usage: scripts/build.sh [pio args...]      e.g. scripts/build.sh -e wiscore_rak4631
+# Usage: scripts/build.sh [pio args...]      e.g. scripts/build.sh -e rak4631
+#
+# The environment is named rak4631 and the board id is rak4630 -- the board id comes from
+# RAK's vendored definition in rakwireless/ and is not ours to rename.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
