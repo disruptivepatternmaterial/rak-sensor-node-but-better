@@ -351,6 +351,9 @@ def main() -> int:
         if str(f.get("status", "")).upper() == "BLOCKED":
             warnings.append(f"{label}: status BLOCKED — {_first_line(f.get('notes'))}")
 
+    # --- Gate 3b: does the firmware encoder actually agree with the schema?
+    failures.extend(check_encoder(schema))
+
     # --- Gate 3: pending formatter changes
     for item in schema.get("requires_formatter_change") or []:
         if str(item.get("status", "")).lower() == "open":
@@ -363,6 +366,105 @@ def main() -> int:
           f"{len(wx_types)} decoder types{RESET}")
     _report(failures, warnings)
     return 1 if failures else 0
+
+
+ENCODER = REPO_ROOT / "src" / "payload.cpp"
+
+# constexpr uint8_t kChWindSpeed = 1, kTyWindSpeed = 190;
+_CONST_RE = re.compile(
+    r"kCh(\w+)\s*=\s*(\d+)\s*,\s*kTy\1\s*=\s*(\d+)"
+)
+
+# put_u16(kChWindSpeed, kTyWindSpeed, ...)
+_CALL_RE = re.compile(r"put_(u8|u16|s16)\(\s*kCh(\w+)\s*,\s*kTy\2\s*,")
+
+# Width and signedness implied by each emitter.
+_EMITTERS = {
+    "u8":  (1, False),
+    "u16": (2, False),
+    "s16": (2, True),
+}
+
+
+def check_encoder(schema) -> list:
+    """Compare src/payload.cpp against the schema.
+
+    Without this the chain has a hole in the middle. The schema is checked against the
+    JavaScript decoder, but nothing checks the firmware that actually produces the bytes,
+    so the encoder can drift while the gate stays green. Changing one type number in
+    payload.cpp would ship an uplink that decodes into the wrong fields entirely, with
+    every check passing.
+    """
+    if not ENCODER.is_file():
+        return [f"encoder not found: {ENCODER.relative_to(REPO_ROOT)}"]
+
+    src = ENCODER.read_text(encoding="utf-8")
+
+    consts = {m.group(1): (int(m.group(2)), int(m.group(3)))
+              for m in _CONST_RE.finditer(src)}
+    if not consts:
+        return ["Could not parse channel/type constants from src/payload.cpp — "
+                "the encoder's structure changed and this gate went blind."]
+
+    # name -> (channel, type, size, signed), deduplicated across add() and build().
+    encoded = {}
+    for m in _CALL_RE.finditer(src):
+        emitter, name = m.group(1), m.group(2)
+        if name not in consts:
+            continue
+        channel, type_id = consts[name]
+        size, signed = _EMITTERS[emitter]
+        encoded[name] = (channel, type_id, size, signed)
+
+    if not encoded:
+        return ["Found channel/type constants in src/payload.cpp but no emit calls using "
+                "them — this gate cannot see what the firmware sends."]
+
+    failures = []
+    by_channel = {f["channel"]: f for f in (schema.get("fields") or [])}
+
+    for name, (channel, type_id, size, signed) in sorted(encoded.items()):
+        field = by_channel.get(channel)
+        if field is None:
+            failures.append(
+                f"encoder sends channel {channel} (type {type_id}, from kCh{name}) "
+                "which is NOT in payload/schema.yaml.\n"
+                "        The decoder throws on an unknown type and discards the WHOLE "
+                "uplink."
+            )
+            continue
+
+        if field["type"] != type_id:
+            failures.append(
+                f"encoder/schema type mismatch on channel {channel} (kCh{name}): "
+                f"encoder={type_id} schema={field['type']}.\n"
+                "        The uplink would decode under the wrong field, silently."
+            )
+        if field["size"] != size:
+            failures.append(
+                f"encoder/schema size mismatch on channel {channel} (kCh{name}): "
+                f"encoder={size} schema={field['size']}.\n"
+                "        There is no length prefix on the wire — a wrong width shifts "
+                "every field after it."
+            )
+        if bool(field["signed"]) != signed:
+            failures.append(
+                f"encoder/schema signedness mismatch on channel {channel} (kCh{name}): "
+                f"encoder={'signed' if signed else 'unsigned'} "
+                f"schema={'signed' if field['signed'] else 'unsigned'}.\n"
+                "        Negative readings would arrive as large positive ones."
+            )
+
+    missing = sorted(set(by_channel) - {c for c, _, _, _ in encoded.values()})
+    if missing:
+        failures.append(
+            f"schema declares channel(s) {missing} that src/payload.cpp never sends. "
+            "Either the encoder lost a field or the schema is stale."
+        )
+
+    print(f"{DIM}   encoder: {len(encoded)} emitted field(s) checked against "
+          f"the schema{RESET}")
+    return failures
 
 
 def _first_line(text) -> str:
