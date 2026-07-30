@@ -4,11 +4,6 @@
 
 namespace {
 
-// CITE(spec): [CIT-MODBUS-SERIAL] the RTU CRC is the reflected CRC-16 with polynomial
-//   0xA001, seeded 0xFFFF, transmitted low byte first.
-constexpr uint16_t kCrcPoly = 0xA001;
-constexpr uint16_t kCrcSeed = 0xFFFF;
-
 // Longest reply this node ever asks for: address + function + byte count + 2 bytes per
 // register + CRC. Sized for the 21-register battery span in case the Modbus fallback path
 // is ever used (docs/FIRMWARE_SPEC.md §2.2).
@@ -30,18 +25,6 @@ uint32_t frame_gap_us(uint32_t baud)
 constexpr uint32_t kReplyTimeoutMs = 1000;
 
 } // namespace
-
-uint16_t modbus_crc16(const uint8_t *data, size_t len)
-{
-    uint16_t crc = kCrcSeed;
-    for (size_t i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (uint8_t bit = 0; bit < 8; bit++) {
-            crc = (crc & 1) ? (uint16_t)((crc >> 1) ^ kCrcPoly) : (uint16_t)(crc >> 1);
-        }
-    }
-    return crc;
-}
 
 const char *modbus_result_name(ModbusResult r)
 {

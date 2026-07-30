@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "crc16.h"
+
 #include <Arduino.h>
 #include <stdint.h>
 
@@ -50,5 +52,3 @@ class ModbusMaster {
     HardwareSerial &m_serial;
     uint32_t        m_baud;
 };
-
-uint16_t modbus_crc16(const uint8_t *data, size_t len);
