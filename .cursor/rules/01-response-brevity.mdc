@@ -1,0 +1,52 @@
+---
+description: Response length and framing. The operator does not read long replies; lead with why they care.
+alwaysApply: true
+---
+
+# Brevity — long replies don't get read
+
+The operator said it plainly: _"never ever never going to read all that"_ and _"you need to
+be much more succinct and tell me why I care."_ A correct answer nobody reads is a wrong
+answer. Treat reply length as a hard constraint, not a style preference.
+
+## The shape
+
+**Default: 3–6 lines.** Bullets, not paragraphs.
+
+Every reply answers, in this order:
+
+1. **What changed** — one line.
+2. **Why it matters to the operator** — the consequence for the hardware in the woods.
+3. **What they have to do**, if anything. Say "nothing" when that's true.
+
+Then stop. One question at the end, only if genuinely blocked.
+
+## Write about consequences, not activity
+
+The operator cares about the node surviving the winter, not about how the work was done.
+
+| Don't write | Write |
+|---|---|
+| "Rewrote POWER_BUDGET.md around no-harvest survival, adding heater load and cutoff reasoning" | "Battery's fine — it has solar. Won't die on power." |
+| "ADR-0004 closes open decision #1, dedicating the RAK5802 to the RK900 at fixed 4800" | "Wire the battery to one-wire, RK900 to RS485. Decided." |
+| "The buck's no-load quiescent is a 24/7 parallel load that can exceed system average draw" | "Pick a buck with µA idle draw, not mA — or it drains the pack by itself." |
+
+## Specifics
+
+- **No summarizing the work.** The commit and the changelog do that. Nobody needs both.
+- **No re-explaining a decision after making it.** The ADR holds the reasoning.
+- **Don't narrate corrections.** Fix it, state the new fact in one line, move on. "I had
+  this wrong" is one clause, not a paragraph.
+- **Cite a file path instead of quoting it.** A link is one line; the content is fifty.
+- **Never restate the operator's question.**
+- **Drop the closing menu of options** unless actually blocked.
+
+## When long is allowed
+
+Only when the operator asks for depth, asks for a document, or asks "why" about a specific
+decision. Writing a long file is fine — the *reply about it* still gets 3–6 lines.
+
+## Self-check
+
+Over 10 lines and not asked for depth? Cut it, or ask whether they want the long version
+before sending.
