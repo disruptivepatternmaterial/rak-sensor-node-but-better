@@ -1,81 +1,168 @@
 /*
- * Stage 0 bring-up.
+ * Read two sensors, send the numbers, sleep. Repeat until the batteries outlast us.
  *
- * Proves four things and deliberately nothing else: the toolchain builds, the vendored
- * board definition is correct, the bootloader accepts the image, and the USB serial
- * path works. There is no radio, no Modbus, and no sleep here on purpose — when the
- * first flash of brand-new hardware fails, the suspect list should be four items long,
- * not twenty.
+ * The whole job is in `loop()` below and it is deliberately boring. Anything interesting
+ * lives in one of the modules, so that when something misbehaves in the field there is
+ * exactly one place to look for each kind of problem.
  *
- * Behavior contract for the real firmware: docs/FIRMWARE_SPEC.md
- * Framework choice and rationale:        docs/decisions/ADR-0003-firmware-framework.md
- * Bring-up results get recorded in:      docs/EVIDENCE.md
+ * Subsystems are switched on by the build environment (see features.h), so the same
+ * source can be flashed as wind-sensor-only, then with the battery, then with the radio,
+ * then with sleep. Each build adds one new way to fail.
+ *
+ * Behavior contract:  docs/FIRMWARE_SPEC.md
+ * Wiring:             docs/HARDWARE.md · docs/decisions/ADR-0004-bms-one-wire-path.md
+ * Payload contract:   payload/schema.yaml
  */
 
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
 
-// CITE(datasheet): [CIT-RAK-PIO-BSP] rakwireless/variants/rak4630/variant.h lines 70-79
-//   define LED_GREEN = PIN_LED1 and give the active level as LED_STATE_ON.
-// The active level is read from the variant rather than assumed, because it is not the
-// same on every WisBlock base board.
-static const uint8_t kStatusLed = LED_GREEN;
+#include "config.h"
+#include "features.h"
+#include "payload.h"
+#include "power.h"
+#include "radio.h"
+#include "reading.h"
+#include "sensors/battery.h"
+#include "sensors/rk900.h"
 
-// CITE(datasheet): [CIT-RAK4631] the RAK4631's nRF52840 provides USB device support
-//   directly — there is no separate USB-to-serial bridge chip on the module.
-// The console therefore runs over USB CDC, where the host ignores the line rate. This
-// value only has to match monitor_speed in platformio.ini.
-static const unsigned long kConsoleBaud = 115200;
+namespace {
 
-// CITE(prior-art): [CIT-TINYUSB] Adafruit TinyUSB supplies the USB CDC device class.
-// CITE(prior-art): [CIT-PIO-RAK4631-USB] it must be linked with lib_archive = no, or the
-//   port never enumerates and the board looks dead after a successful flash.
-// A deployed node boots with no USB host attached. Blocking forever on the port is the
-// standard way to make a working headless board look bricked, so the wait is bounded and
-// boot continues either way.
-static const unsigned long kConsoleWaitMs = 5000;
+// CITE(datasheet): [CIT-RAK19007] the base board's IO slot exposes WB_IO1..WB_IO6; the
+//   one-wire battery link lands on WB_IO1, leaving Serial1 free for the RS-485 module.
+// CITE(datasheet): [CIT-RAK5802] the RS-485 module occupies the IO slot and its
+//   transceiver is powered from the switched rail on WB_IO2, which rk900.cpp controls.
+constexpr uint8_t kBatteryPin = WB_IO1;
 
-static const char kFirmwareVersion[] = "0.0.1+stage0";
+// Ceiling on one awake cycle. Two sensor reads with bounded retries plus a join attempt
+// and the receive windows fit inside this with room to spare; anything longer means
+// something is stuck and a reset is the correct answer. The counter pauses during sleep,
+// so this measures awake time only.
+constexpr uint32_t kWatchdogSeconds = 120;
 
-static uint32_t heartbeat = 0;
+// How long to wait for the USB console at boot. A deployed node has no host attached, so
+// waiting forever would make a perfectly healthy board look dead.
+constexpr uint32_t kConsoleWaitMs = 3000;
+
+Config  config;
+Radio   radio;
+RK900   weather_sensor;
+Battery battery_sensor(kBatteryPin);
+
+uint32_t cycle = 0;
+
+void print_banner()
+{
+    LOGLN();
+    LOGLN(F("=== rak-sensor-node ==="));
+    LOGF("firmware : %s\n", FIRMWARE_VERSION);
+    LOGF("built    : %s %s\n", __DATE__, __TIME__);
+    LOGF("features : rk900=%d battery=%d radio=%d sleep=%d wdt=%d\n", FEATURE_RK900,
+         FEATURE_BATTERY, FEATURE_RADIO, FEATURE_SLEEP, FEATURE_WATCHDOG);
+
+    if (power::reset_was_watchdog()) {
+        // Worth shouting about. A node resetting every cycle still reports data and looks
+        // healthy from the network side, so this is the only place it becomes visible.
+        LOGLN(F("WARNING  : last reset came from the watchdog — something hung"));
+    }
+}
+
+} // namespace
 
 void setup()
 {
-	pinMode(kStatusLed, OUTPUT);
-	digitalWrite(kStatusLed, LED_STATE_ON);
+    Serial.begin(115200);
+    const uint32_t start = millis();
+    while (!Serial && (millis() - start) < kConsoleWaitMs) {
+        delay(10);
+    }
 
-	Serial.begin(kConsoleBaud);
-	const unsigned long start = millis();
-	while (!Serial && (millis() - start) < kConsoleWaitMs) {
-		delay(10);
-	}
+#if FEATURE_WATCHDOG
+    // Started before anything that can hang, so a failure during bring-up is recoverable
+    // rather than permanent.
+    power::watchdog_begin(kWatchdogSeconds);
+#endif
 
-	Serial.println();
-	Serial.println(F("=== rak-sensor-node — stage 0 bring-up ==="));
-	Serial.print(F("firmware : "));
-	Serial.println(kFirmwareVersion);
-	Serial.print(F("built    : "));
-	Serial.print(F(__DATE__));
-	Serial.print(' ');
-	Serial.println(F(__TIME__));
-	Serial.println(F("board    : RAK4631 (nRF52840 + SX1262) / RAK19007 base"));
-	Serial.println(F("scope    : LED + USB serial only. No radio, no Modbus, no sleep."));
-	Serial.println(F("next     : stage 1 — RK900 Modbus read over RAK5802."));
-	Serial.println();
+    print_banner();
+    config.begin();
+
+#if FEATURE_RADIO
+    radio.begin();
+#endif
+
+    LOGLN();
 }
 
 void loop()
 {
-	// Asymmetric blink: a short pulse is visually distinct from the bootloader's own
-	// slow fade, so "my image is running" is unambiguous at a glance.
-	digitalWrite(kStatusLed, LED_STATE_ON);
-	delay(80);
-	digitalWrite(kStatusLed, !LED_STATE_ON);
-	delay(920);
+    power::watchdog_feed();
 
-	if (++heartbeat % 5 == 0) {
-		Serial.print(F("alive — "));
-		Serial.print(heartbeat);
-		Serial.println(F("s"));
-	}
+    LOGF("[cycle %lu]\n", (unsigned long)++cycle);
+
+    Payload payload;
+
+    // Each sensor is read independently and neither can prevent the other from being
+    // read. A sensor that fails contributes no fields rather than zeroes, so a gap in the
+    // data is visible as a gap instead of arriving as a plausible wrong number.
+#if FEATURE_RK900
+    const WeatherReading weather = weather_sensor.read();
+    payload.add(weather);
+    power::watchdog_feed();
+#endif
+
+#if FEATURE_BATTERY
+    const BatteryReading pack = battery_sensor.read();
+    payload.add(pack);
+    power::watchdog_feed();
+#endif
+
+    uint32_t sleep_for = config.interval_seconds();
+
+#if FEATURE_RADIO
+    if (payload.empty()) {
+        // Both sensors silent. Still worth waking on schedule — the fault may clear, and
+        // an empty uplink would tell the network nothing it does not already infer from
+        // the silence.
+        LOGLN(F("   uplink  : nothing to send"));
+    } else if (radio.ensure_joined()) {
+        if (radio.send(payload)) {
+            DownlinkCommand cmd;
+            if (radio.take_downlink(cmd)) {
+                if (cmd.set_interval) {
+                    config.set_interval_seconds(cmd.interval_value);
+                }
+                if (cmd.request_status) {
+                    // The next cycle's uplink is the answer. Rather than transmitting
+                    // twice, shorten the wait so it arrives promptly.
+                    sleep_for = kIntervalMinSeconds;
+                }
+            }
+        }
+    }
+
+    // Any failure — join or send — replaces the normal interval with a backoff that grows
+    // and then holds. The node keeps trying forever at that ceiling, so a gateway that
+    // returns after a week is picked up without anyone going out to restart anything.
+    const uint32_t backoff = radio.backoff_seconds();
+    if (backoff > 0) {
+        sleep_for = backoff;
+    }
+#endif
+
+    power::watchdog_feed();
+
+#if FEATURE_SLEEP
+    LOGF("   sleep   : %lu s\n\n", (unsigned long)sleep_for);
+    power::sleep_seconds(sleep_for);
+#else
+    // Without sleep the node stays awake and simply waits, which keeps the console
+    // attached and every cycle observable. Capped so bring-up is not spent watching a
+    // blank screen for an hour.
+    const uint32_t awake_wait = (sleep_for > 30) ? 30 : sleep_for;
+    LOGF("   wait    : %lu s (sleep disabled)\n\n", (unsigned long)awake_wait);
+    for (uint32_t i = 0; i < awake_wait; i++) {
+        delay(1000);
+        power::watchdog_feed();
+    }
+#endif
 }
