@@ -52,6 +52,21 @@ power::Brownout  brownout;
 
 uint32_t cycle = 0;
 
+// Consecutive cycles in which neither sensor produced a single field.
+uint32_t empty_cycles = 0;
+
+// How often to transmit proof of life while both sensors stay silent. The first quiet cycle
+// reports immediately, so a wiring mistake made during installation is visible before anyone
+// leaves the site; after that the rate drops to keep a permanently broken sensor from
+// spending the airtime budget on saying nothing. At the shortest permitted interval this is
+// roughly one uplink every four hours.
+constexpr uint32_t kQuietCyclesPerHeartbeat = 8;
+
+bool heartbeat_due(uint32_t quiet_cycles)
+{
+    return quiet_cycles == 1 || (quiet_cycles % kQuietCyclesPerHeartbeat) == 0;
+}
+
 void print_banner()
 {
     LOGLN();
@@ -136,6 +151,10 @@ void loop()
     payload.build(weather, pack);
 #endif
 
+    if (!payload.empty()) {
+        empty_cycles = 0;
+    }
+
     uint32_t sleep_for = config.interval_seconds();
 
 #if FEATURE_RADIO
@@ -144,12 +163,21 @@ void loop()
         // recovers on sunlight, not on being left alone, and the node has to notice the
         // moment it can transmit again.
         LOGLN(F("   uplink  : held — pack too low to transmit"));
-    } else if (payload.empty()) {
-        // Both sensors silent. Still worth waking on schedule — the fault may clear, and
-        // an empty uplink would tell the network nothing it does not already infer from
-        // the silence.
-        LOGLN(F("   uplink  : nothing to send"));
+    } else if (payload.empty() && !heartbeat_due(++empty_cycles)) {
+        // Both sensors silent, and the last proof-of-life was recent enough. Reading
+        // continues on schedule because the fault may clear on its own.
+        LOGF("   uplink  : nothing to send (%lu quiet cycle(s))\n", (unsigned long)empty_cycles);
     } else if (radio.ensure_joined()) {
+        if (payload.empty()) {
+            // Deliberately transmitting with no measurements in it. Silence cannot be told
+            // apart from a node that is gone, a flat pack, or a dead gateway, and all three
+            // want different responses from whoever is deciding whether to drive out there.
+            // An uplink carrying nothing still reports that the node is running, and — being
+            // Class A, where a downlink can only follow an uplink — it is also the only thing
+            // that reopens the path for commanding the node back to health remotely.
+            LOGF("   uplink  : proof of life — no sensor data for %lu cycle(s)\n",
+                 (unsigned long)empty_cycles);
+        }
         if (radio.send(payload)) {
             DownlinkCommand cmd;
             if (radio.take_downlink(cmd)) {
