@@ -105,6 +105,29 @@ undocumented part.
 
 **Not** full-duplex UART to RX1/TX1 as two independent lines without bridging — Hub protocol is half-duplex one-wire @ 9600. See Meshtastic / RAK-OneWireSerial / `rak-4-5-wire`.
 
+## RAK5802 terminal blocks — what each one actually is
+
+Two 4-way spring terminals, silkscreened `BAT GND A/RX B/TX` and `SCL SDA 3V3 AIN`.
+
+| Terminal | Direction | Notes |
+|---|---|---|
+| `BAT` | **output** | Battery rail, 2.6–4.2 V, for powering a sensor [CIT-RAK5802]. Not an input. |
+| `GND` | — | Common ground. Worth landing the RS-485 ground here, not just A/B. |
+| `A/RX` | RS-485 A | Non-inverting |
+| `B/TX` | RS-485 B | Inverting |
+| `3V3` | **output** | On the **switched** `3V3_S` rail — see the warning below |
+| `SCL` / `SDA` / `AIN` | — | I²C and one analog input. Unused here. |
+
+**`BAT` and `3V3` are outputs to power a sensor, not supply inputs.** Neither can run the RK900,
+which needs 12 V — that comes from the pack, through the buck, and never through this module.
+
+**Do not take the pack's `3V3_In` (pin 4) from the RAK5802's `3V3` terminal.** That terminal sits
+on `3V3_S`, which `WB_IO2` switches, and `src/sensors/rk900.cpp` deliberately drops `WB_IO2` LOW
+when it finishes reading the weather station in order to power the transceiver down. The battery
+is read *after* the weather station, so the pack's reference would be dead exactly when it is
+needed, and the symptom would be a battery that never replies — easy to misread as a wiring or
+protocol fault. Take pin 4 from the always-on `VDD` pad on the base-board header instead.
+
 ## RK900
 
 4-wire: V+, GND, A, B → RAK5802 @ **4800**. Probe IO optional as junction box only.
