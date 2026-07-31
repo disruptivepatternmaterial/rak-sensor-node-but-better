@@ -60,12 +60,14 @@ uint32_t empty_cycles = 0;
 // leaves the site; after that the rate drops to keep a permanently broken sensor from
 // spending the airtime budget on saying nothing. At the shortest permitted interval this is
 // roughly one uplink every four hours.
+#if FEATURE_RADIO
 constexpr uint32_t kQuietCyclesPerHeartbeat = 8;
 
 bool heartbeat_due(uint32_t quiet_cycles)
 {
     return quiet_cycles == 1 || (quiet_cycles % kQuietCyclesPerHeartbeat) == 0;
 }
+#endif
 
 void print_banner()
 {

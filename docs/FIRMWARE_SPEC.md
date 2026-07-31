@@ -42,6 +42,15 @@ Cross-links (sibling repos on this machine / org):
 
 **Null policy:** missing Modbus → omit field / encode null sentinel per payload schema. Never invent `0`. Wind direction may be null when wind speed is 0 (match existing decoder policy).
 
+**Total-silence policy (proof of life).** When *neither* sensor yields a single field, the node
+still transmits a zero-length uplink — immediately on the first such cycle, then every 8th
+consecutive silent cycle. This is deliberate and is not a data uplink: it distinguishes a
+node whose sensors have failed from a node that is gone, a flat pack, or a dead gateway, all
+of which otherwise present identically as silence. It is also the only way to stay
+commandable, since Class A permits a downlink only in the window following an uplink. The
+counter resets as soon as any field is read. Implemented in `src/main.cpp`
+(`kQuietCyclesPerHeartbeat`).
+
 **Timeouts:** per-transaction max wait ≤ 1000 ms; max retries 2; then mark sensor fail and continue cycle.
 
 ### 2.2 RAK9154 (battery) — preferred path
