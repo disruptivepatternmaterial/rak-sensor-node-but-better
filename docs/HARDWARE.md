@@ -16,18 +16,45 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | Base | RAK19007 | **110082** |
 | RS-485 | RAK5802 | **100003** |
 | Antenna | Blade 915 RP-SMA (if needed) | **926019** |
-| Enclosure | Unify 150×100×45 M8+RP-SMA **no solar** | **910406** |
+| Enclosure | Unify **solar** variant — the no-solar 910406 was out of stock | **910421** (confirm) |
 | Buck | 12 V → 5 V | (separate) |
 | Power source | RAK9154 Solar Battery Lite, **large-panel variant** | — |
 
-**Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, Solar Unify **910421**, AS923 kit **119012**.
+**Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, AS923 kit **119012**.
 
-**"No solar" describes the enclosure, not the system.** The 910406 shell has no panel
-mounting, but the RAK9154 is itself solar-recharged: 56.16 Wh pack, integrated 18 V charge
-controller, BMS, and heater, with a 10 W panel in the regular variant
-[CIT-RAK9154-SOLAR]. This deployment uses the large panel. The distinction was previously
-stated wrong in [`POWER_BUDGET.md`](POWER_BUDGET.md) and matters a great deal to the
-design — see that page.
+### The enclosure that arrived has its own solar panel — and we do not want to use it
+
+Planning assumed the no-solar 910406. Only the solar variant was available, so the shell in
+hand has panel mounting and, unlike 910406, is roomy enough for the buck converter with
+space to spare. Both of those are fine. The panel is the problem, and it is a decision
+rather than a detail:
+
+**The RAK9154 must remain the power source, and the enclosure's panel should be left
+unconnected.** Half the firmware exists to read that pack — voltage, current, state of
+charge, and temperature come over the one-wire link on its 5-pin socket
+([ADR-0004](decisions/ADR-0004-bms-one-wire-path.md)), the low-voltage gate in
+`src/power.h` decides whether to transmit based on what it reports, and four of the nine
+uplink fields come from it. Powering the node from the enclosure panel instead would mean
+no pack to interrogate: `BatteryReading` would be permanently absent, the brownout gate
+would have nothing to act on, and the node would lose the ability to tell anyone it was
+running out of energy.
+
+Wiring both panels into the pack's charge input is also not the answer — the RAK9154 has
+its own 18 V charge controller expecting one array, and a second uncontrolled source on the
+same input is a good way to damage it.
+
+So the enclosure's panel is dead weight here. That is acceptable; it was a stock
+substitution, not a design change. Do not "make use of it" without revisiting this.
+
+**The RAK9154 is solar-recharged in its own right:** 56.16 Wh pack, integrated 18 V charge
+controller, BMS, and heater, with a 10 W panel in the regular variant [CIT-RAK9154-SOLAR].
+This deployment uses the large panel. The system was always solar; only the shell was not.
+This was previously stated wrong in [`POWER_BUDGET.md`](POWER_BUDGET.md) and matters a great
+deal to the design — see that page.
+
+**To confirm on the bench:** the exact SKU, how many cable entries the shell actually has,
+and whether the lid panel terminates in a bare lead or a connector. Cable entry planning is
+issue #20 and the premise changed with the shell.
 
 **Select the buck on its no-load quiescent current.** It is a 24/7 load in parallel with
 everything the firmware does, and a part drawing several milliamps at idle would exceed the
