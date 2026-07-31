@@ -54,6 +54,40 @@ only a measurement recorded here closes it.
 
 Newest first.
 
+### 2026-07-31 — First flash. Firmware runs on real hardware; sensor not yet connected
+
+- **Commit:** `8d4a41c` (first flash), then the attempt-log fix
+- **Host:** Heliotrope Ridge · RAK4631 at `/dev/cu.usbmodem31101`, USB `239A:8029`,
+  serial `4BC1FCC87D1343AB`
+- **Image:** `stage1` — RK900 only. Radio, battery reader, and sleep all compiled out.
+- **Measured:** serial console over USB CDC, several consecutive cycles.
+- **Observation:** the RK900 was **not connected**, so every read timed out. That is the
+  expected result for an absent sensor, and the behavior around it is what this run
+  actually tested:
+
+      [cycle 2]
+            modbus attempt 1/3 failed (timeout)
+            modbus attempt 2/3 failed (timeout)
+            modbus attempt 3/3 failed (timeout)
+         RK900   : no data (timeout)
+         wait    : 30 s (sleep disabled)
+
+- **Verdict:** PASS for four narrow claims, all of them first-time-on-hardware:
+  1. The vendored board definition produces an image that boots and runs. Flash and USB
+     CDC both work, which retires the risk that the board files were subtly wrong.
+  2. The cycle loop runs and repeats on schedule.
+  3. **H7 — a silent sensor does not livelock.** Three bounded attempts, then the cycle
+     continues. This is the failure that would otherwise strand a node in the field, and it
+     is now observed rather than reasoned.
+  4. **A missing reading stays missing.** No zeros were fabricated for the absent sensor.
+- **Defect found and fixed:** the log read `modbus retry 3/2`, which looks like the retry
+  limit was breached. Three attempts is one initial plus the two retries the spec allows —
+  the count was right and the label was wrong. Now `attempt N/3`.
+- **Notes:** proves nothing about the RK900 register map, the pack, the radio, joining,
+  sleep, or current draw. An interrupted flash left the board in its bootloader
+  (product ID `002A` instead of `8029`); re-running `flash.sh` recovered it, which confirms
+  the documented recovery path works.
+
 ### 2026-07-30 — The build host and CI disagreed on the same commit
 
 - **Commit:** `24c5d5e` (failing) → `fe3fc47` (passing)
