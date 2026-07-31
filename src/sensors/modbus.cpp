@@ -161,7 +161,11 @@ ModbusResult ModbusMaster::read_holding(uint8_t slave, uint16_t start, uint8_t c
         if (result == ModbusResult::Ok || result == ModbusResult::Exception) {
             return result;
         }
-        LOGF("      modbus retry %u/%u (%s)\n", attempt + 1, retries,
+        // Counted in attempts, not retries. The first pass is not a retry, and the last
+        // failure is not followed by one — the earlier wording printed "retry 3/2" after
+        // the final attempt, which reads like the retry limit was exceeded when the limit
+        // was being honoured exactly.
+        LOGF("      modbus attempt %u/%u failed (%s)\n", attempt + 1, retries + 1,
              modbus_result_name(result));
     }
     return result;
