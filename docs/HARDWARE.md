@@ -189,4 +189,32 @@ is in the ADR.
 
 ## Enclosure
 
-Unify **910406** (no solar) or reuse Sensor Hub shell (2× SP11 already fitted).
+Unify **solar variant** (the no-solar 910406 was out of stock — see the BOM note above). Its
+lid panel stays unconnected.
+
+### Mounting the board — the baseplate holes do not line up
+
+The Unify shells use a removable mounting plate rather than bosses in the shell itself, and the
+plate that ships with the enclosure is not drilled for the RAK19007. Three ways out, best first:
+
+1. **Buy RAK's mounting plate.** Sized `137 × 87 × 6.8 mm` for the 150×100×45 shell, ABS
+   UL94V-0, and it comes with the self-tapping screws. It holds a RAK19001 *and* a RAK19007
+   simultaneously, and builds in the required 3 mm standoff between the plate surface and the
+   PCB underside — [store.rakwireless.com](https://store.rakwireless.com/products/unify-enclosure-mounting-plate).
+   Confirm the size against the shell in hand first; the solar variant was not the planned one.
+2. **Print RAK's blank plate and add your own bosses.** `Medium-Blank.step` / `.stl` in
+   [Awesome-WisBlock](https://github.com/RAKWireless/Awesome-WisBlock/blob/main/Unify-Enclosure/README.md).
+   This is likely the better route here, because the buck converter and the pack's field wiring
+   also need somewhere to live, and the bought plate only accounts for WisBlock boards. The same
+   folder has drill guides for the USB-C cutout and for gland/antenna holes, which is directly
+   useful for the second cable entry (issue #20).
+3. **Ready-made prints.** A finished RAK19007 plate by pdxlocs on
+   [Printables](https://www.printables.com/model/622358-rak-unify-enclosure-simple-rak19007-mounting-plate)
+   (drawn for the smaller shell — check before printing), and a dimensionally accurate RAK19007
+   board model by Radish on [Printables](https://www.printables.com/model/1694959-rak-wireless-wisblock-19007-baseboard)
+   for laying out hole positions in your own design.
+
+Board facts for any custom plate: the RAK19007 is `30 × 60 mm`, mounting-hole locations are in
+Figures 12–13 of its datasheet, and the board ships with `M2.5 × 4` screws for exactly this
+[CIT-RAK19007]. Keep the 3 mm standoff — the underside carries the sensor-slot connectors and
+the pad header being soldered to.
