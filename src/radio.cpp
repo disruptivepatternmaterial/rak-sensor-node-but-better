@@ -273,7 +273,12 @@ size_t Radio::max_payload() const
 
 bool Radio::send(const Payload &p)
 {
-    if (!m_joined || p.empty()) {
+    // An empty payload is permitted here and is not a mistake. When both sensors are silent
+    // the node still owes the network proof that it is alive, and a zero-length uplink is the
+    // cheapest way to say so — see the total-silence policy in main.cpp. Refusing it here was
+    // dropping that uplink without a word, which left the node looking dead exactly when
+    // knowing otherwise mattered most.
+    if (!m_joined) {
         return false;
     }
 
