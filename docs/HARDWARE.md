@@ -97,8 +97,8 @@ undocumented part.
 
 | Pin | Signal | Notes |
 |---|---|---|
-| 1 | P+ (~12 V) | Buck VIN+ only |
-| 2 | P− | GND |
+| 1 | P+ (~12 V) | Splits two ways: buck VIN+, **and** the RK900's 12 V supply |
+| 2 | P− | GND — shared return for the buck, the RK900, and the RS-485 reference |
 | 3 | TXD | Half-duplex data (bridge to pin 5 for one-wire) |
 | 4 | 3V3_In | Level ref / probe rail — tie carefully to 3V3, **never 5 V** |
 | 5 | RXD | Bridge to TXD for one-wire |
@@ -137,8 +137,12 @@ protocol fault. Take pin 4 from the always-on `VDD` pad on the base-board header
 Per [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md). The two sensors are on **separate
 buses**, so neither can interfere with or block the other.
 
-1. Buck from P+ (either socket) → WisBlock 5 V. Select on no-load quiescent draw.
-2. RAK5802 → RK900 only, fixed **4800** 8N1, slave `0x01`. No baud switching.
+1. `P+` feeds **two** loads, not one: the buck's VIN+ (→ WisBlock 5 V) and the RK900's 12 V
+   directly. The RK900 is a 12 V device and the RAK5802 cannot supply it — that module's `BAT`
+   and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the buck for the WisBlock
+   alone and select it on no-load quiescent draw; the RK900 does not pass through it.
+2. RAK5802 → RK900 **data only** (A/RX, B/TX, and GND for the reference), fixed **4800** 8N1,
+   slave `0x01`. No baud switching. Power comes from step 1, not from this module.
 3. RAK9154 → **one-wire half-duplex** on the 5-pin socket, TXD/RXD bridged, via the SP11
    adapter cable. Watch pin 4 (`3V3_In`): tie to 3V3, **never 5 V**.
 4. Leave the 4-pin Gateway Load socket unused — it is the documented fallback.
