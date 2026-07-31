@@ -50,3 +50,21 @@ decision. Writing a long file is fine — the *reply about it* still gets 3–6 
 
 Over 10 lines and not asked for depth? Cut it, or ask whether they want the long version
 before sending.
+
+## Hard ceiling — this rule keeps getting broken
+
+Said again on 2026-07-31, after a reply that ran ~20 lines with headers about the first
+successful join: _"I will never read all that please more concise."_ The pull toward length is
+strongest right after interesting work, because the temptation is to report the whole
+investigation. Resist it — the interesting part is the outcome, and the investigation is
+already in the commits, `docs/EVIDENCE.md`, and the issue tracker.
+
+Hard limits, no exceptions without being asked:
+
+- **6 lines. Not 10, not "about 10."** Count them before sending.
+- **No section headers.** A reply needing headers is a document; write it to a file instead.
+- **One line per finding, maximum.** Two defects means two lines.
+- **No paragraph explaining why a bug was subtle.** That belongs in the changelog entry,
+  which is already written.
+- **Prose over links to work already recorded.** "Two bugs fixed, both in the changelog" beats
+  reproducing either one.
