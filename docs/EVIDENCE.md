@@ -178,6 +178,46 @@ Newest first.
   enumerates USB, joins, sleeps, or draws the current we hope. The first real evidence
   comes from flashing hardware and reading the serial banner.
 
+### 2026-07-31 — first LoRaWAN join and first uplink accepted by The Things Network
+
+- **Commit:** `stage3` build, after the DevEUI byte-order and empty-uplink fixes
+- **Host:** Heliotrope Ridge, RAK4631 on USB, antenna attached, no sensors connected
+- **Device:** `puma-concolor-001`, DevEUI `42BB96EF76E200F1`, US915 FSB2, MAC 1.0.3
+- **Observation:** device side —
+  ```
+  session : restored 0x260CE734, counter 32
+  [cycle 1]
+     RK900   : no data (timeout)
+     battery : no data (no reply, 0 bytes)
+     uplink  : proof of life — no sensor data for 1 cycle(s)
+     radio   : sent 0 bytes on port 2
+     session : saved 0x260CE734, resume at 64
+  ```
+  network side — Network Server `nam1` reports `has session: True`, `has pending: False`,
+  `adr_data_rate_index: 3`, `rx1_delay: 5`. Gateway `9181014c6051030034` heard the join at
+  **RSSI −62, SNR 14** at 48.71066, −122.05389.
+- **Verdict:** PASS — the radio path works end to end. Join, join-accept, session
+  establishment, and an accepted uplink are all confirmed from both sides. Session
+  persistence (H5) also demonstrated: the second boot restored DevAddr `0x260CE734` from
+  flash and transmitted without rejoining.
+- **Notes:** Two real defects were found getting here, both of which would have been far
+  worse to diagnose in the field.
+
+  First, `src/secrets.h` held the DevEUI **byte-reversed**. `SX126x-Arduino` requires
+  most-significant-byte-first and reverses the bytes itself; the generator script had written
+  the opposite convention. The node transmitted flawlessly and TTN logged **nothing at all** —
+  an unrecognised DevEUI is neither answered nor reported, so it is indistinguishable from a
+  dead radio or an absent gateway. The boot banner now prints the DevEUI so this comparison
+  takes seconds.
+
+  Second, the node did not join at all when both sensors were silent, and `Radio::send()`
+  additionally discarded zero-length payloads. Together these meant a station installed with
+  one bad wire would have sat in the woods transmitting nothing and been unreachable by
+  downlink, since Class A only opens a receive window after an uplink.
+
+  Still unproven: real sensor data (nothing is wired yet), sleep current, and the decoder
+  against a live non-empty payload.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary

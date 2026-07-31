@@ -8,6 +8,27 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The node now transmits proof of life when both sensors are silent.** It previously skipped
+  joining entirely in that case, so a station installed with one bad wire would have sat in the
+  woods transmitting nothing — indistinguishable from a dead node, a flat pack, or a dead
+  gateway, all of which want different responses from whoever decides to drive out. It was also
+  unreachable: Class A only opens a receive window after an uplink, so a node that never
+  uplinks can never be commanded back to health. Sends a zero-length uplink on the first silent
+  cycle and every 8th after, so an installation mistake is visible before anyone leaves the
+  site without a permanently dead sensor spending the airtime budget on saying nothing.
+  `Radio::send()` was separately discarding zero-length payloads, which had been dropping that
+  uplink with no log line at all.
+- **The DevEUI was byte-reversed, so no join could ever succeed.** `SX126x-Arduino` requires the
+  keys most-significant-byte-first and reverses them itself when building the join request; the
+  registration script had written the opposite convention, which a different and widely-copied
+  Arduino LoRaWAN library uses. The consequence is the worst kind: an unrecognised DevEUI is
+  neither answered nor logged, so the node transmitted perfectly while the console showed no
+  join attempt, no error, and nothing to bisect. The boot banner now prints the DevEUI, AppEUI,
+  and sub-band so the comparison against the console is immediate, and
+  `src/secrets.example.h` records the failure mode.
+
 ### Added
 
 - **Real encoder bytes are checked through the real decoder** (`scripts/check_golden_vectors.py`,
