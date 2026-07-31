@@ -137,6 +137,15 @@ protocol fault. Take pin 4 from the always-on `VDD` pad on the base-board header
 Per [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md). The two sensors are on **separate
 buses**, so neither can interfere with or block the other.
 
+### The two power rules, stated plainly
+
+> **12 V positive (`P+`) goes to BOTH the buck VIN+ AND the RK900's 12 V input.**
+>
+> **12 V negative (`P−`) goes to ALL THREE: the buck negative, `GND` on the RAK5802, and the
+> RK900's negative.**
+
+Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is exclusive.
+
 1. `P+` feeds **two** loads, not one: the buck's VIN+ (→ WisBlock 5 V) and the RK900's 12 V
    directly. The RK900 is a 12 V device and the RAK5802 cannot supply it — that module's `BAT`
    and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the buck for the WisBlock
