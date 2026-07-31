@@ -84,6 +84,17 @@ Modbus slave **0x6E**, **9600** 8N1. Register map: FIRMWARE_SPEC §2.2 / RAK2560
 
 ### B — 5-pin Sensor Hub Load (SP11/P5) — power + one-wire — **chosen**
 
+**Mating part: `SP1110/P5-N` plug** (SP11 series, IP67, screw-locking circular, 2 A, 0.75 mm
+contacts × 5). The socket on the pack is `SP1110/P5`; the cable-end plug that mates with it is
+the `-N` variant [CIT-RAK9154]. Buying the plug is preferable to cutting the supplied cable,
+which keeps the assembly weatherproof and reversible.
+
+The connector visible **inside** a Sensor Hub shell is the board-side end of that bulkhead and
+is a different, unpublished part — RAK does not document it, so it cannot be ordered by part
+number. Measure the pin pitch before assuming a JST family (1.0 mm SH, 1.25 mm GH, 1.5 mm ZH,
+and 2.0 mm PH all look alike in a photograph). Mating it saves a gland but ties the build to an
+undocumented part.
+
 | Pin | Signal | Notes |
 |---|---|---|
 | 1 | P+ (~12 V) | Buck VIN+ only |
