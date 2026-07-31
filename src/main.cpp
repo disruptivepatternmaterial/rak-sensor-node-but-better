@@ -78,6 +78,17 @@ void print_banner()
     LOGF("features : rk900=%d battery=%d radio=%d sleep=%d wdt=%d\n", FEATURE_RK900,
          FEATURE_BATTERY, FEATURE_RADIO, FEATURE_SLEEP, FEATURE_WATCHDOG);
 
+#if FEATURE_RADIO
+    // Printed so the identity the node is actually joining with can be compared against what
+    // the network server has registered, without reading it back out of the binary. A
+    // byte-order mistake in these is invisible from the network side — the join request simply
+    // never matches a known device, and the network stays silent rather than reporting a
+    // rejection.
+    LOGF("deveui   : %s\n", radio.deveui_hex());
+    LOGF("appeui   : %s\n", radio.appeui_hex());
+    LOGF("region   : US915 sub-band %u\n", radio.sub_band());
+#endif
+
     if (power::reset_was_watchdog()) {
         // Worth shouting about. A node resetting every cycle still reports data and looks
         // healthy from the network side, so this is the only place it becomes visible.

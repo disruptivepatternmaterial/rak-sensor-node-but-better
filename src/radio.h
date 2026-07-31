@@ -49,6 +49,14 @@ class Radio {
 
     bool joined() const { return m_joined; }
 
+    // The identity being presented to the join server, in the same most-significant-byte-first
+    // order the network server displays it. The keys are stored least-significant-byte-first as
+    // the MAC layer requires, and that reversal is a routine source of a device that transmits
+    // perfectly and is never recognised, so these exist to make the comparison possible.
+    const char *deveui_hex() const;
+    const char *appeui_hex() const;
+    uint8_t     sub_band() const;
+
     // How many application bytes the current data rate allows. Adaptive data rate means
     // the network moves the node between rates, and the allowance at the slowest one is
     // 11 bytes against a full payload of 35. An oversized uplink is not truncated — it is

@@ -63,9 +63,28 @@ constexpr uint32_t kBackoffMaxSeconds   = 3600;
 // pattern rather than a single event.
 constexpr uint32_t kFailuresBeforeRejoin = 3;
 
+// Most-significant byte first, matching what the network server displays. This library
+// requires that order and reverses the bytes itself when it builds the join request; its own
+// example is emphatic about it ("OTAA keys !!!! KEYS ARE MSB !!!!" in
+// examples/LoRaWAN_OTAA_ABP_RAK3401/src/main.cpp). Supplying them reversed — the convention a
+// different Arduino LoRaWAN library uses — produces a device that transmits correctly forever
+// and is never once recognised. [CIT-SX126X-ARDUINO]
 uint8_t s_dev_eui[8]  = OTAA_DEVEUI;
 uint8_t s_app_eui[8]  = OTAA_APPEUI;
 uint8_t s_app_key[16] = OTAA_APPKEY;
+
+char s_dev_eui_text[17] = {0};
+char s_app_eui_text[17] = {0};
+
+void eui_to_hex(const uint8_t *eui, char *out)
+{
+    static const char kHex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < 8; i++) {
+        out[i * 2]     = kHex[(eui[i] >> 4) & 0x0F];
+        out[i * 2 + 1] = kHex[eui[i] & 0x0F];
+    }
+    out[16] = '\0';
+}
 
 volatile bool s_joined       = false;
 volatile bool s_join_failed  = false;
@@ -133,6 +152,23 @@ lmh_param_t s_params = {LORAWAN_ADR_ON,        DR_3,
                         LORAWAN_DEFAULT_TX_POWER, LORAWAN_DUTYCYCLE_OFF};
 
 } // namespace
+
+const char *Radio::deveui_hex() const
+{
+    eui_to_hex(s_dev_eui, s_dev_eui_text);
+    return s_dev_eui_text;
+}
+
+const char *Radio::appeui_hex() const
+{
+    eui_to_hex(s_app_eui, s_app_eui_text);
+    return s_app_eui_text;
+}
+
+uint8_t Radio::sub_band() const
+{
+    return kSubBand;
+}
 
 bool Radio::begin()
 {
