@@ -146,6 +146,34 @@ buses**, so neither can interfere with or block the other.
 
 Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is exclusive.
 
+### The two data rules, stated plainly
+
+> **Pack pins 3 and 5 (TXD and RXD) are joined together, and that single joined wire goes to
+> the `IO1` pad on the base board.**
+>
+> **Pack pin 4 (`3V3_In`) goes to the `VDD` pad on the base board. Not to the RAK5802's `3V3`
+> terminal, and never to 5 V.**
+
+Both pads are on the 2.54 mm header along the edge of the RAK19007, silkscreened
+`BAT IO2 IO1 A1 IN1` and `SDA SCL TX1 RX1 GND VDD BOOT0`. Neither signal appears on any screw
+terminal, so both are solder joints.
+
+### The whole harness on one screen
+
+| From (pack, 5-pin SP11) | To | Why |
+|---|---|---|
+| Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
+| Pin 2 `P−` | buck negative **and** RAK5802 `GND` **and** RK900 negative | all three |
+| Pins 3 + 5 joined | `IO1` pad | one-wire half-duplex to the pack |
+| Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
+
+| From (RK900) | To |
+|---|---|
+| RS-485 A | RAK5802 `A/RX` |
+| RS-485 B | RAK5802 `B/TX` |
+| 12 V + | pack `P+` |
+| Negative | pack `P−` |
+
 1. `P+` feeds **two** loads, not one: the buck's VIN+ (→ WisBlock 5 V) and the RK900's 12 V
    directly. The RK900 is a 12 V device and the RAK5802 cannot supply it — that module's `BAT`
    and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the buck for the WisBlock
