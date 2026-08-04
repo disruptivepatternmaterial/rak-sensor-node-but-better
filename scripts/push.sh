@@ -73,7 +73,11 @@ ssh "$BUILD_HOST" "zsh -l -c '
   # Tags travel with the branch. A release tag that stays on the workstation leaves the
   # GitHub release pointing at nothing, and the version in the changelog unreachable.
   git push ${GH_SSH} --tags
-  git branch -D ${RELAY_REF##refs/heads/} -q
+  # The branch can already be gone when this is a no-op relay (both main and the
+  # relay ref were current). It is cleanup only; GitHub has already received main,
+  # so do not report a successful push as a failure merely because there is nothing
+  # left to delete.
+  git branch -D ${RELAY_REF##refs/heads/} -q || true
 '" || die "relay failed. The build host may have diverged; check it before retrying."
 
 echo
