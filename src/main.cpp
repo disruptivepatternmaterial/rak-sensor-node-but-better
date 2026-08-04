@@ -148,16 +148,19 @@ uint32_t scan_one(uint32_t baud, uint8_t slave)
     return n;
 }
 
-void bus_scan()
+uint32_t sweep(bool rail_on)
 {
-    LOGLN(F("[bus scan] WB_IO2 HIGH, A/B as wired, FC 0x03 read 0x0000 x1"));
-
     // CITE(datasheet): [CIT-RAK5802] the transceiver runs from the switched 3V3_S rail,
-    //   gated by WB_IO2. Held HIGH for the whole sweep so no result can be blamed on the
-    //   module having been unpowered when it was tried.
+    //   gated by WB_IO2. The sweep is run twice, once with the rail up and once with it
+    //   down, because that comparison is the only way to tell a real reply from a floating
+    //   receiver. Bytes that appear identically with the transceiver unpowered came from
+    //   nothing but an undriven input, and mean the opposite of what they look like.
     pinMode(WB_IO2, OUTPUT);
-    digitalWrite(WB_IO2, HIGH);
+    digitalWrite(WB_IO2, rail_on ? HIGH : LOW);
     delay(50);
+
+    LOGF("[bus scan] WB_IO2 %s, A/B as wired, FC 0x03 read 0x0000 x1\n",
+         rail_on ? "HIGH (transceiver powered)" : "LOW (transceiver unpowered)");
 
     uint32_t total = 0;
     for (uint32_t b = 0; b < (sizeof(kScanBauds) / sizeof(kScanBauds[0])); b++) {
@@ -170,11 +173,31 @@ void bus_scan()
         Serial1.end();
     }
 
-    LOGF("[bus scan] total bytes seen on the line: %lu\n", (unsigned long)total);
-    if (total == 0) {
-        LOGLN(F("[bus scan] silent at every combination tried. No constant this firmware"));
-        LOGLN(F("           controls can make an unpowered or reverse-wired transceiver"));
-        LOGLN(F("           answer — check 12 V at the RK900 and the A/B pair first."));
+    LOGF("[bus scan] total with rail %s: %lu byte(s)\n", rail_on ? "HIGH" : "LOW",
+         (unsigned long)total);
+    return total;
+}
+
+void bus_scan()
+{
+    const uint32_t powered   = sweep(true);
+    const uint32_t unpowered = sweep(false);
+
+    // Restored so the pin is not left driving the rail down between cycles.
+    digitalWrite(WB_IO2, HIGH);
+
+    LOGF("[bus scan] verdict: %lu byte(s) powered vs %lu unpowered\n",
+         (unsigned long)powered, (unsigned long)unpowered);
+
+    if (powered == 0 && unpowered == 0) {
+        LOGLN(F("[bus scan] the line is dead in both states. Nothing the firmware controls"));
+        LOGLN(F("           can change that — check 12 V at the RK900 and the A/B pair."));
+    } else if (powered == unpowered) {
+        LOGLN(F("[bus scan] identical with the transceiver unpowered, so those bytes are a"));
+        LOGLN(F("           floating receiver, not a reply. Nothing is answering on the bus."));
+    } else {
+        LOGLN(F("[bus scan] the counts differ, so something really is driving the pair."));
+        LOGLN(F("           Read the hex above before changing any constant."));
     }
     LOGLN();
 }

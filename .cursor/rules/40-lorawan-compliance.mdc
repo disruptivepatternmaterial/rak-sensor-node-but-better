@@ -19,7 +19,8 @@ not targets. Citation keys in brackets resolve in `docs/CITATIONS.md`.
 | ADR | ON | §3 |
 | Confirmed uplink | **OFF** | §3 |
 | Default interval | 3600 s | §4 |
-| Allowed interval | 300–86400 s inclusive | §4 |
+| Allowed interval | 1800–86400 s inclusive | §4 |
+| Bench cadence | 60 s, USB-only builds, `FEATURE_RADIO=0` | §4 |
 
 Class C is a non-goal because it holds the receiver open, which is incompatible with the
 months-unattended power budget (rule 50).
@@ -41,10 +42,18 @@ consequences the firmware must respect:
 ## Airtime budget — the constraint that sets the interval floor
 
 TTN Fair Use allows roughly **30 seconds of uplink airtime per device per day** and
-**about 10 downlinks per device per day** [CIT-TTN-FUP]. The 300 s minimum interval in
-`FIRMWARE_SPEC.md` §4 is 288 uplinks/day, so **every uplink must stay near or under ~100 ms
-of airtime** to fit the budget. That is a real design constraint on payload size, not a
-rounding detail.
+**about 10 downlinks per device per day** [CIT-TTN-FUP]. This is what sets the interval
+floor, and it is why `FIRMWARE_SPEC.md` §4 raised that floor from 300 s to **1800 s**: an
+11-byte uplink at the slowest US915 data rate takes about 370 ms, so 300 s intervals would
+be 288 uplinks and roughly 107 seconds of airtime — over three times the allowance. At
+1800 s it stays under 18 seconds even at the slowest rate.
+
+Design against the slowest rate, not the typical one. ADR puts the nodes with the weakest
+coverage on it, and that is exactly this deployment.
+
+The 60 s bench cadence (`FEATURE_BENCH_INTERVAL`) is compile-time and confined to builds
+with `FEATURE_RADIO=0`, so it never reaches the air. Do not combine it with the radio: at
+60 s that is ~1440 uplinks/day, roughly fifty times the allowance.
 
 Therefore:
 
@@ -71,12 +80,15 @@ the resulting messages-per-day differ.
 
 ## Downlink handling — validate, then persist
 
-The interval downlink is `interval_s` as a **uint32 big-endian** on a dedicated fPort
-(`FIRMWARE_SPEC.md` §4). Required behavior:
+Downlinks are opcode-led on **fPort 10** (`FIRMWARE_SPEC.md` §4): a uint8 `opcode` followed
+by its arguments. `0x01` set-interval carries `interval_s` as a **uint32 big-endian**, 5
+bytes total; `0x03` request-status carries no arguments, 1 byte. A bare integer was rejected
+because its meaning would have to be guessed from its length, and a node already in the
+woods cannot be taught a new message format. Required behavior:
 
 1. Check the fPort. Ignore other ports.
-2. Check the length is exactly 4 bytes. Wrong length → ignore.
-3. Range-check **300–86400 inclusive**. Out of range → ignore and keep the previous value.
+2. Check the opcode, then the length for that opcode. Wrong length → ignore.
+3. Range-check **1800–86400 inclusive**. Out of range → ignore and keep the previous value.
 4. Persist to flash so it survives power loss (H5), then apply on the **next** wake (§4).
 5. **Never** let a downlink drive the interval outside the allowed range, and never let a
    malformed downlink reset it to a default. Invalid input keeps the previous value — an
