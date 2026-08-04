@@ -57,6 +57,59 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-03 — RK900 full five-register frame captured at 9600; register map confirmed, Stage 1 read PASS
+
+- **Commit:** `998dc26e6aa70841f2f3d6716068124792da8b5d`, `busscan` image
+  (`FEATURE_BUS_SCAN=1`, everything else off), built and flashed on the build host.
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB` on `/dev/cu.usbmodem1101`,
+  `USB VID:PID=239A:8029` (application running). This flash succeeded on the first attempt
+  with no manual double-tap — the board was in a clean application state (`8029`) when the
+  1200 bps touch dropped it to DFU, unlike the two prior failures recorded below.
+- **Measured:** the full FC `0x03`, slave `0x01`, registers `0x0000`–`0x0004` (quantity 5)
+  reply at 9600 8N1, and whether the five register values discriminate between the two
+  candidate register maps left open by ADR-0006.
+- **Raw observation:** two consecutive production frames, captured over USB CDC via pyserial:
+
+  ```
+  9600 baud  slave 0x01  0x0000 x5 : 15 byte(s)  <- 01 03 0A 00 00 00 00 00 FB 01 F8 27 56 DA A1
+  9600 baud  slave 0x01  0x0000 x5 : 15 byte(s)  <- 01 03 0A 00 00 00 00 00 FB 01 F9 27 55 CB 60
+  [bus scan] verdict: 29 byte(s) powered vs 0 unpowered; 9600/0x01 production frame: 15 byte(s)
+  ```
+
+  Both are well-formed Modbus RTU: slave `0x01`, FC `0x03`, byte count `0x0A` (10 = five
+  registers), then the five 16-bit words, then CRC. The two frames differ only in registers
+  `0x0003` (`0x01F8`→`0x01F9`) and `0x0004` (`0x2756`→`0x2755`) — real sensor jitter across
+  reads, which is itself evidence the values are live and not a static artifact.
+
+- **Decoded against the register map already in `src/sensors/rk900.cpp`** (wind speed at
+  `0x0000`, ÷100; wind direction `0x0001`, raw; temperature `0x0002`, ÷10; humidity
+  `0x0003`, ÷10; pressure `0x0004`, ÷10):
+
+  | Register | Raw (frame 1) | Field · scale | Value | Sanity |
+  |---|---|---|---|---|
+  | `0x0000` | `0x0000` | wind speed ÷100 m/s | 0.00 m/s | ✓ no wind indoors |
+  | `0x0001` | `0x0000` | wind direction, raw ° | 0° | ✓ |
+  | `0x0002` | `0x00FB` (251) | temperature ÷10 °C | 25.1 °C | ✓ room temperature |
+  | `0x0003` | `0x01F8` (504) | humidity ÷10 %RH | 50.4 %RH | ✓ indoor humidity |
+  | `0x0004` | `0x2756` (10070) | pressure ÷10 hPa | 1007.0 hPa | ✓ sea-level-ish |
+
+  The alternative Rika-page layout (device status at `0x0000`, wind speed at `0x0002`) makes
+  the **same bytes** decode as temperature 50.4 °C and humidity 1007 %RH — physically
+  impossible. The full frame therefore discriminates decisively where the single-register
+  read could not.
+
+- **Verdict:** **PASS.** The RK900-09 is read correctly at 9600 8N1, slave `0x01`, FC `0x03`,
+  registers `0x0000`–`0x0004`, and the register map already encoded in `rk900.cpp` is the
+  correct one for this physical unit — no `RegisterIndex` or scaling change is needed. This
+  settles the register-map half of ADR-0006 (the baud half was already settled at 9600) and
+  is the first real environmental reading ever taken from this sensor on this hardware:
+  25.1 °C, 50.4 %RH, 1007.0 hPa, calm. It satisfies the "one good RK900 frame" item from
+  `FIRMWARE_SPEC.md` §9.
+- **Not yet done:** this is the `busscan` diagnostic path, not the production `RK900::read()`
+  path with the RAK5802 rail-power sequencing and the driver's retry/timeout handling. Stage 1
+  is proven at the wire level; a capture of the production firmware (`stage1` env) emitting the
+  same values through the normal code path is the remaining confirmation.
+
 ### 2026-08-03 — RK900 full-frame diagnostic flash did not survive DFU; no sensor result
 
 - **Commit:** `f38480bca5460a409faada2f36ccc40672b6d19f`, `busscan` image. This was the
