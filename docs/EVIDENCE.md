@@ -218,6 +218,49 @@ Newest first.
   Still unproven: real sensor data (nothing is wired yet), sleep current, and the decoder
   against a live non-empty payload.
 
+### 2026-08-03 — bench 60 s cadence builds and tests; RK900 read still unproven
+
+- **Commit:** `2b3b500`
+- **Host:** Heliotrope Ridge (`ComputerName` confirmed over SSH), RAK4631 on USB
+  (`USB VID:PID=239A:8029 SER=4BC1FCC87D1343AB`, `WisCore RAK4631 Board`)
+- **Measured:** that `FEATURE_BENCH_INTERVAL` compiles into `stage1`, that the off-target
+  suite still passes at that commit, and whether `stage1` could be flashed to the board
+- **Observation:**
+  ```
+  HEAD 2b3b5005fd7df3579ca6450a70fed7cc340c5a0c
+  HOST Heliotrope Ridge
+  native         test_crc16    PASSED    00:00:00.933
+  native         test_payload  PASSED    00:00:00.552
+  ================= 20 test cases: 20 succeeded in 00:00:01.485 =================
+  RAM:   [=         ]   7.0% (used 17372 bytes from 248832 bytes)
+  Flash: [=         ]  12.2% (used 99344 bytes from 815104 bytes)
+  stage1         SUCCESS   00:00:06.247
+  ```
+  Flash attempt — a poll loop on the build host checked for `/dev/cu.usbmodem*` every 0.3 s
+  in order to catch the awake window of the sleeping field image:
+  ```
+  catch: start 18:52:18 sha 2b3b500
+  --- ports ---
+  /dev/cu.Bluetooth-Incoming-Port
+  /dev/cu.PT-P710BT3824
+  /dev/cu.debug-console
+  ```
+  No `usbmodem` port appeared in the first ~6 minutes of polling.
+- **Verdict:** PASS for the build and the off-target suite. **INCONCLUSIVE for the flash, and
+  the RK900 remains entirely unproven — no sensor read has been observed on hardware, ever.**
+- **Notes:** The board is running the `ffec8aa` full image, which has `FEATURE_SLEEP=1`;
+  `src/power.cpp` calls `Serial.end()` and disables the USB peripheral before sleeping, so
+  the port genuinely does not exist while it sleeps. That is designed behavior, not a fault.
+  The awake window is therefore the only opportunity to flash, and the interval between
+  windows is whatever the stored config says — up to 3600 s. A double-tap of RESET on the
+  RAK19007 drops the board into its DFU bootloader, where the port appears immediately and
+  persists, which is the reliable way to do this rather than racing a sleep cycle.
+
+  Nothing here says anything about the RK900. The sensor was physically connected just before
+  this session and no read has ever been attempted on hardware. Do not read the passing
+  `stage1` build as evidence that the wiring, the RS-485 direction control, the 4800 8N1
+  framing, or the register map are correct — none of that has been exercised.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary
