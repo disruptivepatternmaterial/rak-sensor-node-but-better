@@ -70,7 +70,7 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | Stage | Adds | State |
 |---|---|---|
 | 0 | LED + USB serial | run on hardware 2026-07-31 (`8d4a41c`) — firmware boots and prints over USB CDC ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| 1 | RK900 Modbus over RAK5802 @ 4800 | partial — RK900 gave a CRC-valid reply 2026-08-03 (`6b70416`, `busscan`), but **at 9600, not 4800** ([#30](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/30)); full 5-register read still pending |
+| 1 | RK900 Modbus over RAK5802 @ 9600 | proven at wire level 2026-08-03 (`998dc26`, `busscan`) — full 5-register frame read at **9600** (not 4800): 25.1 °C, 50.4 %RH, 1007.0 hPa, calm; register map confirmed ([ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md), [`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Remaining: same read through the production `stage1` path |
 | 2 | OTAA join + first uplink | done 2026-07-31 — join + accepted uplink, `puma-concolor-001`, session restore across reset ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | 3 | RAK9154 battery telemetry over one-wire | not started; unblocked by ADR-0004 |
 

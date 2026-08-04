@@ -1,6 +1,8 @@
 # ADR-0006 — RK900-09 line rate: keep 9600 for now, register map unchanged
 
-- **Status:** Accepted, provisional pending full-frame bench confirmation
+- **Status:** Accepted. Baud settled at 9600 by measurement; register map confirmed
+  (RAKwireless/sibling/beegee map) by the full five-register frame on 2026-08-03 — see the
+  Update section at the foot of this ADR and `docs/EVIDENCE.md`.
 - **Date:** 2026-08-03
 - **Closes:** #30 (baud), documents the register-map question `rk900.cpp`'s raw-dump comment
   refers to (previously an undocumented forward-reference — no ADR-0006 existed until this one)
@@ -112,9 +114,30 @@ RS-485 pair at the sensor's *current* baud, each line within the 15 s settings-m
 ## Evidence
 
 - `docs/EVIDENCE.md` — 2026-08-03 busscan entries (single-register reply at 9600; full-frame
-  DFU failure, unresolved).
-- The full five-register frame is the test that closes the register-map half of this ADR —
-  not yet captured as of this writing.
+  DFU failure; and the successful full-frame capture that resolves the register map).
+- The full five-register frame — the test that closes the register-map half of this ADR — was
+  captured 2026-08-03 at commit `998dc26`. See the Update below.
+
+## Update — 2026-08-03: register map confirmed, both conflicts resolved
+
+The full five-register frame was captured (`docs/EVIDENCE.md`, commit `998dc26`, busscan
+image, Heliotrope Ridge). Slave `0x01`, FC `0x03`, `0x0000`–`0x0004` at 9600 8N1 returned,
+across two consecutive reads:
+
+```
+01 03 0A 00 00 00 00 00 FB 01 F8 27 56 <crc>   -> regs 0,0,251,504,10070
+01 03 0A 00 00 00 00 00 FB 01 F9 27 55 <crc>   -> regs 0,0,251,505,10069
+```
+
+Decoded with the enum already in `rk900.cpp` this is 0.00 m/s wind, 0° direction, 25.1 °C,
+50.4 %RH, 1007.0 hPa — a physically plausible calm-indoor-bench quadruple. The Rika-page
+layout would decode the same bytes as 50.4 °C / 1007 %RH, which is impossible.
+
+**Decision, now non-provisional:** the RAKwireless / sibling / beegee-tokyo register map — the
+one already coded — is correct for this unit. `RegisterIndex` and the `LOGF` scaling stay as
+they are; the raw hex dump added in `6ea7488` can remain as belt-and-braces but is no longer
+load-bearing. Option B (reprogramming this unit to 4800 for fleet consistency) remains the
+only genuinely open item and is still not urgent — the node reads correctly at 9600 today.
 
 ## Citations
 
