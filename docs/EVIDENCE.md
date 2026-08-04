@@ -57,6 +57,83 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-04 — RAK9154 one-wire PROVEN ALIVE: pack drives the line, identifies as "RAK2560-io", answers SENDAT at dest 0xFF
+
+The one-wire scanner (`owscan`) settled the question the driver could not: **the pack talks.**
+It supersedes the "narrowed to physical" entry below — the wire was fine all along; the
+production driver was addressing the wrong destination.
+
+- **Commit:** `3d3425df5b5acee8b4999d3972e148a14092890e`, `owscan` image
+  (`FEATURE_ONEWIRE_SCAN=1`, RK900/battery/radio/sleep all off).
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB`, `239A:8029`.
+- **Wiring** (metered good the same day): RAK9154 5-pin socket B — pins 3+5 joined → `IO1`
+  pad; pin 4 `3V3_In` → `VDD` (3.3 V confirmed); pin 2 `P−` common ground; pack output 11.6 V.
+
+**Phase 1 — falling-edge census on P0.17, no UART, no framing:**
+
+```
+INPUT_PULLUP   idle HIGH : 334 falling edge(s), 126321 of 1805615 samples LOW
+INPUT (float)  idle HIGH :   0 falling edge(s),      0 of 1811089 samples LOW
+```
+
+With the pull-up engaged an undriven open-drain line cannot produce a falling edge, and the
+floating control produced exactly zero. **Something is actively pulling the line low.**
+
+**Phase 2 — passive listen at 9600, transmitting nothing, repeatable every cycle:**
+
+```
+FF 7E 00 55 02 00 00 FF 00 01 50 03 44 01 02 09 00 30 00 ... FF 00 47 45 00 00 00 00
+52 41 4B 32 35 36 30 2D 69 6F 00 ...
+```
+
+`52 41 4B 32 35 36 30 2D 69 6F` is ASCII **"RAK2560-io"**. Header decodes as length `0x55`,
+RUI3 type `02`, flag `00`, then SNHub `dest=0x00` (master), `source=0xFF` (unprovisioned),
+`hub_type=0x01` (PROVISION), `payload_length=0x50`, `payload_type=0x03`. **The pack
+announces itself to the master unprompted.** 4800/19200/38400 returned garbage
+(`EF F8 08…`, `FE F8 06 66…`, `F8 80 78…`) — the same signal sampled at the wrong rate,
+which independently confirms **9600** is correct.
+
+**Phase 4 — SENDAT probe-id sweep at 9600 (the finding that explains the production bug):**
+
+```
+SENDAT dest 0x01 : 0 byte(s)
+SENDAT dest 0x02 : 0 byte(s)
+SENDAT dest 0x03 : 0 byte(s)
+SENDAT dest 0xFF : 64 byte(s)  <- FF 7E 00 15 02 01 00 FF 12 03 10 02
+                                  15 BA 00 00  16 B9 00 00  17 B8 00  18 67 00 00  2F ...
+```
+
+Reply header: length `0x15`, type `02`, **flag `01`** (response), `dest=0x00`, `source=0xFF`,
+`seq=0x12`, `hub_type=0x03` (SENDAT), `payload_length=0x10`, `payload_type=0x02`. The 16
+payload bytes are IPSO records carrying a leading sensor-id byte:
+
+| Bytes | Sensor id | IPSO type | Meaning | Value |
+|---|---|---|---|---|
+| `15 BA 00 00` | `0x15` | `0xBA` = 186 | DC voltage | `00 00` |
+| `16 B9 00 00` | `0x16` | `0xB9` = 185 | DC current | `00 00` |
+| `17 B8 00` | `0x17` | `0xB8` = 184 | capacity / SoC | `00` |
+| `18 67 00 00` | `0x18` | `0x67` = 103 | temperature | `00 00` |
+
+The sequence byte increments across cycles (`0x12`, `0x1B`, `0x24`), so this is live traffic,
+not a replay.
+
+**Phase 3 — our BOOT/provision broadcast drew 0 bytes at every baud.**
+
+- **What this establishes:**
+  - The pack is alive on the one-wire bus at **9600**, and the record types match the IPSO
+    constants already in `src/sensors/battery.cpp`.
+  - **The production driver's `kProbeId = 0x01` is the bug** — the pack answers only at
+    `0xFF`. Silence at `0x01`/`0x02`/`0x03` is conclusive.
+  - Our BOOT frame is not what the pack responds to; the pack *initiates* provisioning
+    (`dest=master, source=0xFF`), so the master's role is likely to answer, not to poll.
+- **Still open:** every reported value is zero, consistent with provisioning never completing
+  (the pack keeps re-announcing as `source=0xFF`). **These zeros must not be encoded as real
+  measurements** — `AGENTS.md` forbids fabricated zeros, and an unprovisioned pack reporting
+  `00 00` is a null, not a 0.00 V reading.
+- **Verdict:** **PASS on "the pack communicates."** Addressing fix and the provisioning
+  handshake are the remaining work. Tracked in
+  [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+
 ### 2026-08-04 — RAK9154 one-wire still silent after two firmware fixes; fault narrowed to physical
 
 Two independent firmware defects were found by reading the reference readers, fixed, flashed,
