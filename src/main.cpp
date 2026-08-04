@@ -156,9 +156,9 @@ uint32_t scan_production_frame()
     // kBaud in rk900.cpp remains unchanged until the data frame is captured. Refs #30.
     //
     // CITE(datasheet): [CIT-RK900] five consecutive holding registers from 0x0000.
-    // CITE(sibling): forest-weather-machines@5a2c752:
-    //   docs/RK900-09_BRINGUP_AND_FALLBACKS_2026-05-15.md — the deployed unit uses
-    //   9600 8N1, FC 0x03, slave 0x01, start 0x0000, quantity 5.
+    // CITE(sibling): forest-weather-machines (local sibling)
+    //   docs/RK900-09_BRINGUP_AND_FALLBACKS_2026-05-15.md § "Modbus register map" — the
+    //   deployed fleet uses 9600 8N1, FC 0x03, slave 0x01, start 0x0000, quantity 5.
     constexpr uint32_t kObservedBaud = 9600;
     constexpr uint8_t kObservedSlave = 0x01;
     constexpr uint8_t kProductionRegisterCount = 5;
