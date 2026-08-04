@@ -104,7 +104,7 @@ constexpr uint8_t  kScanSlaves[] = {0x01, 0x02, 0x03, 0x6E};
 // that the whole sweep stays well inside the watchdog window.
 constexpr uint32_t kScanListenMs = 400;
 
-uint32_t scan_one(uint32_t baud, uint8_t slave)
+uint32_t scan_one(uint32_t baud, uint8_t slave, uint8_t register_count = 1)
 {
     uint8_t req[8];
     req[0] = slave;
@@ -112,7 +112,7 @@ uint32_t scan_one(uint32_t baud, uint8_t slave)
     req[2] = 0x00;
     req[3] = 0x00;
     req[4] = 0x00;
-    req[5] = 0x01;
+    req[5] = register_count;
 
     const uint16_t crc = modbus_crc16(req, 6);
     req[6] = (uint8_t)(crc & 0xFF);
@@ -136,8 +136,8 @@ uint32_t scan_one(uint32_t baud, uint8_t slave)
         }
     }
 
-    LOGF("   %6lu baud  slave 0x%02X : %lu byte(s)", (unsigned long)baud, slave,
-         (unsigned long)n);
+    LOGF("   %6lu baud  slave 0x%02X  0x0000 x%u : %lu byte(s)",
+         (unsigned long)baud, slave, register_count, (unsigned long)n);
     if (n > 0) {
         LOG("  <-");
         for (uint32_t i = 0; i < n; i++) {
@@ -146,6 +146,27 @@ uint32_t scan_one(uint32_t baud, uint8_t slave)
     }
     LOGLN();
     return n;
+}
+
+uint32_t scan_production_frame()
+{
+    // The broad scan below established that this physical unit answers only at 9600.
+    // Read the same contiguous five-register span Stage 1 will use so a baud-only reply
+    // cannot be mistaken for a production-compatible sensor. This is diagnostic only:
+    // kBaud in rk900.cpp remains unchanged until the data frame is captured. Refs #30.
+    //
+    // CITE(datasheet): [CIT-RK900] five consecutive holding registers from 0x0000.
+    // CITE(sibling): forest-weather-machines/docs/RK900-09_BRINGUP_AND_FALLBACKS_2026-05-15.md
+    //   — the deployed unit uses FC 0x03, slave 0x01, start 0x0000, quantity 5.
+    constexpr uint32_t kObservedBaud = 9600;
+    constexpr uint8_t kObservedSlave = 0x01;
+    constexpr uint8_t kProductionRegisterCount = 5;
+
+    Serial1.begin(kObservedBaud);
+    delay(20);
+    const uint32_t total = scan_one(kObservedBaud, kObservedSlave, kProductionRegisterCount);
+    Serial1.end();
+    return total;
 }
 
 uint32_t sweep(bool rail_on)
@@ -183,11 +204,20 @@ void bus_scan()
     const uint32_t powered   = sweep(true);
     const uint32_t unpowered = sweep(false);
 
+    // Only test the full frame with the transceiver powered: an unpowered line is the
+    // broad scan's control, not a separate claim about register contents.
+    pinMode(WB_IO2, OUTPUT);
+    digitalWrite(WB_IO2, HIGH);
+    delay(50);
+    const uint32_t production_frame = scan_production_frame();
+
     // Restored so the pin is not left driving the rail down between cycles.
     digitalWrite(WB_IO2, HIGH);
 
-    LOGF("[bus scan] verdict: %lu byte(s) powered vs %lu unpowered\n",
-         (unsigned long)powered, (unsigned long)unpowered);
+    LOGF("[bus scan] verdict: %lu byte(s) powered vs %lu unpowered; "
+         "9600/0x01 production frame: %lu byte(s)\n",
+         (unsigned long)powered, (unsigned long)unpowered,
+         (unsigned long)production_frame);
 
     if (powered == 0 && unpowered == 0) {
         LOGLN(F("[bus scan] the line is dead in both states. Nothing the firmware controls"));

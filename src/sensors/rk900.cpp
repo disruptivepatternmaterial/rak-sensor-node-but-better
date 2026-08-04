@@ -6,8 +6,9 @@ namespace {
 
 // CITE(datasheet): [CIT-RK900] Modbus slave address and line rate. Fixed, not configurable
 //   — ADR-0004 dedicated the RAK5802 to this sensor precisely so it could stay fixed.
+// CITE(bench): 2026-08-03 busscan reply at 9600 — factory default, not 4800.
 constexpr uint8_t  kSlave = 0x01;
-constexpr uint32_t kBaud  = 4800;
+constexpr uint32_t kBaud  = 9600;
 
 // CITE(datasheet): [CIT-RK900] five consecutive holding registers from 0x0000. Read as one
 //   span rather than five transactions: one bus turnaround instead of five, which is both
