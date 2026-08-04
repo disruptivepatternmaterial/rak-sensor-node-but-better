@@ -54,6 +54,81 @@ only a measurement recorded here closes it.
 
 Newest first.
 
+### 2026-08-03 — The RK900 answers, and it is at 9600 baud, not the 4800 the firmware asks at
+
+- **Commit:** `6b70416` (the `busscan` image running on the board). Build host `HEAD` has
+  since moved to `be06c98`; the running image predates those two commits, neither of which
+  touches the Modbus path.
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB` on `/dev/cu.usbmodem1101`,
+  `USB VID:PID=239A:8029` (`WisCore RAK4631 Board` — an application, not the bootloader)
+- **Image:** `busscan` — `FEATURE_BUS_SCAN=1`, everything else off. Sweeps 4800/9600/19200/
+  38400/115200 against slaves `0x01`, `0x02`, `0x03`, `0x6E` with FC `0x03` at register
+  `0x0000`, once with `WB_IO2` HIGH and once LOW, printing raw bytes rather than a verdict.
+- **Measured:** whether anything on the RS-485 pair answers at all, and whether any bytes
+  seen are a real reply or an undriven receiver.
+- **Observation:** the same non-empty rows in every one of four consecutive sweeps:
+
+  ```
+       9600 baud  slave 0x01 : 7 byte(s)  <- 01 03 02 00 00 B8 44
+     115200 baud  slave 0x01 : 6 byte(s)  <- 7F 7F FF FF FD BD
+     115200 baud  slave 0x02 : 5 byte(s)  <- FF FF FF FD 7B
+     115200 baud  slave 0x03 : 6 byte(s)  <- 7F 7F FF FF FD FD
+     115200 baud  slave 0x6E : 5 byte(s)  <- FF FF FF FD 55
+  [bus scan] verdict: 29 byte(s) powered vs 0 unpowered
+  ```
+
+  Every other combination, including **4800 at every slave address**, returned 0 bytes.
+
+- **Verdict:** **PASS — the RK900 replied.** This is the first response ever observed from
+  this sensor on this hardware. `01 03 02 00 00 B8 44` is a well-formed Modbus RTU reply:
+  slave `0x01`, function `0x03`, byte count `0x02`, one register reading `0x0000`, checksum
+  `0xB844`. The checksum was verified by hand against the reflected CRC-16 poly `0xA001`
+  seeded `0xFFFF` ([CIT-MODBUS-SERIAL]): for `01 03 02 00 00` the result is `0x44B8`,
+  appended low byte first as `B8 44`. It matches exactly, so this is not line noise.
+
+  Register `0x0000` is wind speed at ×0.01 m/s, so `0x0000` is 0.00 m/s — plausible for a
+  sensor sitting indoors on a bench, and recorded as the measurement it is. **No value here
+  is inferred or filled in.**
+
+- **What this rules out.** The rail comparison is what makes the rest of the read
+  trustworthy: 29 bytes with `WB_IO2` HIGH and **0** with it LOW, in all three cycles. Every
+  byte on the line depends on the transceiver being powered, which means the RAK5802 is
+  alive, `Serial1` reaches it in both directions, and `WB_IO2` gates it exactly as
+  `src/sensors/rk900.cpp` assumes. The A/B pair is the right way round and the sensor has
+  12 V — a reversed pair or an unpowered sensor cannot produce a CRC-valid frame.
+  **No physical check is required.**
+
+  The 115200 rows are **not** replies. They are driver-turnaround transients: byte-identical
+  on every sweep, tracking the request's own CRC, none of them valid Modbus, and they vanish
+  with the rail down along with everything else. At 115200 a bit is 8.7 µs, short enough for
+  the transceiver's enable/disable edge to frame as a character; at 4800 the same edge is far
+  too short to register. Reading them as a sensor answering in the wrong framing would have
+  sent the next person chasing baud rates on a bus that was already telling the truth.
+
+- **The defect this exposes — the firmware asks at the wrong rate.**
+  `src/sensors/rk900.cpp` pins `kBaud = 4800`, cited to [CIT-RK900] and corroborated by the
+  deployed Sensor Hub (`forest-weather-machines` `efc0e3c`,
+  `LoRaWAN/docs/RAK2560_weather_station_settings.md`, which configures RS-485 at 4800 8N1).
+  **This unit does not answer at 4800 and does answer at 9600.** Four sweeps, no exceptions.
+
+  That is a direct contradiction between the datasheet plus field-proven sibling config on
+  one side and observed hardware on the other, which
+  [`.cursor/rules/00-agent-liveness.mdc`](../.cursor/rules/00-agent-liveness.mdc) makes an
+  operator decision rather than an agent guess. **The constant was deliberately not changed.**
+  The likely explanation is that this RK900 was configured to 9600 at some point — the rate
+  is settable, and the deployed unit's 4800 was itself set by hand through WisToolBox — but
+  that is a hypothesis and nothing here confirms it.
+
+- **Notes:** the earlier sweep in this same session, at 19:27, showed **0 bytes at 9600** and
+  only the 115200 transients. Something changed between then and 19:59, during which the
+  operator was at the bench and pushed `420558e` and `be06c98`. The reply has been stable
+  across every sweep since. Worth knowing before treating the 19:27 capture as contradicting
+  this one — it was taken of a different physical setup.
+
+  Still unproven: a full five-register read, any non-zero wind value, the register map beyond
+  `0x0000`, the payload encoding, the join, and the uplink. **No TTN uplink carrying real
+  wind data has been observed. Status stays `🚧 NOT YET DEPLOYED`.**
+
 ### 2026-08-03 — First RK900 read attempt never happened: DFU failed twice, board left in its bootloader
 
 - **Commit:** `3c05058`
