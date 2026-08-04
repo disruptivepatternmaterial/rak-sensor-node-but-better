@@ -57,6 +57,31 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-04 — First end-to-end real-sensor uplink to TTN (operator-confirmed), Stage 2 join+uplink PASS
+
+- **Commit:** `00c52d8fa1ef3f23ea7b5948d3012565650c40d6`, `stage3` image (RK900 + radio,
+  `FEATURE_SLEEP=0`), built and flashed on the build host.
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB` on `/dev/cu.usbmodem1101`,
+  `USB VID:PID=239A:8029` (application running). Clean single-attempt flash, no double-tap.
+- **Measured:** whether the full path — RK900 read at 9600 → Cayenne LPP encode → OTAA
+  join → LoRaWAN uplink → live TTN application — delivers real weather data, with the
+  battery unwired (its fields expected null, not fabricated).
+- **Raw observation:** operator confirmed the wind and other weather readings arriving in
+  the TTN console live. (Agent serial capture was interrupted before a log excerpt could be
+  saved, so the primary evidence here is the operator's direct TTN observation, not an
+  agent-captured serial frame.) Battery fields absent as expected — the pack is not yet
+  wired, and `src/power.h` `Brownout::update()` holds transmit-allowed on invalid voltage
+  (default `m_engaged=false`), so a silent pack did not block the uplink.
+- **Caveat — why this image was not left running:** `stage3` runs with sleep off, and
+  `src/main.cpp` caps the awake between-cycle wait at 30 s (`kAwakeWaitCapSeconds`), so it
+  uplinks roughly every 30 s — fine for a bring-up watch, far over TTN fair-use for a
+  sustained run. Immediately after confirmation the node was reflashed to the field image
+  (`env:rak4631`, `FEATURE_SLEEP=1`, `kIntervalDefaultSeconds=3600`) → one uplink/hour.
+- **Verdict:** **PASS** — closes two of the `FIRMWARE_SPEC.md` §9 outstanding items (one
+  good RK900 frame decoded to real values; one TTN uplink) for the weather path. Battery
+  frame, interval downlink, and the H1–H8 hardening gates remain open. Status stays
+  `🚧 NOT YET DEPLOYED`.
+
 ### 2026-08-03 — RK900 full five-register frame captured at 9600; register map confirmed, Stage 1 read PASS
 
 - **Commit:** `998dc26e6aa70841f2f3d6716068124792da8b5d`, `busscan` image
