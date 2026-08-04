@@ -100,14 +100,17 @@ Newest first.
   produced no evidence about it whatsoever, in either direction. No read was attempted, so
   nothing here says the wiring, the A/B polarity, the `WB_IO2` switched rail, the 4800 8N1
   framing, the slave ID, or the register map are either right or wrong.
-- **Defect found, not fixed — [#27](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/27):**
+- **Defect found — [#27](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/27),
+  fixed in `420558e` (not yet exercised on hardware):**
   `pio run -t upload` exits **0** and prints `[SUCCESS]` even when `adafruit-nrfutil` fails
   and prints a traceback. The first attempt therefore reported `=== FLASH OK ===` and went on
   to capture serial from a board that had just been bricked into its bootloader. This is the
   worst shape a failure can take: it reports success, and the empty capture that follows looks
-  exactly like a silent sensor. `scripts/flash.sh` line 79 has the same bug — it branches on
-  the exit status of the same command, so it will also claim `=== FLASH OK ===` on a failed
-  DFU. Detection must grep the upload output for `Failed to upgrade target`.
+  exactly like a silent sensor. `scripts/flash.sh` branched on the exit status of that same
+  command and inherited the bug. It now scans the upload output for the DFU tool's own
+  failure strings and re-reads the USB product ID afterwards, refusing to report success
+  unless the board comes back as `8029`. That gate has been tested against this captured
+  output but **not yet against a real flash** — the board was in use elsewhere.
 - **Notes:** Two attempts, then stopped, per the bounded-retry rule. The second attempt is
   not a repeat of the first — it changed the port strategy from pinned to auto-detect and
   added real success detection — and it produced new evidence: the failure moved *earlier*,
