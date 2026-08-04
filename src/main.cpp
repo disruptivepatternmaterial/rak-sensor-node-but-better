@@ -92,7 +92,7 @@ bool heartbeat_due(uint32_t quiet_cycles)
 // CITE(datasheet): [CIT-RK900] the sensor is fixed at 4800 8N1, slave 0x01. The other
 //   combinations are swept only to establish that the line is silent everywhere, not
 //   because any of them is expected to answer.
-// CITE(sibling): forest-weather-machines LoRaWAN/docs/RAK2560_weather_station_settings.md @ efc0e3c
+// CITE(sibling): forest-weather-machines (local sibling) — LoRaWAN/docs/RAK2560_weather_station_settings.md
 //   — the deployed Sensor Hub reads this same sensor at 4800 8N1, slave 01, FC 0x03,
 //   holding registers 0x0000-0x0004. The constants under test are field-proven, so a
 //   silent line is not a wrong constant.
