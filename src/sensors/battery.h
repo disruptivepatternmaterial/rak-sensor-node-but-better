@@ -34,6 +34,11 @@ enum class BatteryResult : uint8_t {
     BadFrame,    // no delimiter, or a declared length that does not fit what arrived
     BadChecksum, // arrived intact-looking but does not verify — treated as no data
     NoRecords,   // frame verified but held nothing we understand
+    // Frame verified, records understood, and every one of them read zero. Distinct from
+    // NoRecords because it is a live pack answering with placeholders rather than a parsing
+    // failure — and distinct from Ok because 0.00 V from a pack that is powered by the cell
+    // it is measuring is not a measurement. Reported as no data; never encoded.
+    Unsampled,
 };
 
 const char *battery_result_name(BatteryResult r);
@@ -51,8 +56,17 @@ class Battery {
   private:
     void   send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type);
     void   send_boot();
-    void   send_query();
     size_t receive(uint8_t *buf, size_t cap);
+
+    // One "send SENDAT to `dest`, collect whatever comes back" round trip.
+    size_t query(uint8_t dest, uint8_t *buf, size_t cap);
+
+    // Completes the provisioning handshake. The pack announces itself unbidden with a
+    // PROVISION request carrying provId = 0xFF; the master's job is to answer that
+    // announcement with the same frame turned around and provId filled in. Rewrites `buf`
+    // in place — the response is the request with five bytes changed — and returns true
+    // when an announcement was found and answered.
+    bool provision(uint8_t *buf, size_t len);
 
     // Byte-level transport. The bit timing lives in beegee-tokyo/RAK-OneWireSerial, not
     // here — see the rationale at the top of battery.cpp. Deliberately not a member of this
@@ -67,7 +81,15 @@ class Battery {
     // node needs rescuing.
     BatteryResult parse(const uint8_t *buf, size_t len, BatteryReading &out);
 
-    uint8_t       m_pin;
-    uint8_t       m_seq  = 0; // per-request sequence, mirrors menu.seq in the reference
+    uint8_t m_pin;
+    uint8_t m_seq = 0; // per-request sequence, mirrors menu.seq in the reference
+
+    // The address the pack actually answers on. Starts at PID_UNKNOW (0xFF) because that is
+    // where an un-provisioned pack listens — confirmed on the bench, where a SENDAT to 0x01
+    // drew silence and the same frame to 0xFF drew a full reply. Upgraded to the assigned
+    // probe id once the provisioning handshake completes, and thereafter sticky, so the
+    // steady state costs one request per cycle.
+    uint8_t m_pid = 0xFF;
+
     BatteryResult m_last = BatteryResult::NoReply;
 };
