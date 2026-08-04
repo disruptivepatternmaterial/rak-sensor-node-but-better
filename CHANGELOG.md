@@ -34,6 +34,31 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
 
 ### Fixed
 
+- **`scripts/flash.sh` can no longer report a failed flash as `=== FLASH OK ===`.** Issue #27.
+  `pio run -t upload` exits 0 and prints `[SUCCESS]` even when `adafruit-nrfutil` dies with a
+  traceback, and the script branched on that exit status alone. On 2026-08-03 that produced a
+  green flash, a green harness, and then a serial capture from a board sitting in its
+  bootloader with nothing to run. The capture was 0 bytes — and a 0-byte log from a board
+  with no firmware is indistinguishable from a 0-byte log from a silent or miswired sensor,
+  so the obvious reading of it would have sent the next session after RS-485 polarity on
+  hardware that was never executing a single instruction.
+
+  Two independent checks now decide the result. The upload output is scanned for the DFU
+  tool's own failure strings (`Failed to upgrade target`, `Timed out waiting for
+  acknowledgement`, `No data received on serial port`, `Serial port could not be opened`, a
+  Python traceback), any of which fails the flash whatever the exit status says. Then the
+  board's USB product ID is re-read over a bounded 30 s settle window: `8029` is a running
+  application, `0029` and `002A` are the bootloader. Anything but `8029` fails, and the
+  failure message says outright that the board has no valid application, that a capture
+  taken now is not evidence, and that the fix is a double-tap of RESET on the RAK19007.
+  The PID table is now written down in `docs/FIRST_FLASH.md`, having been rediscovered
+  twice; `scripts/remote.sh usbpid` and `devices` report it.
+- **`scripts/build.sh` refuses an `upload` target** rather than passing it to the same
+  untrustworthy exit status. Uploading goes through `flash.sh`, which verifies the result.
+- **`scripts/remote.sh sync` no longer reads an unreachable build host as a clean tree.** The
+  dirty-tree check discarded its own exit status with `|| true`, so an SSH failure and an
+  empty `git status` were the same answer — the same class of defect as #27, a check that
+  could not run reporting as a check that passed.
 - **The node now transmits proof of life when both sensors are silent.** It previously skipped
   joining entirely in that case, so a station installed with one bad wire would have sat in the
   woods transmitting nothing — indistinguishable from a dead node, a flat pack, or a dead

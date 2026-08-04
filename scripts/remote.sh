@@ -14,6 +14,7 @@
 #   scripts/remote.sh run '<command>'    run in the remote repo under a login shell
 #   scripts/remote.sh sha                remote HEAD
 #   scripts/remote.sh devices            USB serial devices on the build host
+#   scripts/remote.sh usbpid             RAK4631 USB product ID (8029 = app, 0029/002A = DFU)
 
 set -euo pipefail
 
@@ -54,6 +55,21 @@ cmd_sha() { rrepo 'git rev-parse HEAD'; }
 cmd_devices() {
   info "USB serial devices on $BUILD_HOST_NAME"
   rsh 'ls /dev/cu.* 2>/dev/null || echo "  none"'
+  echo "${DIM}-- hardware IDs --${NC}"
+  rsh 'pio device list --serial 2>/dev/null || echo "  pio device list unavailable"'
+  echo "${DIM}   239A:8029 app · 239A:0029/002A bootloader, no app (docs/FIRST_FLASH.md)${NC}"
+}
+
+# The RAK4631's USB product ID is the only thing that separates a board running an
+# application from one sitting in DFU with nothing to run -- both print the same
+# reassuring nothing on a serial capture. Prints the 4-hex PID, or nothing when no RAK is
+# on the bus. Enumeration only: this never opens the port. Table: docs/FIRST_FLASH.md.
+cmd_usbpid() {
+  local out
+  out=$(rsh 'pio device list --serial 2>/dev/null' || true)
+  printf '%s\n' "$out" \
+    | grep -oE 'VID:PID=239A:[0-9A-Fa-f]{4}' \
+    | head -1 | cut -d: -f3 | tr '[:lower:]' '[:upper:]' || true
 }
 
 # Git is the ONLY transport between machines. Never scp/rsync source across --
@@ -81,9 +97,14 @@ cmd_sync() {
     || die "relay push failed -- run scripts/push.sh directly to see why."
 
   # The user sometimes works directly on the build host or a laptop. Never clobber
-  # work that exists only over there.
-  if [[ -n "$(rrepo 'git status --porcelain' || true)" ]]; then
-    rrepo 'git status --short' || true
+  # work that exists only over there. `|| true` on the status call would turn an
+  # unreachable host into "tree is clean", which is the same class of bug as issue #27 --
+  # a check that cannot run must not read as a check that passed.
+  local remote_status rc=0
+  remote_status=$(rrepo 'git status --porcelain') || rc=$?
+  [[ "$rc" -eq 0 ]] || die "could not read the build host's git status (exit ${rc}). Refusing to sync blind."
+  if [[ -n "$remote_status" ]]; then
+    printf '%s\n' "$remote_status" | sed 's/^/       /'
     die "build host tree is dirty. Someone was working there -- resolve it by hand, do not discard it."
   fi
 
@@ -111,5 +132,6 @@ case "${1:-}" in
   run)     shift; cmd_run "$@" ;;
   sha)     shift; cmd_sha "$@" ;;
   devices) shift; cmd_devices "$@" ;;
+  usbpid)  shift; cmd_usbpid "$@" ;;
   *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

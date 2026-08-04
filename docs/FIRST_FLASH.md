@@ -29,6 +29,43 @@ was not observed.
       [`HARDWARE.md`](HARDWARE.md) — and note that the pinout is still to be confirmed with
       a meter, because the two sources disagree about it (issue #6).
 
+## Is the board actually running your firmware?
+
+Ask this before reading anything into a serial capture. The USB product ID answers it, and
+nothing else reliably does — a DFU failure and a clean flash print much the same thing, and
+`pio run -t upload` exits 0 either way (issue #27).
+
+| VID:PID | Description | What it means |
+|---|---|---|
+| `239A:8029` | `WisCore RAK4631 Board` | **Application running.** This is the only ID that means the flash landed. |
+| `239A:0029` | `WisBlock RAK4631` | UF2 bootloader — **no valid application**. Double-tap RESET put it here, or a DFU failed. |
+| `239A:002A` | `WisBlock RAK4631` | Serial-only DFU bootloader — **no valid application**. Seen 2026-07-31 after an interrupted flash. |
+| `239A:802A` | — | Application with a CDC-only descriptor. Not what this project builds. |
+
+`8029` is the application PID the RAK Arduino board definition builds against; `0029` and
+`002A` are the Adafruit nRF52 bootloader's UF2 and CDC-only IDs
+([CITE(datasheet): RAK-nRF52-Arduino `boards.txt`](https://github.com/RAKWireless/RAK-nRF52-Arduino/blob/master/boards.txt),
+[CITE(prior-art): Adafruit\_nRF52\_Bootloader `board.h`](https://github.com/adafruit/Adafruit_nRF52_Bootloader/blob/master/src/boards/feather_nrf52840_express/board.h)).
+
+Read it on the build host:
+
+```
+./scripts/remote.sh usbpid      # prints just the PID
+./scripts/remote.sh devices     # ports plus full hardware IDs
+```
+
+**The trap this exists to close.** On 2026-08-03 a DFU failed, PlatformIO printed
+`[SUCCESS]`, the harness printed `=== FLASH OK ===`, and the serial capture that followed
+was 0 bytes — from a board in its bootloader with nothing to run. A 0-byte log from a board
+with no firmware is indistinguishable from a 0-byte log from a silent or miswired sensor,
+and the obvious reading of it costs the next session an afternoon on RS-485 polarity that
+was never the problem. `flash.sh` now checks the PID after every upload and refuses to
+report success without `8029`. Check it by hand before trusting any capture you did not
+watch land. See [`EVIDENCE.md`](EVIDENCE.md).
+
+**Recovery when the PID is `0029` or `002A`:** double-tap RESET on the RAK19007 to re-enter
+DFU cleanly, then re-run `flash.sh`. Nothing else is needed and nothing is lost.
+
 ## Stage 1 — wind sensor only
 
 Radio off, battery reader off, no sleep. Powered from USB, printing to the serial monitor.

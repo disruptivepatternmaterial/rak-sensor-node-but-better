@@ -16,6 +16,18 @@ cd "$(dirname "$0")/.."
 
 BLUE=$'\033[34m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; DIM=$'\033[2m'; NC=$'\033[0m'
 
+# `pio run -t upload` exits 0 even when the DFU tool fails (issue #27), so an upload run
+# through here would report BUILD OK on a board it just bricked. flash.sh is the only path
+# allowed to upload -- it scans the DFU output and re-checks the USB product ID afterwards.
+for arg in "$@"; do
+  case "$arg" in
+    upload|*=upload)
+      echo "${YELLOW}build.sh does not upload.${NC} Use scripts/flash.sh --" \
+           "it verifies the flash actually landed (issue #27)." >&2
+      exit 2 ;;
+  esac
+done
+
 echo "${BLUE}== 1/3 preflight ==${NC}"
 scripts/preflight.sh
 
