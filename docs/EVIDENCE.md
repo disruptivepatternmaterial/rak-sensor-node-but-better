@@ -57,6 +57,33 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-03 — RK900 full-frame diagnostic flash did not survive DFU; no sensor result
+
+- **Commit:** `f38480bca5460a409faada2f36ccc40672b6d19f`, `busscan` image. This was the
+  first attempt to request FC `0x03`, slave `0x01`, registers `0x0000`–`0x0004` at the
+  previously observed 9600 baud and capture the raw reply.
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB` on
+  `/dev/cu.usbmodem1101`.
+- **Measured:** whether the diagnostic image could be installed and remain a valid
+  application long enough to capture the full five-register response.
+- **Raw observation:** the first upload reported `=== FLASH OK ===` and briefly enumerated
+  as application PID `239A:8029`, but an attempted 115200-baud capture received EOF and the
+  board subsequently enumerated as `239A:0029` (UF2 bootloader). A recovery upload then
+  failed independently:
+  ```
+  Failed to upgrade target. Error is: No data received on serial port. Not able to proceed.
+  Timed out waiting for acknowledgement from device.
+  ...
+  USB 239A:0029 -- UF2 bootloader -- NO valid application
+  ```
+- **Verdict:** **INCONCLUSIVE — no RK900 frame captured.** The board has no valid
+  application, so an empty serial log is not sensor evidence. This reproduces the physical
+  recovery condition documented by closed issue #27; the fixed `flash.sh` gate correctly
+  reported `=== FLASH FAILED ===` rather than falsely accepting the upload.
+- **Next physical action:** operator double-taps RESET on the RAK19007 to re-enter DFU
+  cleanly, then re-run `scripts/flash.sh --yes --env busscan`. Do not capture serial or
+  interpret sensor silence while the USB PID is `239A:0029`.
+
 ### 2026-08-03 — The RK900 answers, and it is at 9600 baud, not the 4800 the firmware asks at
 
 - **Commit:** `6b70416` (the `busscan` image running on the board). Build host `HEAD` has
