@@ -54,9 +54,37 @@ class Battery {
     BatteryResult last_result() const { return m_last; }
 
   private:
-    void   send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type);
+    // `payload` is the SensorHub payload behind the six-byte header: empty for BOOT and
+    // SENDAT, one sid byte for PARAMGET, a 43-byte parameter block for PARAMSET. Both the
+    // transport length and the header's payload_length are derived from it, because the pack
+    // cross-checks the two.
+    void   send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type,
+                      const uint8_t *payload = nullptr, size_t payload_len = 0);
     void   send_boot();
     size_t receive(uint8_t *buf, size_t cap);
+
+    // Hex-dump under a label, for the paths where the decoded verdict is not enough evidence.
+    void dump(const char *what, const uint8_t *buf, size_t len);
+
+    // BOOT, listen, repeat — bounded. The pack announces on its own schedule, so a single
+    // listening window is a coin flip; this makes provisioning reliable without ever blocking
+    // indefinitely. Returns true when an announcement was answered this cycle.
+    bool acquire_pid(uint8_t *buf, size_t cap);
+
+    // Read one sensor's sampling rule and interval. Read-only: this is how the driver finds
+    // out whether the pack's sensors are armed (RULE_PERIODIC) or idle (RULE_DISABLE) without
+    // changing anything.
+    bool param_get(uint8_t sid, uint32_t &intv, uint16_t &rule, uint8_t *buf, size_t cap);
+
+    // Switch one sensor to periodic sampling at `intv`, leaving thresholds and tag zeroed as
+    // the reference does. The interval is the one the pack itself reported — the protocol
+    // never states its unit, so inventing one would be an unsourced constant.
+    bool param_set(uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap);
+
+    // Best-effort pass over every known sensor id. Cannot make a reading worse: a refused or
+    // ignored request leaves the pack as it was, and the caller re-reads and re-applies the
+    // all-zero test, so a pack that will not sample still yields nulls.
+    bool enable_sampling(uint8_t *buf, size_t cap);
 
     // One "send SENDAT to `dest`, collect whatever comes back" round trip.
     size_t query(uint8_t dest, uint8_t *buf, size_t cap);
@@ -90,6 +118,16 @@ class Battery {
     // probe id once the provisioning handshake completes, and thereafter sticky, so the
     // steady state costs one request per cycle.
     uint8_t m_pid = 0xFF;
+
+    // Sensor ids the pack announced, learned from the provisioning announcement's descriptor
+    // tail. Empty until an announcement is parsed, in which case the enable pass falls back to
+    // the four ids the pack's own data records carry.
+    uint8_t m_sids[8]     = {0};
+    uint8_t m_sid_count   = 0;
+
+    // Wake cycles that have spent time trying to enable sampling. Bounded so a pack that
+    // ignores the request stops costing a parameter exchange on every cycle for months.
+    uint8_t m_enable_attempts = 0;
 
     BatteryResult m_last = BatteryResult::NoReply;
 };

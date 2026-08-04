@@ -284,6 +284,23 @@ constexpr uint8_t kOwBroadcast   = 0xFF; // CITE(prior-art): [CIT-ONEWIRE-SERIAL
 //   first byte has arrived; the generous first-byte allowance is what covers probe wake.
 constexpr uint32_t kOwCensusMs  = 2000;
 constexpr uint32_t kOwPassiveMs = 3000;
+
+// Capture depth. 64 was silently the most consequential number in this scanner: the pack's
+// provisioning announcement is a 92-byte frame whose *tail* carries the per-sensor sampling
+// rules, so a 64-byte buffer captured the identity fields and threw away the only bytes that
+// say whether the pack is sampling at all. Every earlier capture stopped 3 bytes short of the
+// sensor count and 4 short of the first rule value.
+//
+// 0x100 is BUFF_SIZE in the reference master — the largest frame the protocol handles — and
+// also comfortably holds the data reply and an announcement arriving back to back.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 src/onewire_master_protocol.c `#define
+//   BUFF_SIZE 0x100`; onewire_master_protocol.h SNHub_Api_Provision_t places snsr_num after
+//   sn[18] + provId + reserved1[7] + model_name[20] + reserved2[4], i.e. 54 bytes into the
+//   provision payload, followed by 4-byte SNSRNODE { sid, ipso, U16 rule } descriptors.
+// CITE(bench): docs/EVIDENCE.md — the announcement captured on 3d3425d declares hub
+//   payload_length 0x50 (80) with the provision payload starting at frame index 12, putting
+//   snsr_num at index 66 and the rule fields at 69, 73, 77, 81, 85 and 89 — all beyond 64.
+constexpr size_t kOwCaptureBytes = 0x100;
 constexpr uint32_t kOwBootMs    = 300; // CITE(prior-art): [CIT-MESHTASTIC-9154] as above
 constexpr uint32_t kOwSendatMs  = 500; // CITE(prior-art): [CIT-MESHTASTIC-9154] as above
 
@@ -420,8 +437,8 @@ uint32_t ow_passive(long baud)
     link.begin(baud);
     link.flush();
 
-    uint8_t  got[64];
-    uint32_t n = 0;
+    static uint8_t got[kOwCaptureBytes];
+    uint32_t       n = 0;
 
     const uint32_t start = millis();
     while ((millis() - start) < kOwPassiveMs) {
@@ -507,8 +524,8 @@ uint32_t ow_request(long baud, const char *label, uint8_t dest, uint8_t hub_type
     }
     delay(2); // let the probe turn the line around
 
-    uint8_t  got[64];
-    uint32_t n = 0;
+    static uint8_t got[kOwCaptureBytes];
+    uint32_t       n = 0;
 
     const uint32_t start = millis();
     while ((millis() - start) < listen_ms) {

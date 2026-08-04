@@ -49,16 +49,75 @@ constexpr uint8_t kBroadcastId = 0xFF; // PID_UNKNOW — where an un-provisioned
 constexpr uint8_t kRui3TypeSensorHub = 0x02; // RUI3API_TYPE_SENSORHUB
 constexpr uint8_t kRui3FlagReq       = 0x00; // RUI3API_FLG_REQ
 constexpr uint8_t kRui3FlagRsp       = 0x01; // RUI3API_FLG_RSP
-// SHORT_SWAP(sizeof(SNHub_Api_t)=6) in wire order (low byte, then high byte). Both the
-// BOOT and SENDAT requests carry a zero-length payload, so the length is 6 for both.
-constexpr uint8_t kLenLo = 0x00;
-constexpr uint8_t kLenHi = 0x06;
+// The RUI3 length field is no longer a constant. BOOT and SENDAT carry a zero-length
+// payload and so still transmit SHORT_SWAP(6) = 0x00 0x06, but PARAMGET adds a sid byte and
+// PARAMSET adds a 43-byte parameter block, so send_frame() derives it — see there.
 
 // SensorHub frame fields.
 constexpr uint8_t kHubTypeProvision = 0x01; // SNHUB_TYPE_PROVISION
+constexpr uint8_t kHubTypeParamSet  = 0x02; // SNHUB_TYPE_PARAMSET
 constexpr uint8_t kHubTypeSendData  = 0x03; // SNHUB_TYPE_SENDAT
+constexpr uint8_t kHubTypeParamGet  = 0x05; // SNHUB_TYPE_PARAMGET
 constexpr uint8_t kPldBoot          = 0x02; // PLD_PROVI_TYPE_BOOT
 constexpr uint8_t kPayloadSendData  = 0x02; // PLD_SDATA_TPYE_SENDAT
+
+// The per-sensor sampling rule, which is the thing this revision is here to reach.
+//
+// A provisioned probe still needs each of its sensors switched from RULE_DISABLE to
+// RULE_PERIODIC before it samples anything; until then it answers a SENDAT with a
+// well-formed record set full of placeholder zeros, which is precisely the production
+// symptom. The reference exposes exactly one call for this — set.param(pid, sid, enable,
+// intv) — and it is addressed per *sensor id*, not per probe: the sid goes in payload[0]
+// and one request carries one sid.
+//
+// PLD_PARMGSET_TYPE_SNSR_UPDATE is the only payload type the reference's parameter command
+// will emit; every other member of PLD_PARMGSET_TYPE_E falls through to `return RET_ERROR`,
+// so RULE (0x03) — the one that reads like the obvious choice — is not actually reachable
+// and must not be used.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h —
+//   SNHUB_TYPE_PARAMSET = 2 and SNHUB_TYPE_PARAMGET = 5 in SNHUBAPI_TYPE_E;
+//   PLD_PARMGSET_TYPE_E { PRB_INTV = 0x1, SNSR_INTV, RULE, SNSR_HTHR, SNSR_LTHR,
+//   PRB_TAGID, PRB_TAGEN, PRB_UPDATE, SNSR_UPDATE = 0x9, CONF_UPDATE };
+//   RULE_DISABLE 0x00 and RULE_PERIODIC 0x08.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   api_set_snsr_param(pid, sid, enb, intv): `menu.intv = intv; menu.rule = (enb == 0) ?
+//   RULE_DISABLE : RULE_PERIODIC;` then snhub_paramget_command(pid, sid, SNHUB_GS_SET,
+//   PLD_PARMGSET_TYPE_SNSR_UPDATE). That command sets hub_api->type = SNHUB_TYPE_PARAMSET,
+//   payload_length = sizeof(SNHub_Api_Param_Snsr_t), payload[0] = sid, and only then fills
+//   paramset->intv / paramset->rule — so the sid byte and the struct's `sid` field are the
+//   same byte, and the addressing is per sensor.
+constexpr uint8_t  kPldParamSnsrUpdate = 0x09; // PLD_PARMGSET_TYPE_SNSR_UPDATE
+constexpr uint16_t kRuleDisable        = 0x0000;
+constexpr uint16_t kRulePeriodic       = 0x0008;
+
+// SNHub_Api_Param_Snsr_t, ATT_PACKED: sid(1) intv(4) rule(2) thr_above(10) thr_below(10)
+// tag(16) = 43. The widths and order are the struct's, not a guess, and the total is what
+// the reference puts in payload_length — so getting it wrong fails the pack's own
+// verify_snhublen() and draws silence rather than a diagnosable error.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
+//   SNHub_Api_Param_Snsr_t { U8 sid; U32 intv; U16 rule; U8 thr_above[10];
+//   U8 thr_below[10]; U8 tag[16]; } ATT_PACKED; onewire_master_protocol.c
+//   verify_snhublen() requires rui3_len == payload_length + sizeof(SNHub_Api_t).
+constexpr size_t kParamSid   = 0;
+constexpr size_t kParamIntv  = 1;
+constexpr size_t kParamRule  = 5;
+constexpr size_t kParamBytes = 43;
+
+// The interval the rule runs at. Deliberately taken from the pack itself rather than
+// invented: the reference documents `intv` only as "rule to be applied" and never states a
+// unit, so a number chosen here would be an unsourced constant of exactly the kind that
+// bricks an unreachable node. The sequence is therefore PARAMGET the sensor, keep whatever
+// interval it reports, and PARAMSET the same interval back with only the rule changed.
+//
+// kParamIntvFallback is used only when the PARAMGET draws no reply, so the enable can still
+// be attempted rather than abandoned. 60 is the smallest round value that cannot be a
+// runaway sampler under any plausible unit — 60 seconds is sensible, 60 minutes is
+// sensible, 60 ms is not something a battery gauge would honour.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_api.h — the API is
+//   `void (*param)(U8 pid, U8 sid, U8 enable, U32 intv)` with the doxygen comment
+//   "@param intv rule to be applied"; no unit is stated anywhere in the library.
+constexpr uint32_t kParamIntvFallback = 60;
 
 // The pack's self-announcement is a PROVISION request of payload type VER3 — and VER3 is
 // the *only* provision payload type the reference master accepts. VER1, VER2 and BOOT all
@@ -83,6 +142,38 @@ constexpr uint8_t kPldProvVer3 = 0x03; // PLD_PROVI_TYPE_VER3
 //   index 34 (= payload + 6 + 22, the provId slot) and `52 41 4B 32 35 36 30 2D 69 6F`
 //   ("RAK2560-io") at index 42, which is offset 30. The layout is not inferred, it is seen.
 constexpr size_t kProvIdOffset = 22;
+
+// The rest of that struct, which is where the sampling rules live. Continuing the same
+// walk: provId(1) at 22 + reserved1(7) = 30 for model_name, + model_name(20) = 50 for
+// reserved2, + reserved2(4) = 54 for snsr_num, and the descriptor array begins at 55. Each
+// descriptor is SNSRNODE { U8 sid; U8 ipso; U16 rule; } = 4 bytes.
+//
+// In the captured announcement the provision payload starts at frame index 12, so snsr_num
+// lands at frame index 66 and the first descriptor at 67 — past the 64 bytes the previous
+// scanner buffer retained, which is exactly why the rule values have never been seen. The
+// declared payload leaves 79 bytes for a 55-byte struct, i.e. six descriptors, so the rule
+// fields sit at frame indices 69, 73, 77, 81, 85 and 89.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
+//   SNHub_Api_Provision_t { hw_version, sw_version[3], SERIALNUM sn, provId, reserved1[7],
+//   MDLNAME model_name, reserved2[4], snsr_num, SNSRNODE snsr_type[] } ATT_PACKED, with
+//   SERIALNUM 18 bytes, MDLNAME 20 bytes and SNSRNODE { sid, ipso, U16 rule }.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   snhub_provision_req_program() reads `record[aid].snsrnum = hub_api_prov->snsr_num` then
+//   `record[aid].snsrlist[i] = hub_api_prov->snsr_type[i].sid` — the announcement is the
+//   only place the master ever learns which sensor ids a probe carries.
+// CITE(bench): docs/EVIDENCE.md — announcement on 3d3425d declares hub payload_length 0x50
+//   with model_name at frame index 42, fixing the provision payload base at index 12 and
+//   therefore snsr_num at index 66. The tail was truncated by the scanner, not absent.
+constexpr size_t kProvSnsrNumOffset = 54;
+constexpr size_t kProvSnsrOffset    = 55;
+constexpr size_t kSnsrNodeBytes     = 4;
+
+// Sensor ids worth enabling: the four the pack reports in its SENDAT records (0x15..0x18).
+// Sized rather than unbounded because the array is only ever a work list for the enable
+// pass, and a probe that announces more sensors than this simply gets the first few
+// enabled — which is a degraded outcome, not a buffer overrun.
+constexpr size_t kMaxSensors = 8;
 
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] IPSO codes, already reduced by the 3200 offset.
 //   These are the same numbers the payload encoder uses on the LoRaWAN side, because RAK
@@ -140,7 +231,37 @@ SoftwareHalfSerial &bus(uint8_t pin)
 
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
-constexpr size_t   kRxCapacity         = 96;
+
+// One buffer, used by every phase in turn, and sized like the reference's.
+//
+// 96 was too small in two separate ways. The bench capture shows a 28-byte SENDAT reply and
+// a 92-byte announcement arriving concatenated inside one read, which is 120 bytes — so a
+// 96-byte buffer truncates the announcement that the frame scanner then has to skip, and the
+// truncation itself looked like a checksum failure. And the announcement is the one frame
+// whose *tail* matters now: the sampling rules live in its last 24 bytes, so anything that
+// clips it clips the evidence.
+//
+// 0x100 is not a round number picked for comfort; it is BUFF_SIZE in the reference master,
+// which is the largest frame the protocol is written to handle.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c `#define
+//   BUFF_SIZE 0x100`, used for both dataBuff[] and every per-command pktBuff[].
+// CITE(bench): docs/EVIDENCE.md — SENDAT sweep on 3d3425d returned `FF 7E 00 15 ...`
+//   (28 bytes) immediately followed by `FF 7E 00 55 ...` (92 bytes) in a single read.
+constexpr size_t kRxCapacity = 0x100;
+
+// How many times to prompt for an announcement before giving up on provisioning for this
+// cycle. Each attempt costs one BOOT plus at most the first-byte window, so three bounds the
+// phase at roughly 1.5 s — comfortably inside the 120 s watchdog and cheap next to a wasted
+// cycle. Three rather than one because the pack announces on its own schedule, and rather
+// than ten because a pack that has not spoken in three windows is not going to.
+constexpr uint8_t kProvAttempts = 3;
+
+// How many wake cycles may spend time trying to enable sampling before the driver stops
+// asking. A pack that ignores two full enable passes is not going to answer the third, and a
+// node that runs for months cannot afford to pay for that discovery every cycle — the reads
+// still happen, they just stop being preceded by a futile parameter exchange. Two rather than
+// one so a single unlucky cycle does not permanently give up.
+constexpr uint8_t kEnableAttempts = 2;
 
 // SensorHub frame header (inside the RUI3 payload) before the first record: dest, source,
 // sequence, hub-type, payload-length, payload-type.
@@ -152,7 +273,7 @@ constexpr size_t kHubHeaderBytes = 6;
 // truncated announcement cannot be turned around.
 // CITE(bench): docs/EVIDENCE.md — announcement on 3d3425d declares length 0x0055 = 85,
 //   giving delimiter + 5 header + 85 + 1 checksum = 92 bytes from the wake byte.
-constexpr size_t kProvCapacity = 160;
+constexpr size_t kProvCapacity = kRxCapacity;
 
 // cal_chksum() over a frame already in a buffer: popcount of the RUI3 type byte, plus the
 // RUI3 flag byte, plus every byte the length field covers. Shared by the verify path and the
@@ -270,15 +391,39 @@ void Battery::tx_byte(uint8_t b)
     bus(m_pin).write(b);
 }
 
-void Battery::send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type)
+// Compose and transmit one request. `payload` is the SensorHub payload that follows the
+// six-byte header — empty for BOOT and SENDAT, one sid byte for PARAMGET, a 43-byte
+// SNHub_Api_Param_Snsr_t for PARAMSET.
+//
+// The RUI3 length field covers the SensorHub header *and* that payload, and the pack checks
+// the two against each other: verify_snhublen() requires the RUI3 length to equal
+// payload_length + 6, so the header's payload_length byte and the transport length cannot be
+// filled in independently. Both are derived from one number here for that reason.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   snhub_paramget_command(): `pktLen = sizeof(SNHub_Api_t); pldLen += ...;
+//   pktLen += pldLen; hub_api->payload_length = pldLen;` then
+//   `rui3_api->length.value = SHORT_SWAP(pktLen)` — one length, two places.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   verify_snhublen() accepts only rui3_len == payload_length + sizeof(SNHub_Api_t) (or that
+//   minus one, for older firmware that counted the checksum byte).
+void Battery::send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type,
+                         const uint8_t *payload, size_t payload_len)
 {
-    // SensorHub frame: dest, source, sequence, hub-type, payload-length(0), payload-type.
+    // SensorHub frame: dest, source, sequence, hub-type, payload-length, payload-type.
     const uint8_t seq    = ++m_seq;
-    const uint8_t hub[6] = {dest, kMasterId, seq, hub_type, 0x00, payload_type};
+    const uint8_t hub[6] = {dest,     kMasterId,            seq,
+                            hub_type, (uint8_t)payload_len, payload_type};
+
+    // SHORT_SWAP(pktLen) puts the high byte on the wire first, which is why the verified
+    // zero-payload case transmits 0x00 then 0x06 for a total of six.
+    const size_t  total  = sizeof(hub) + payload_len;
+    const uint8_t len_hi = (uint8_t)(total >> 8);
+    const uint8_t len_lo = (uint8_t)(total & 0xFF);
 
     // Checksum is NOT an XOR. It is the sum of the set-bit counts (popcount) of the RUI3
-    // type byte, the RUI3 flag byte, and every byte the length field covers (the six
-    // SensorHub bytes), accumulated into a uint8_t.
+    // type byte, the RUI3 flag byte, and every byte the length field covers (the SensorHub
+    // header plus the payload), accumulated into a uint8_t.
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] onewire_master_protocol.c cal_chksum():
     //   chsum = popcount(type) + popcount(flag) + sum popcount(payload[0..len-1]).
     uint8_t checksum = (uint8_t)(__builtin_popcount(kRui3TypeSensorHub) +
@@ -286,17 +431,23 @@ void Battery::send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type)
     for (size_t i = 0; i < sizeof(hub); i++) {
         checksum += __builtin_popcount(hub[i]);
     }
+    for (size_t i = 0; i < payload_len; i++) {
+        checksum += __builtin_popcount(payload[i]);
+    }
 
     for (uint8_t i = 0; i < kWakeCount; i++) {
         tx_byte(kWakeByte);
     }
     tx_byte(kDelimiter);
-    tx_byte(kLenLo);
-    tx_byte(kLenHi);
+    tx_byte(len_hi);
+    tx_byte(len_lo);
     tx_byte(kRui3TypeSensorHub);
     tx_byte(kRui3FlagReq);
     for (size_t i = 0; i < sizeof(hub); i++) {
         tx_byte(hub[i]);
+    }
+    for (size_t i = 0; i < payload_len; i++) {
+        tx_byte(payload[i]);
     }
     tx_byte(checksum);
 }
@@ -383,6 +534,39 @@ bool Battery::provision(uint8_t *buf, size_t len)
             continue; // too short to hold a provId — not a frame we can answer
         }
 
+        // Read the sensor descriptors out of the tail *before* the frame is mutated, and log
+        // them. This is the only place the pack ever states which sensors it carries and what
+        // rule each one is running under, and it is the answer to the question the zeros pose:
+        // a rule of 0x00 (RULE_DISABLE) means provisioned-but-not-sampling, a rule of 0x08
+        // (RULE_PERIODIC) means the sensors are armed and the zeros come from somewhere else.
+        // Logged unconditionally rather than only on failure, because by the time a reading
+        // looks wrong the announcement that would explain it is long gone.
+        m_sid_count = 0;
+        if (prov + kProvSnsrNumOffset < f.cksum) {
+            const uint8_t announced = buf[prov + kProvSnsrNumOffset];
+            LOGF("   battery : probe 0x%02X announces %u sensor(s)\n", f.source, announced);
+            for (uint8_t s = 0; s < announced; s++) {
+                const size_t at = prov + kProvSnsrOffset + (size_t)s * kSnsrNodeBytes;
+                if (at + kSnsrNodeBytes > f.cksum) {
+                    LOGF("   battery : descriptor %u truncated at %u bytes — tail lost\n", s,
+                         (unsigned)len);
+                    break;
+                }
+                // SNSRNODE.rule is a U16 in a packed struct on a little-endian core, so the
+                // low byte leads. Both bytes are printed as well as the decoded value so a
+                // wrong assumption here is visible in the capture rather than silent.
+                const uint16_t rule = (uint16_t)(buf[at + 2] | ((uint16_t)buf[at + 3] << 8));
+                LOGF("   battery :   sid 0x%02X ipso %u rule 0x%04X (%02X %02X) %s\n",
+                     buf[at + 0], buf[at + 1], rule, buf[at + 2], buf[at + 3],
+                     rule == kRulePeriodic  ? "periodic"
+                     : rule == kRuleDisable ? "DISABLED"
+                                            : "?");
+                if (m_sid_count < kMaxSensors) {
+                    m_sids[m_sid_count++] = buf[at + 0];
+                }
+            }
+        }
+
         buf[f.delim + 4]          = kRui3FlagRsp; // request becomes response
         buf[f.payload + 0]        = f.source;     // dest := the probe that announced
         buf[f.payload + 1]        = kMasterId;    // source := us
@@ -400,6 +584,225 @@ bool Battery::provision(uint8_t *buf, size_t len)
         return true;
     }
     return false;
+}
+
+// Hex-dump a buffer under a label. Every failure path in this driver ends in "the next bench
+// run has to be able to answer this", and a decoded verdict without the bytes behind it
+// cannot be re-examined once the console has scrolled.
+void Battery::dump(const char *what, const uint8_t *buf, size_t len)
+{
+    LOGF("   battery : %s", what);
+    for (size_t i = 0; i < len; i++) {
+        LOGF(" %02X", buf[i]);
+    }
+    LOGLN("");
+}
+
+// Complete the provisioning handshake, retrying rather than hoping.
+//
+// The production capture that motivated this shows no `provisioned probe` line at all: the
+// single 500 ms listen after BOOT did not overlap the pack's announcement, so the handshake
+// silently did not happen and the SENDAT that followed went to an unprovisioned probe. That
+// is not a rare misfortune to be tolerated — it is the difference between a reading and no
+// reading, decided by timing luck.
+//
+// The reference master never has this problem because it never stops listening: Meshtastic
+// runs the one-wire handler on a 50 ms periodic forever and requests data only once the
+// ADD_PID event has fired. A driver that wakes, transacts and sleeps cannot copy that, so it
+// buys the equivalent with bounded retries — BOOT, listen, and if nothing answerable arrived,
+// BOOT again — which converts "did the announcement land in our window" from a coin flip into
+// a near certainty without ever blocking indefinitely.
+//
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+//   onewireHandle() returns 50 (ms) to reschedule itself indefinitely, and `if (provision !=
+//   0) { RakSNHub_Protocl_API.get.data(provision); }` gates the data request on provisioning
+//   having completed. Data is never requested from an unprovisioned probe.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_init() sends
+//   PLD_PROVI_TYPE_BOOT to PID_UNKNOW and nothing awaits a reply; the announcement arrives
+//   later and independently, which is what makes repeating BOOT safe.
+// CITE(bench): docs/EVIDENCE.md — stage2 capture on 7f65384 logged a valid 28-byte SENDAT
+//   reply with no preceding `provisioned probe` line, i.e. the announcement was missed and
+//   the request went out to an unprovisioned pack.
+bool Battery::acquire_pid(uint8_t *buf, size_t cap)
+{
+    for (uint8_t attempt = 0; attempt < kProvAttempts; attempt++) {
+        bus(m_pin).flush();
+        send_boot();
+        delay(2); // let the probe turn the line around
+
+        const size_t n = receive(buf, cap);
+        if (n > 0 && provision(buf, n)) {
+            m_pid = kProbeId;
+            delay(50); // the reference's tick interval — the only timing guidance available
+            return true;
+        }
+        if (n > 0) {
+            // Bytes arrived but held no answerable announcement. Worth the dump: it separates
+            // "the pack is quiet" from "the pack said something this parser rejected".
+            dump("prov?", buf, n);
+        }
+    }
+    return false;
+}
+
+// Read one sensor's sampling parameters.
+//
+// Read-only, and therefore the safest possible way to test the hypothesis behind this whole
+// change: it reports the rule the pack is actually running without altering anything. It also
+// supplies the interval to echo back on the way in, so the enable never has to invent one.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   snhub_paramget_command() with SNHUB_GS_GET sets hub_api->type = SNHUB_TYPE_PARAMGET,
+//   payload_length = 1 and payload[0] = sid; protocol_list[SNHUB_TYPE_PARAMGET].rsp =
+//   snhub_paramget_rsp_program, which casts the response payload to SNHub_Api_Param_Snsr_t
+//   and reads paramset->sid, paramset->intv and paramset->rule, deriving
+//   `enable = (paramset->rule == RULE_PERIODIC)`.
+bool Battery::param_get(uint8_t sid, uint32_t &intv, uint16_t &rule, uint8_t *buf, size_t cap)
+{
+    const uint8_t payload[1] = {sid};
+
+    bus(m_pin).flush();
+    send_frame(m_pid, kHubTypeParamGet, kPldParamSnsrUpdate, payload, sizeof(payload));
+    delay(2);
+
+    const size_t n = receive(buf, cap);
+    if (n == 0) {
+        LOGF("   battery : paramget sid 0x%02X — no reply\n", sid);
+        return false;
+    }
+
+    SnHubFrame f;
+    bool       bad_cksum = false;
+    size_t     from      = 0;
+    while (next_frame(buf, n, from, f, bad_cksum)) {
+        from = f.delim + 1;
+        if (f.hub_type != kHubTypeParamGet) {
+            continue;
+        }
+        const size_t p = f.payload + kHubHeaderBytes;
+        if (p + kParamRule + 2 > f.cksum) {
+            continue; // not a full parameter block
+        }
+        // Little-endian, matching the packed struct on the pack's own core. The raw bytes go
+        // out with it so the order is checkable from the capture rather than trusted.
+        intv = (uint32_t)buf[p + kParamIntv] | ((uint32_t)buf[p + kParamIntv + 1] << 8) |
+               ((uint32_t)buf[p + kParamIntv + 2] << 16) |
+               ((uint32_t)buf[p + kParamIntv + 3] << 24);
+        rule = (uint16_t)(buf[p + kParamRule] | ((uint16_t)buf[p + kParamRule + 1] << 8));
+
+        LOGF("   battery : paramget sid 0x%02X -> rule 0x%04X %s, intv %lu\n",
+             buf[p + kParamSid], rule,
+             rule == kRulePeriodic  ? "(periodic)"
+             : rule == kRuleDisable ? "(DISABLED)"
+                                    : "(?)",
+             (unsigned long)intv);
+        return true;
+    }
+
+    LOGF("   battery : paramget sid 0x%02X — no PARAMGET frame%s\n", sid,
+         bad_cksum ? " (bad checksum)" : "");
+    dump("paramget raw", buf, n);
+    return false;
+}
+
+// Switch one sensor to periodic sampling.
+//
+// Only the rule changes. The interval is whatever the pack just reported for that sensor, and
+// the thresholds and tag fields stay zero exactly as the reference leaves them — its command
+// memsets the whole packet and then writes nothing but sid, intv and rule, so a zeroed
+// threshold block is the documented shape of this request rather than an omission.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   snhub_paramget_command(): f_memset(pktBuff, 0, BUFF_SIZE) precedes everything, then
+//   SNHUB_GS_SET sets hub_api->type = SNHUB_TYPE_PARAMSET with payload_length =
+//   sizeof(SNHub_Api_Param_Snsr_t), payload[0] = sid, paramset->intv = menu.intv and
+//   paramset->rule = menu.rule. thr_above, thr_below and tag are left at zero.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   api_set_snsr_param() maps enable != 0 to RULE_PERIODIC (0x08); protocol_list
+//   [SNHUB_TYPE_PARAMSET] has both .req and .rsp NULL, so the reference discards whatever
+//   comes back — which is why success here is judged by a subsequent read, not by the reply.
+bool Battery::param_set(uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap)
+{
+    uint8_t payload[kParamBytes] = {0};
+
+    payload[kParamSid]      = sid;
+    payload[kParamIntv + 0] = (uint8_t)(intv & 0xFF);
+    payload[kParamIntv + 1] = (uint8_t)((intv >> 8) & 0xFF);
+    payload[kParamIntv + 2] = (uint8_t)((intv >> 16) & 0xFF);
+    payload[kParamIntv + 3] = (uint8_t)((intv >> 24) & 0xFF);
+    payload[kParamRule + 0] = (uint8_t)(kRulePeriodic & 0xFF);
+    payload[kParamRule + 1] = (uint8_t)(kRulePeriodic >> 8);
+
+    LOGF("   battery : paramset sid 0x%02X rule 0x%04X intv %lu\n", sid,
+         (unsigned)kRulePeriodic, (unsigned long)intv);
+
+    bus(m_pin).flush();
+    send_frame(m_pid, kHubTypeParamSet, kPldParamSnsrUpdate, payload, sizeof(payload));
+    delay(2);
+
+    const size_t n = receive(buf, cap);
+    if (n == 0) {
+        // Not necessarily a failure. The reference does not process a PARAMSET response at
+        // all, so silence may be the protocol working as designed — which is precisely why
+        // this function's return value is never allowed to gate the read path.
+        LOGF("   battery : paramset sid 0x%02X — no reply (reference expects none)\n", sid);
+        return false;
+    }
+    dump("paramset ack", buf, n);
+    return true;
+}
+
+// Try to get every sensor sampling. Best effort by construction.
+//
+// Nothing here can make the reading worse: a refused or ignored PARAMSET leaves the pack
+// exactly as it was, and the caller re-reads afterwards and applies the same all-zero test it
+// always did. If the pack still will not sample, the result is still a null — never a
+// fabricated zero, which is the one outcome this repo does not permit.
+//
+// The sid list comes from the announcement when one was parsed, and falls back to the four
+// ids the pack's own SENDAT records carry when it was not. That fallback is bench-observed,
+// not assumed.
+// CITE(bench): docs/EVIDENCE.md — SENDAT reply on 3d3425d/7f65384 leads its four records with
+//   sensor ids 0x15, 0x16, 0x17 and 0x18, so those ids exist on this pack whether or not an
+//   announcement was captured in the same cycle.
+bool Battery::enable_sampling(uint8_t *buf, size_t cap)
+{
+    // Addressing matters: the reference refuses to set parameters on PID_MASTER, and a probe
+    // that has not been assigned an id has no parameter record to write to. Enabling is only
+    // attempted once provisioning has actually completed.
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+    //   api_set_snsr_param(): `if (pid == PID_MASTER) { return; }`.
+    if (m_pid == kBroadcastId || m_pid == kMasterId) {
+        LOGLN(F("   battery : not provisioned — skipping sampling enable"));
+        return false;
+    }
+
+    static_assert(kMaxSensors <= sizeof(m_sids), "sid work list must fit the member array");
+
+    static constexpr uint8_t kFallbackSids[] = {0x15, 0x16, 0x17, 0x18};
+
+    const uint8_t *sids  = m_sid_count > 0 ? m_sids : kFallbackSids;
+    const size_t   count = m_sid_count > 0 ? m_sid_count : sizeof(kFallbackSids);
+
+    bool any = false;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t intv = kParamIntvFallback;
+        uint16_t rule = kRuleDisable;
+
+        if (param_get(sids[i], intv, rule, buf, cap) && rule == kRulePeriodic) {
+            // Already armed. Leave it alone — rewriting a working rule is a chance to break
+            // one for no gain.
+            any = true;
+            continue;
+        }
+        if (intv == 0) {
+            intv = kParamIntvFallback; // a zero interval would be a rule that never fires
+        }
+        if (param_set(sids[i], intv, buf, cap)) {
+            any = true;
+        }
+    }
+    return any;
 }
 
 // Drain whatever the GPIOTE receiver has buffered. Bytes are assembled in the interrupt
@@ -592,13 +995,14 @@ BatteryReading Battery::read()
     //   never requested; `provision` is set only from SNHUBAPI_EVT_ADD_PID, which the library
     //   raises at the end of handling an inbound announcement, and get.data() follows on the
     //   next 50 ms scheduler tick.
-    send_boot();
-    delay(2); // let the probe turn the line around
-    uint8_t      hello[kProvCapacity];
-    const size_t hn = receive(hello, sizeof(hello));
-    if (hn > 0 && provision(hello, hn)) {
-        m_pid = kProbeId;
-        delay(50); // the reference's tick interval — the only timing guidance available
+    // One buffer for every phase, reused in turn. Two separate 256-byte arrays would put half
+    // a kilobyte on the stack for no benefit, and the phases never overlap.
+    static uint8_t rx[kRxCapacity];
+    static_assert(kProvCapacity <= kRxCapacity, "provisioning needs the whole buffer");
+
+    const bool provisioned = acquire_pid(rx, sizeof(rx));
+    if (!provisioned) {
+        LOGLN(F("   battery : no announcement — proceeding unprovisioned"));
     }
     link.flush(); // anything still queued from phase 1 is not part of the data reply
 
@@ -612,7 +1016,6 @@ BatteryReading Battery::read()
     //
     // CITE(bench): docs/EVIDENCE.md — dest sweep on 3d3425d: 0x01/0x02/0x03 -> 0 bytes,
     //   0xFF -> a full 28-byte SENDAT response with a valid checksum.
-    uint8_t       rx[kRxCapacity];
     const uint8_t fallback = (m_pid == kBroadcastId) ? kProbeId : kBroadcastId;
 
     size_t n = query(m_pid, rx, sizeof(rx));
@@ -629,6 +1032,56 @@ BatteryReading Battery::read()
         m_last = BatteryResult::ShortFrame;
     } else {
         m_last = parse(rx, n, out);
+    }
+
+    // Phase 3: a verified frame full of placeholders is the one failure this cycle can still
+    // act on. Ask the pack what rule each sensor is running, set the ones that are disabled
+    // to periodic, and read once more.
+    //
+    // Gated three ways on purpose. It runs only when the reply decoded cleanly and every
+    // value was zero, so a working pack is never touched. It runs only once per wake, so a
+    // pack that refuses cannot turn a cycle into an unbounded retry loop. And its outcome is
+    // discarded entirely if the re-read does not improve — `out` is rebuilt from scratch and
+    // re-tested, so a pack that still will not sample yields Unsampled and therefore nulls,
+    // exactly as before this phase existed.
+    //
+    // The honest caveat, recorded here because it changes how the next capture should be read:
+    // the working reference gets real values with no PARAMSET at all. Meshtastic never calls
+    // set.param — it provisions, requests once, and reads what arrives. So the first thing to
+    // check in the next capture is the `sid ... rule ...` lines from the announcement. If they
+    // already say `periodic`, the rule was never the problem and phase 1 (provisioning
+    // reliability) is the fix that mattered.
+    //
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+    //   handles SNHUBAPI_EVT_GET_INTV and SNHUBAPI_EVT_GET_ENABLE as empty cases and never
+    //   invokes RakSNHub_Protocl_API.set.param or .get.param. A working reader on this same
+    //   pack therefore does not need PARAMSET, which is why this is a fallback and not the
+    //   primary path.
+    // CITE(bench): docs/EVIDENCE.md — stage2 on 7f65384 decoded a checksum-valid SENDAT reply
+    //   to voltage 0, current 0, capacity 0, temperature 0 from a pack that was demonstrably
+    //   powered by the cell it was reporting on.
+    if (m_last == BatteryResult::Unsampled && m_enable_attempts < kEnableAttempts) {
+        m_enable_attempts++;
+        dump("unsampled raw", rx, n);
+
+        if (enable_sampling(rx, sizeof(rx))) {
+            link.flush();
+            const size_t n2 = query(m_pid, rx, sizeof(rx));
+            if (n2 >= 8) {
+                BatteryReading        retry;
+                const BatteryResult   r2 = parse(rx, n2, retry);
+                if (r2 == BatteryResult::Ok) {
+                    LOGLN(F("   battery : sampling enabled — pack now reporting"));
+                    out    = retry;
+                    m_last = r2;
+                    n      = n2;
+                } else {
+                    LOGF("   battery : still %s after enabling sampling\n",
+                         battery_result_name(r2));
+                    n = n2;
+                }
+            }
+        }
     }
 
     // A frame that arrived but did not yield a reading is the case worth dumping in full. It
