@@ -83,6 +83,17 @@
 #define FEATURE_BUS_SCAN 0
 #endif
 
+// The same idea for the one-wire battery link, OFF everywhere except its own environment.
+// The battery driver collapses "the pack never heard us" and "the pack answered and we
+// missed it" into one outcome — no reply, 0 bytes — and those need opposite responses: a
+// meter and a cable in the first case, a constant in the second. This measures the pin
+// itself before it assumes any protocol at all, so the two can be told apart. Never
+// compiled into a field image: it holds the line for tens of seconds and addresses probe
+// ids the node has no business addressing.
+#ifndef FEATURE_ONEWIRE_SCAN
+#define FEATURE_ONEWIRE_SCAN 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)
