@@ -28,3 +28,6 @@ __pycache__/
 # multi-megabyte serial logs and scope traces do not belong in git.
 evidence/raw/
 *.log
+
+# Scratch serial-capture helper, recreated per session
+scripts/_serial_capture.py

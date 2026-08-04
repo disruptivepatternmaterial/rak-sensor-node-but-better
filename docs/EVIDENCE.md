@@ -57,6 +57,57 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-04 — RAK9154 one-wire still silent after two firmware fixes; fault narrowed to physical
+
+Two independent firmware defects were found by reading the reference readers, fixed, flashed,
+and **neither produced a reply**. Recording the negative results, because they are what
+narrows the remaining suspect list.
+
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB`, `239A:8029` (app running).
+- **Image:** `stage2` (RK900 + battery, radio off, sleep off, 60 s bench cadence). The RK900
+  was physically disconnected throughout, so its timeouts are expected and not a finding.
+- **Wiring under test** (operator-asserted, **not** metered): RAK9154 5-pin Sensor Hub socket
+  (socket B) — pins 3+5 bridged to one wire → `IO1` pad; pin 4 `3V3_In` → always-on `VDD`;
+  pin 2 `P−` → common ground; pin 1 `P+` → buck.
+
+| Commit | Change under test | Result |
+|---|---|---|
+| `375e99a` | Correct RUI3 frame: transport header (`00 06 02 00`), popcount-sum checksum (was XOR), BOOT/provision handshake before SENDAT | `battery : no data (no reply, 0 bytes)` |
+| `16986d1` | Byte layer replaced with `beegee-tokyo/RAK-OneWireSerial` @ `c58c0f0` (cached port-register TX, GPIOTE falling-edge RX) — the library Meshtastic drives on this same nRF52840 | `battery : no data (no reply, 0 bytes)` |
+
+- **Raw observation**, identical on both builds, every cycle:
+
+  ```
+  [cycle 2]
+     RK900   : no data (timeout)
+     battery : no data (no reply, 0 bytes)
+     wait    : 60 s (sleep disabled)
+  ```
+
+  `Battery::receive()` returns 0 only when the line never goes LOW for the full 500 ms
+  first-byte window — the pack never drove a single start bit.
+
+- **What these results rule out:**
+  - Malformed request framing (was definitively wrong before `375e99a`; now matches the
+    reference byte-for-byte).
+  - Bit-timing skew from `digitalWrite` + `delayMicroseconds`, and the `noInterrupts()`
+    -per-byte hazard — both gone with `16986d1`.
+  - A fully dead/asleep pack: the same pack delivered 12 V and powered the entire node with
+    USB unplugged earlier the same day.
+  - Wrong pin mapping: `WB_IO1` → Arduino 17 → P0.17, the `IO1` pad
+    (`rakwireless/variants/rak4630/variant.h:45`).
+
+- **What remains, and why it needs an instrument:** every remaining candidate is electrical
+  and invisible to the firmware — an open solder joint on the `IO1` or `VDD` pad, a dead
+  `3V3_In` reference, or a probe interface on socket B that is simply not active. The
+  reference implementation's own bring-up notes require a logic analyzer for one-wire first
+  light. No continuity or voltage measurement has been taken yet; the wiring above is
+  asserted, not measured.
+
+- **Verdict:** **FAIL / inconclusive on cause.** Firmware is now reference-equivalent; the
+  fault is very likely physical. Next step is measurement, not another code change.
+  Tracked in [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+
 ### 2026-08-04 — First end-to-end real-sensor uplink to TTN (operator-confirmed), Stage 2 join+uplink PASS
 
 - **Commit:** `00c52d8fa1ef3f23ea7b5948d3012565650c40d6`, `stage3` image (RK900 + radio,
