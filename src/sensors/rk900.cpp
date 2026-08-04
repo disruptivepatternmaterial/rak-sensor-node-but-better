@@ -69,6 +69,13 @@ WeatherReading RK900::read()
         return out; // every field stays invalid — the encoder will omit them all
     }
 
+    // Raw dump first, ahead of any interpretation. ADR-0006 documents a genuine conflict
+    // between two RK900-09 sources on what 0x0000-0x0004 actually mean; printing the words
+    // as received lets that be re-checked against either candidate map without re-wiring
+    // anything, and costs nothing once a map is settled.
+    LOGF("   RK900   : raw 0x0000-0x0004 = %04X %04X %04X %04X %04X\n",
+         regs[0], regs[1], regs[2], regs[3], regs[4]);
+
     // The span either arrives whole and CRC-checked or not at all, so all five fields
     // become valid together. Values are stored exactly as the sensor reported them;
     // scaling belongs to the encoder, which has to match the TTN decoder's divisors.
