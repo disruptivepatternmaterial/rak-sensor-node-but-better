@@ -54,6 +54,76 @@ only a measurement recorded here closes it.
 
 Newest first.
 
+### 2026-08-03 — First RK900 read attempt never happened: DFU failed twice, board left in its bootloader
+
+- **Commit:** `3c05058`
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB` on `/dev/cu.usbmodem1101`
+- **Image:** `stage1` — RK900 only (`FEATURE_BATTERY=0 FEATURE_RADIO=0 FEATURE_SLEEP=0`),
+  `FEATURE_BENCH_INTERVAL` giving a 60 s cadence and staying awake so USB persists.
+- **Measured:** whether the RK900-09, physically connected for the first time just before
+  this session, would answer a Modbus read. **It was never asked.** No firmware ran.
+- **Observation:** the serial capture is **empty — 0 bytes**, not a timeout, not a partial
+  frame, nothing at all:
+
+      === CAPTURE DONE ===
+             0 /tmp/stage1_serial.log
+
+  The cause is upstream of the sensor. Both DFU attempts failed. Attempt 1 (port pinned to
+  `/dev/cu.usbmodem1101`) got partway through the image and then stopped being acknowledged:
+
+      Upgrading target on /dev/cu.usbmodem1101 with DFU package .../firmware.zip.
+      Flow control is disabled, Single bank, Touch disabled
+      ########################################
+      Timed out waiting for acknowledgement from device.
+      ######################
+      Failed to upgrade target. Error is: No data received on serial port. Not able to proceed.
+      ...
+      nordicsemi.exceptions.NordicSemiException: No data received on serial port. Not able to proceed.
+
+  Attempt 2 (auto-detected port, board already in DFU) failed **earlier** — at
+  `send_start_dfu`, the very first packet, with zero bytes transferred:
+
+      File ".../dfu/dfu.py", line 199, in _dfu_send_image
+        self.dfu_transport.send_start_dfu(program_mode, softdevice_size, bootloader_size,
+      File ".../dfu/dfu_transport_serial.py", line 179, in send_start_dfu
+        self.send_packet(packet)
+      nordicsemi.exceptions.NordicSemiException: No data received on serial port. Not able to proceed.
+
+  The board is in its bootloader with no valid application. USB product ID confirms it —
+  `0029` is the bootloader, `8029` is a running application:
+
+      /dev/cu.usbmodem1101
+      Hardware ID: USB VID:PID=239A:0029 SER=4BC1FCC87D1343AB LOCATION=1-1
+      Description: WisBlock RAK4631
+
+- **Verdict:** **FAIL** for the flash. **The RK900 remains entirely unproven** — this run
+  produced no evidence about it whatsoever, in either direction. No read was attempted, so
+  nothing here says the wiring, the A/B polarity, the `WB_IO2` switched rail, the 4800 8N1
+  framing, the slave ID, or the register map are either right or wrong.
+- **Defect found, not fixed — [#27](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/27):**
+  `pio run -t upload` exits **0** and prints `[SUCCESS]` even when `adafruit-nrfutil` fails
+  and prints a traceback. The first attempt therefore reported `=== FLASH OK ===` and went on
+  to capture serial from a board that had just been bricked into its bootloader. This is the
+  worst shape a failure can take: it reports success, and the empty capture that follows looks
+  exactly like a silent sensor. `scripts/flash.sh` line 79 has the same bug — it branches on
+  the exit status of the same command, so it will also claim `=== FLASH OK ===` on a failed
+  DFU. Detection must grep the upload output for `Failed to upgrade target`.
+- **Notes:** Two attempts, then stopped, per the bounded-retry rule. The second attempt is
+  not a repeat of the first — it changed the port strategy from pinned to auto-detect and
+  added real success detection — and it produced new evidence: the failure moved *earlier*,
+  from mid-image to the first packet. That is the opposite of a flaky link warming up.
+
+  Both attempts began with PlatformIO's `use_1200bps_touch` reset. On attempt 2 the board was
+  **already** in the bootloader, where a 1200 bps touch has nothing to reset and may be
+  leaving the CDC endpoint in a state the DFU protocol cannot use. That is a hypothesis, not
+  a finding.
+
+  This is a **physical-hardware blocker**. The documented recovery is a double-tap of RESET
+  on the RAK19007, which re-enters DFU cleanly and holds the port — the same recovery that
+  worked on 2026-07-31 when an interrupted flash left product ID `002A`. Nobody was at the
+  bench to press it. Until someone does, no firmware can be loaded and the RK900 cannot be
+  read. The pack, the radio, and sleep are untouched by this.
+
 ### 2026-07-31 — First flash. Firmware runs on real hardware; sensor not yet connected
 
 - **Commit:** `8d4a41c` (first flash), then the attempt-log fix
