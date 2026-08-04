@@ -156,8 +156,8 @@ uint32_t scan_production_frame()
     // its raw frame is the evidence gate for the production driver's selected baud. Refs #30.
     //
     // CITE(datasheet): [CIT-RK900] five consecutive holding registers from 0x0000.
-    // CITE(sibling): [CIT-FWM-RK900-BRINGUP] — the sibling's recorded bench procedure uses
-    //   9600 8N1, FC 0x03, slave 0x01, start 0x0000, quantity 5.
+    // CITE(sibling): [CIT-FWM-RK900-BRINGUP], forest-weather-machines commit efc0e3c —
+    //   procedure uses 9600 8N1, FC 0x03, slave 0x01, start 0x0000, quantity 5.
     constexpr uint32_t kObservedBaud = 9600;
     constexpr uint8_t kObservedSlave = 0x01;
     constexpr uint8_t kProductionRegisterCount = 5;
