@@ -60,8 +60,15 @@ class Battery {
     // cross-checks the two.
     void   send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type,
                       const uint8_t *payload = nullptr, size_t payload_len = 0);
-    void   send_boot();
-    size_t receive(uint8_t *buf, size_t cap);
+    void send_boot();
+
+    // Drain the RX queue into `buf`. With `stop_on_provision` the drain returns the instant a
+    // complete, checksum-verified PROVISION request is buffered instead of waiting out the
+    // inter-byte gap — the pack's provisioning window is short and that gap is spent inside it.
+    // Off by default, and deliberately not applied to the data path: the pack concatenates its
+    // spontaneous announcement behind a SENDAT reply, so stopping at the first complete frame
+    // there would throw the second one away.
+    size_t receive(uint8_t *buf, size_t cap, bool stop_on_provision = false);
 
     // Hex-dump under a label, for the paths where the decoded verdict is not enough evidence.
     void dump(const char *what, const uint8_t *buf, size_t len);

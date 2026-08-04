@@ -26,7 +26,30 @@ namespace {
 //   boot-then-request order.
 constexpr uint8_t kWakeByte  = 0xFF; // RUI3_Api_t.wakeup
 constexpr uint8_t kDelimiter = 0x7E; // RUI3_Api_t.start
-constexpr uint8_t kWakeCount = 4;    // extra 0xFF settle the line; the pack scans for 0x7E
+
+// Exactly one wake byte, because that is what the reference master emits and because on the
+// provisioning path every extra byte is latency the pack is waiting through.
+//
+// `RUI3_Api_t.wakeup` is a single `U8` at the head of the struct, and the reference hands the
+// whole struct to the transport in one call — so the frame on the wire is one 0xFF, one 0x7E,
+// then the header. The previous four were a guess that the line needed settling; at 9600 they
+// cost 4 x 1.04 ms = ~4.2 ms of dead air ahead of every frame, and ~3.1 ms of that is pure
+// delay added between the pack finishing its announcement and hearing our answer. The pack
+// tolerates four (the bench SENDAT sweep drew a full reply with them), so this is not the
+// whole fault — but it is 3 ms off the critical path for free, and it removes a divergence
+// from the one implementation known to be accepted by this pack.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t is
+//   ATT_PACKED { U8 wakeup; U8 start; RUI3API_LEN_T length; type; flag; U8 payload[]; }: one
+//   wakeup byte, not a run of them.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process()
+//   rebuilds the frame as `dataBuff[0] = WAKEUPBYTE` followed by everything from the
+//   delimiter on, and snhub_provision_req_program() hands that exact buffer to
+//   SNHUBAPI_EVT_QSEND at `pktLen = len` — so the response leaves with a single 0xFF.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the transport under
+//   that event is `case SNHUBAPI_EVT_QSEND: mySerial.write(msg, len);`, one write of the
+//   whole buffer with nothing prepended.
+constexpr uint8_t kWakeCount = 1;
 
 // Probe addressing. kProbeId is the id the master *assigns*, not an id the pack has before
 // being asked: `pid = aid + 1` for the first free record slot, so the first probe on the bus
@@ -363,6 +386,46 @@ bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, bool
     return false;
 }
 
+// Is the frame we are here to answer already complete in this buffer?
+//
+// This is the difference between answering the announcement and answering it too late. Our
+// drain loop cannot tell "the pack has stopped talking" from "the pack is between bytes", so
+// it waits out the whole inter-byte gap before returning — and only then does the caller get
+// to reply. The reference never pays that: its drain is `while (available()) { read();
+// delay(2); }`, which at 9600 polls slower than bytes arrive, so `available()` stays true for
+// the length of the frame and goes false roughly one byte-time after the last one. It then
+// replies immediately.
+//
+// The declared length lets us do better than a timeout: the moment the buffer holds a
+// checksum-verified PROVISION request addressed to the master, there is nothing left to wait
+// for. Deliberately narrow — a data reply must NOT short-circuit the drain, because the pack
+// routinely concatenates its spontaneous announcement behind a SENDAT response and stopping at
+// the first complete frame there would discard the second one.
+//
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp onewireHandle() —
+//   `while (mySerial.available()) { buff[bufflen++] = mySerial.read(); delay(2); }` then
+//   `RakSNHub_Protocl_API.process(buff, bufflen)` on the same tick. The reply is transmitted
+//   within about one byte-time of the announcement's last byte, not after a frame-gap timeout.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process()
+//   validates in the order verify_checksum -> verify_rui3type -> verify_snhublen and only then
+//   dispatches; a frame is answerable as soon as those hold, which is as soon as the byte at
+//   payload[length] has arrived. Same condition, evaluated as the bytes land.
+bool provision_ready(const uint8_t *buf, size_t len)
+{
+    SnHubFrame f;
+    bool       bad_cksum = false;
+    size_t     from      = 0;
+
+    while (next_frame(buf, len, from, f, bad_cksum)) {
+        from = f.delim + 1;
+        if (f.hub_type == kHubTypeProvision && f.flag == kRui3FlagReq &&
+            f.hub_payload_type == kPldProvVer3 && f.dest == kMasterId) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 const char *battery_result_name(BatteryResult r)
@@ -534,13 +597,65 @@ bool Battery::provision(uint8_t *buf, size_t len)
             continue; // too short to hold a provId — not a frame we can answer
         }
 
-        // Read the sensor descriptors out of the tail *before* the frame is mutated, and log
-        // them. This is the only place the pack ever states which sensors it carries and what
-        // rule each one is running under, and it is the answer to the question the zeros pose:
-        // a rule of 0x00 (RULE_DISABLE) means provisioned-but-not-sampling, a rule of 0x08
-        // (RULE_PERIODIC) means the sensors are armed and the zeros come from somewhere else.
-        // Logged unconditionally rather than only on failure, because by the time a reading
-        // looks wrong the announcement that would explain it is long gone.
+        // Mutate and transmit FIRST. Nothing — not one log line — goes between recognising the
+        // announcement and putting the answer on the wire.
+        //
+        // This ordering is the fix. The previous revision decoded and printed the six sensor
+        // descriptors here, seven LOGF lines, and only then transmitted. LOG goes to USB CDC,
+        // and a CDC write blocks until the host drains the endpoint FIFO — milliseconds per
+        // line when a host is attached, and unbounded when one is attached but not reading. So
+        // the reply that this driver correctly composed was leaving tens of milliseconds after
+        // the announcement it answers, by which time the pack had given up on being provisioned
+        // and moved on to re-announcing. Byte for byte the frame was right; it was simply late.
+        //
+        // The reference has no such gap and, tellingly, its author commented out the two
+        // LOG_INFO calls on exactly this path. The descriptors are still read and still logged
+        // — just afterwards, out of the timing-critical window. They survive the mutation
+        // because the five bytes it changes (flag, dest, source, provId, checksum) all sit
+        // outside the descriptor array.
+        //
+        // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+        //   snhub_provision_req_program(): the recomputed buffer goes out via
+        //   `on_evt(source, 0, SNHUBAPI_EVT_QSEND, pktBuff, pktLen)` and only then does it
+        //   raise SNHUBAPI_EVT_ADD_PID and the per-sensor SNHUBAPI_EVT_ADD_SID events. Send
+        //   first, account for it second — the order is the reference's, not a preference.
+        // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — QSEND is
+        //   `mySerial.write(msg, len)` with nothing before it, while the ADD_PID and ADD_SID
+        //   cases carry their `LOG_INFO(...)` commented out. The one consumer known to be
+        //   accepted by this pack prints nothing on this path.
+        // CITE(datasheet): [CIT-NRF-USBD] nRF52840 Product Specification, USBD — bulk IN
+        //   transfers only drain when the host issues an IN token, so a device-side write to a
+        //   CDC endpoint whose FIFO is full stalls until the host polls. Serial logging is not
+        //   a constant-time operation and must not sit inside a protocol response window.
+        buf[f.delim + 4]          = kRui3FlagRsp; // request becomes response
+        buf[f.payload + 0]        = f.source;     // dest := the probe that announced
+        buf[f.payload + 1]        = kMasterId;    // source := us
+        buf[prov + kProvIdOffset] = kProbeId;     // the id we are assigning
+        buf[f.cksum]              = frame_chksum(buf, f.delim, f.payload_len);
+
+        for (uint8_t i = 0; i < kWakeCount; i++) {
+            tx_byte(kWakeByte);
+        }
+        for (size_t i = f.delim; i <= f.cksum; i++) {
+            tx_byte(buf[i]);
+        }
+
+        LOGF("   battery : provisioned probe 0x%02X as pid 0x%02X\n", f.source, kProbeId);
+
+        // The exact bytes we just transmitted, so the next capture can be compared against the
+        // announcement that provoked them rather than trusted. Printed from the wake byte
+        // onward in the order it left, including the recomputed checksum.
+        LOGF("   battery : reply %02X", kWakeByte);
+        for (size_t i = f.delim; i <= f.cksum; i++) {
+            LOGF(" %02X", buf[i]);
+        }
+        LOGLN("");
+
+        // Now the descriptors, out of the response window. This is still the only place the
+        // pack ever states which sensors it carries and what rule each one runs under, and it
+        // is what tells the next capture whether the zeros were ever a sampling problem: rule
+        // 0x00 (RULE_DISABLE) means provisioned-but-idle, rule 0x08 (RULE_PERIODIC) means the
+        // sensors are armed and the zeros came from somewhere else.
         m_sid_count = 0;
         if (prov + kProvSnsrNumOffset < f.cksum) {
             const uint8_t announced = buf[prov + kProvSnsrNumOffset];
@@ -566,21 +681,6 @@ bool Battery::provision(uint8_t *buf, size_t len)
                 }
             }
         }
-
-        buf[f.delim + 4]          = kRui3FlagRsp; // request becomes response
-        buf[f.payload + 0]        = f.source;     // dest := the probe that announced
-        buf[f.payload + 1]        = kMasterId;    // source := us
-        buf[prov + kProvIdOffset] = kProbeId;     // the id we are assigning
-        buf[f.cksum]              = frame_chksum(buf, f.delim, f.payload_len);
-
-        for (uint8_t i = 0; i < kWakeCount; i++) {
-            tx_byte(kWakeByte);
-        }
-        for (size_t i = f.delim; i <= f.cksum; i++) {
-            tx_byte(buf[i]);
-        }
-
-        LOGF("   battery : provisioned probe 0x%02X as pid 0x%02X\n", f.source, kProbeId);
         return true;
     }
     return false;
@@ -630,7 +730,9 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
         send_boot();
         delay(2); // let the probe turn the line around
 
-        const size_t n = receive(buf, cap);
+        // Early-exit drain: answer the announcement as soon as it is complete, not after the
+        // frame gap. This is the second half of the latency fix — see provision_ready().
+        const size_t n = receive(buf, cap, /*stop_on_provision=*/true);
         if (n > 0 && provision(buf, n)) {
             m_pid = kProbeId;
             delay(50); // the reference's tick interval — the only timing guidance available
@@ -813,7 +915,7 @@ bool Battery::enable_sampling(uint8_t *buf, size_t cap)
 //   `while (mySerial.available()) { buff[bufflen++] = mySerial.read(); delay(2); }` — a
 //   per-byte grace period is what delimits the frame, because there is no length field we
 //   can trust before parsing. Same shape here, with the gap expressed as a timeout.
-size_t Battery::receive(uint8_t *buf, size_t cap)
+size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision)
 {
     SoftwareHalfSerial &link = bus(m_pin);
 
@@ -822,10 +924,23 @@ size_t Battery::receive(uint8_t *buf, size_t cap)
     uint32_t mark        = micros();
     size_t   n           = 0;
 
+    // Smallest buffer that could possibly hold an answerable frame: delimiter + length[2] +
+    // type + flag + the six-byte SensorHub header + a checksum byte. Below that the scan
+    // cannot succeed, so running it on every byte is wasted work in the one loop that must
+    // keep up with the wire.
+    constexpr size_t kMinFrame = 1 + 4 + kHubHeaderBytes + 1;
+
     while (n < cap) {
         const int v = link.read();
         if (v >= 0) {
             buf[n++] = (uint8_t)v;
+            // Return the instant the announcement is complete rather than waiting out the
+            // inter-byte gap. The gap is a guess about whether the pack has finished; the
+            // declared length is a fact, and on this path the 5 ms difference is 5 ms the pack
+            // spends waiting to be provisioned. See provision_ready().
+            if (stop_on_provision && n >= kMinFrame && provision_ready(buf, n)) {
+                return n;
+            }
             // Every subsequent byte gets a short window. A gap longer than that means the
             // probe has finished talking, which is what delimits the frame.
             deadline_us = kInterByteTimeoutUs;
@@ -905,18 +1020,27 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     //   17 B8 00 | 18 67 00 00` then checksum 0x2F. Sensor ids 0x15-0x18 lead each record,
     //   the IPSO type follows, and the strides land on the checksum byte with nothing left
     //   over — the walker below is verified against real bytes, not inferred.
+    // Whether any record in this frame carried a non-zero value. This is the template
+    // detector, and it has to be accumulated during the walk rather than reconstructed from
+    // `out` afterwards, because `out` cannot distinguish "the pack reported 0" from "no
+    // record of that type was present".
+    bool any_nonzero = false;
+
     size_t i = records;
     while (i + 2 < records_end) {
         const uint8_t type = buf[i + 1];
 
         if (type == kIpsoCapacity) {
             out.soc.set(buf[i + 2]);
+            any_nonzero |= (buf[i + 2] != 0);
             i += 3;
         } else if (type == kIpsoDcCurrent && (i + 3) < records_end) {
             out.current.set((int16_t)val16(i + 2));
+            any_nonzero |= (val16(i + 2) != 0);
             i += 4;
         } else if (type == kIpsoDcVoltage && (i + 3) < records_end) {
             out.voltage.set(val16(i + 2));
+            any_nonzero |= (val16(i + 2) != 0);
             i += 4;
         } else if (type == kIpsoTemperature && (i + 3) < records_end) {
             // Type 103 is the same code the pack's own LoRaWAN uplinks use for temperature,
@@ -924,6 +1048,7 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
             // Meshtastic reader does not decode this type, so the sign is still unconfirmed
             // against a non-zero reading.
             out.temperature.set((int16_t)val16(i + 2));
+            any_nonzero |= (val16(i + 2) != 0);
             i += 4;
         } else {
             // Worth logging: it means the pack sends something this build does not know
@@ -948,14 +1073,35 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     // rather than partially trusted: if the voltage is a placeholder, the current, charge and
     // temperature beside it are placeholders too.
     //
-    // Only voltage is used as the sentinel. 0 A is a genuine idle current, 0 % is a genuine
-    // (alarming) state of charge, and 0.0 degC is an entirely ordinary temperature for a node
-    // in the woods — nulling those on their own value would throw away real data.
+    // The sentinel is "every record in this frame read zero", not "the voltage read zero".
+    // Voltage alone was the previous test and it leaves a hole: a SENDAT reply that carries
+    // capacity, current and temperature but no voltage record has no sentinel to trip, so a
+    // template full of placeholders would be encoded as a real 0 A / 0 % / 0.0 degC reading.
+    // That is precisely the fabricated zero the repo's null policy exists to forbid, and it
+    // is reachable — the record set is whatever the pack chooses to include, not a fixed
+    // four.
+    //
+    // Judging the whole frame instead keeps every genuine zero: 0 A is a real idle current,
+    // 0 % is a real (alarming) charge state, and 0.0 degC is an ordinary temperature in the
+    // woods — each of those survives as long as one other record in the same frame is
+    // non-zero, which for a pack that is powered by the cell it measures is always true of
+    // the voltage. Only the all-zero case, which cannot be a live measurement from a device
+    // that is simultaneously driving this wire, is discarded.
+    //
+    // Discarded wholesale rather than field by field: if one value is a placeholder the
+    // others beside it are placeholders too, and a partially trusted record set is how a
+    // plausible-looking wrong number reaches an uplink.
     //
     // CITE(bench): docs/EVIDENCE.md — the SENDAT reply captured on 3d3425d verified its
     //   checksum and decoded cleanly to voltage 0, current 0, capacity 0, temperature 0 while
-    //   the pack was demonstrably alive and re-announcing itself unprovisioned.
-    if (out.voltage.valid && out.voltage.value == 0) {
+    //   the pack was demonstrably alive, metered at 11.6 V, and re-announcing itself
+    //   unprovisioned. A live pack cannot be at 0.00 V and also be driving this line.
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the reference
+    //   consumer applies no such guard: it assigns dc_vol/dc_cur/dc_prec straight from the
+    //   frame. It gets away with it because it re-reads forever on a 50 ms tick and a stale
+    //   zero is overwritten seconds later. A node that wakes, reads once and sleeps for an
+    //   hour has no such second chance, so the guard is added here deliberately.
+    if (!any_nonzero) {
         out = BatteryReading{};
         return BatteryResult::Unsampled;
     }
@@ -1014,24 +1160,102 @@ BatteryReading Battery::read()
     // a wrong choice here costs the entire reading — a SENDAT to 0x01 on an unprovisioned pack
     // draws total silence, which is indistinguishable from an unplugged cable.
     //
+    // Which address "answered" is decided by whether a SENDAT frame came back, NOT by whether
+    // bytes came back, and that distinction is a fix rather than a nicety. The pack announces
+    // itself spontaneously and repeatedly, so a request sent to an address nothing is
+    // listening on still routinely returns a non-empty buffer — it just contains the
+    // announcement. The previous revision took any non-zero byte count as proof and would
+    // latch m_pid onto the dead address for the rest of the node's life, turning a recoverable
+    // mis-addressing into a permanent one.
+    //
     // CITE(bench): docs/EVIDENCE.md — dest sweep on 3d3425d: 0x01/0x02/0x03 -> 0 bytes,
-    //   0xFF -> a full 28-byte SENDAT response with a valid checksum.
-    const uint8_t fallback = (m_pid == kBroadcastId) ? kProbeId : kBroadcastId;
+    //   0xFF -> a full 28-byte SENDAT response with a valid checksum, immediately followed in
+    //   the same read by the 92-byte spontaneous announcement. Bytes arriving and the request
+    //   being answered are demonstrably different events on this bus.
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process()
+    //   dispatches on hub_api->type per frame, never on "something arrived"; verify_action()
+    //   then routes SNHUB_TYPE_SENDAT to its own program. Frame type is the unit of meaning.
+    const uint8_t candidates[2] = {m_pid, (m_pid == kBroadcastId) ? kProbeId : kBroadcastId};
 
-    size_t n = query(m_pid, rx, sizeof(rx));
-    if (n == 0) {
-        n = query(fallback, rx, sizeof(rx));
-        if (n > 0) {
-            m_pid = fallback;
+    size_t n = 0;
+    m_last   = BatteryResult::NoReply;
+
+    for (uint8_t c = 0; c < 2; c++) {
+        const size_t got = query(candidates[c], rx, sizeof(rx));
+        if (got == 0) {
+            continue;
+        }
+        n = got;
+        if (got < 8) {
+            if (m_last == BatteryResult::NoReply) {
+                m_last = BatteryResult::ShortFrame;
+            }
+            continue;
+        }
+
+        BatteryReading      candidate;
+        const BatteryResult r = parse(rx, got, candidate);
+
+        // Ok and Unsampled both mean a SENDAT frame addressed to us came back from this
+        // destination — one with data, one with placeholders. Either way the address is
+        // right, and it is worth remembering.
+        if (r == BatteryResult::Ok || r == BatteryResult::Unsampled) {
+            m_pid  = candidates[c];
+            m_last = r;
+            out    = candidate;
+            break;
+        }
+        if (m_last == BatteryResult::NoReply || m_last == BatteryResult::ShortFrame) {
+            m_last = r;
         }
     }
 
-    if (n == 0) {
-        m_last = BatteryResult::NoReply;
-    } else if (n < 8) {
-        m_last = BatteryResult::ShortFrame;
-    } else {
-        m_last = parse(rx, n, out);
+    // Phase 2b: listen for the pack to push its own data, without asking again.
+    //
+    // This is the path the working reference actually reads from, and missing it is the best
+    // explanation for the placeholder zeros. Meshtastic requests data exactly once — the
+    // instant provisioning completes — and then sets `provision = 0` so it never requests
+    // again. Every value it reports from then on arrives as an *unsolicited* SENDAT frame the
+    // pack sends on its own schedule (RUI3 flag = REQ, dispatched through
+    // protocol_list[SENDAT].req -> SNHUBAPI_EVT_REPORT). The solicited reply we poll for goes
+    // down the other branch entirely (flag = RSP -> SNHUBAPI_EVT_SDATA_REQ).
+    //
+    // So the poll is a kick, and the push is the measurement. A freshly provisioned pack that
+    // has not sampled yet answers the kick immediately with a well-formed record template —
+    // exactly the all-zero frame the bench captured — and sends the real numbers moments
+    // later, to a driver that by then has stopped listening.
+    //
+    // Only entered when the poll did not already produce a reading, so a pack that answers
+    // properly pays nothing for this. Bounded by the same first-byte timeout as every other
+    // receive, and nothing is transmitted: the line is simply left open.
+    //
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+    //   onewireHandle(): `if (provision != 0) { RakSNHub_Protocl_API.get.data(provision);
+    //   provision = 0; }` then an unconditional `while (mySerial.available())` drain on every
+    //   50 ms tick. One request in the device's lifetime; continuous listening thereafter.
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+    //   protocol_list[SNHUB_TYPE_SENDAT] = { .req = snhub_snsrdat_req_program, .rsp =
+    //   snhub_snsrdat_rsp_program }; the .req half raises SNHUBAPI_EVT_REPORT and exists only
+    //   to handle a SENDAT the master never asked for. An unsolicited data push is a
+    //   first-class part of this protocol, not an artefact.
+    // CITE(bench): docs/EVIDENCE.md — passive listen at 9600 on 3d3425d, transmitting nothing,
+    //   received the pack's spontaneous PROVISION announcement every cycle. The pack is
+    //   demonstrably willing to talk unprompted on this wire.
+    if (m_last != BatteryResult::Ok) {
+        const size_t pushed = receive(rx, sizeof(rx));
+        if (pushed >= 8) {
+            BatteryReading      candidate;
+            const BatteryResult r = parse(rx, pushed, candidate);
+            if (r == BatteryResult::Ok) {
+                LOGLN(F("   battery : live values arrived as an unsolicited report"));
+                out    = candidate;
+                m_last = r;
+                n      = pushed;
+            } else if (m_last == BatteryResult::NoReply) {
+                m_last = r;
+                n      = pushed;
+            }
+        }
     }
 
     // Phase 3: a verified frame full of placeholders is the one failure this cycle can still
