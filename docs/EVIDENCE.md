@@ -84,6 +84,30 @@ add it at the top.
   cleanly, then re-run `scripts/flash.sh --yes --env busscan`. Do not capture serial or
   interpret sensor silence while the USB PID is `239A:0029`.
 
+### 2026-08-03 — Re-flash for the production-frame test fails DFU again; the PID gate catches it correctly (#28 verified)
+
+- **Commit:** `7dbc23b`, `busscan` env — adds `scan_production_frame()` (5 registers, slave
+  0x01, 9600 8N1) on top of the existing sweep, per #30's resolution (`kBaud` now 9600 in
+  `src/sensors/rk900.cpp`).
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB`.
+- **Attempted:** `scripts/flash.sh --env busscan --yes`. The board was running the prior
+  `busscan` app (`239A:8029`) when the command started, so `pio run -t upload`'s 1200 bps
+  touch reset it into the UF2 bootloader as designed — that part worked. The subsequent
+  `adafruit-nrfutil` DFU transfer then failed: `Timed out waiting for acknowledgement from
+  device` / `No data received on serial port`, the same class of failure `docs/FIRST_FLASH.md`
+  and issue #27 already documented.
+- **Verdict:** FLASH FAILED, correctly reported as such. `scripts/remote.sh usbpid` found
+  `239A:0029` (UF2 bootloader, no application) after the 30 s settle window, and
+  `scripts/flash.sh` reported `=== FLASH FAILED ===` rather than a false `FLASH OK` — **this
+  is real-hardware confirmation that #28's post-flash PID gate works**, closing #28. The
+  board currently has **no application running**; a raw serial capture taken now would be
+  indistinguishable from a silent sensor and must not be treated as evidence.
+- **Not yet closed:** the underlying DFU-transfer flakiness itself (distinct from #28, which
+  was only about *detecting* the failure correctly — it does). Per
+  `.cursor/rules/00-agent-liveness.mdc`, recovery requires a human at the bench: double-tap
+  RESET on the RAK19007 to re-enter DFU cleanly, then retry the same `flash.sh` command.
+  Still unproven: the production-frame five-register read at 9600.
+
 ### 2026-08-03 — The RK900 answers, and it is at 9600 baud, not the 4800 the firmware asks at
 
 - **Commit:** `6b70416` (the `busscan` image running on the board). Build host `HEAD` has
