@@ -117,7 +117,19 @@ payload bytes are IPSO records carrying a leading sensor-id byte:
 The sequence byte increments across cycles (`0x12`, `0x1B`, `0x24`), so this is live traffic,
 not a replay.
 
-**Phase 3 — our BOOT/provision broadcast drew 0 bytes at every baud.**
+**Checksum algorithm confirmed against the capture (desk verification, 2026-08-04).** Running
+`cal_chksum()` by hand over the `seq=0x1B` reply — `popcount(type=0x02) + popcount(flag=0x01)`
+plus the popcount of all 21 bytes the length field covers — sums to **49 = `0x31`**, which is
+exactly the trailing byte captured. The driver's `frame_chksum()` therefore implements the
+reference algorithm correctly, verifies **with the response flag `0x01`** as well as `0x00`,
+and the frame is genuine rather than mis-framed. The all-zero values are the pack's own
+content, not a decode error.
+
+**Phase 3 — our BOOT/provision broadcast drew 0 bytes at every baud.** Reading the reference
+settles this as **expected, not a fault**: `protocol_list[SNHUB_TYPE_PROVISION]` defines only
+`.req` and leaves `.rsp` NULL, and `snhub_provision_command()` has no code path awaiting a
+reply. BOOT is a "re-announce yourselves" nudge that nothing acknowledges. The 0-byte result
+is therefore not evidence of a malformed BOOT frame.
 
 - **What this establishes:**
   - The pack is alive on the one-wire bus at **9600**, and the record types match the IPSO
