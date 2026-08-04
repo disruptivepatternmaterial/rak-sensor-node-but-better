@@ -56,7 +56,9 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   `forest-weather-machines`. A drifted encoder does not lose one field; the decoder throws
   and discards the entire uplink. `scripts/check_decoder_parity.py` runs on every build.
 - **Status is `🚧 NOT YET DEPLOYED`** and stays that way until [`docs/EVIDENCE.md`](docs/EVIDENCE.md)
-  says otherwise. Stage 0 firmware compiles; nothing has been run on hardware.
+  says otherwise. Stages 0-2 have run on hardware (join + uplink 2026-07-31, RK900 reply
+  2026-08-03); Stage 3 (battery) has not. Deployment stays blocked until the H1-H8 gates and
+  the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close — not merely on "it booted once."
 - **The RAK4631 board definition is vendored** in [`rakwireless/`](rakwireless/) because it
   does not exist in the PlatformIO registry. Do not edit it, and do not "fix" the build by
   copying files into `~/.platformio` — see [`rakwireless/README.md`](rakwireless/README.md).
@@ -67,9 +69,9 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 
 | Stage | Adds | State |
 |---|---|---|
-| 0 | LED + USB serial | compiles; not yet run on hardware |
-| 1 | RK900 Modbus over RAK5802 @ 4800 | not started |
-| 2 | OTAA join + first uplink | not started; needs a TTN device |
+| 0 | LED + USB serial | run on hardware 2026-07-31 (`8d4a41c`) — firmware boots and prints over USB CDC ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
+| 1 | RK900 Modbus over RAK5802 @ 4800 | partial — RK900 gave a CRC-valid reply 2026-08-03 (`6b70416`, `busscan`), but **at 9600, not 4800** ([#30](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/30)); full 5-register read still pending |
+| 2 | OTAA join + first uplink | done 2026-07-31 — join + accepted uplink, `puma-concolor-001`, session restore across reset ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | 3 | RAK9154 battery telemetry over one-wire | not started; unblocked by ADR-0004 |
 
 ## Open blockers
