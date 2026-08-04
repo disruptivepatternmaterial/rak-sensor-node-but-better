@@ -153,12 +153,11 @@ uint32_t scan_production_frame()
     // The broad scan below established that this physical unit answers only at 9600.
     // Read the same contiguous five-register span Stage 1 will use so a baud-only reply
     // cannot be mistaken for a production-compatible sensor. This is diagnostic only:
-    // kBaud in rk900.cpp remains unchanged until the data frame is captured. Refs #30.
+    // its raw frame is the evidence gate for the production driver's selected baud. Refs #30.
     //
     // CITE(datasheet): [CIT-RK900] five consecutive holding registers from 0x0000.
-    // CITE(sibling): forest-weather-machines (local sibling)
-    //   docs/RK900-09_BRINGUP_AND_FALLBACKS_2026-05-15.md § "Modbus register map" — the
-    //   deployed fleet uses 9600 8N1, FC 0x03, slave 0x01, start 0x0000, quantity 5.
+    // CITE(sibling): [CIT-FWM-RK900-BRINGUP] — the sibling's recorded bench procedure uses
+    //   9600 8N1, FC 0x03, slave 0x01, start 0x0000, quantity 5.
     constexpr uint32_t kObservedBaud = 9600;
     constexpr uint8_t kObservedSlave = 0x01;
     constexpr uint8_t kProductionRegisterCount = 5;
