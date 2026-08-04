@@ -77,7 +77,7 @@ ssh "$BUILD_HOST" "zsh -l -c '
   # relay ref were current). It is cleanup only; GitHub has already received main,
   # so do not report a successful push as a failure merely because there is nothing
   # left to delete.
-  git branch -D ${RELAY_REF##refs/heads/} -q || true
+  git branch -D ${RELAY_REF##refs/heads/} -q 2>/dev/null || true
 '" || die "relay failed. The build host may have diverged; check it before retrying."
 
 echo
