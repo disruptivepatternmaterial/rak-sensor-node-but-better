@@ -6,18 +6,45 @@
 
 namespace {
 
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] WAKEUPBYTE 0xFF and DELIMTER 0x7E.
-constexpr uint8_t kWakeByte  = 0xFF;
-constexpr uint8_t kDelimiter = 0x7E;
-constexpr uint8_t kWakeCount = 4;
+// The RAK Sensor Hub one-wire link is NOT a bare TLV stream. Every frame is a RUI3
+// transport frame — { wakeup, delimiter, 16-bit length, type, flag, payload } — carrying a
+// SensorHub API frame — { dest, source, sequence, hub-type, payload-length, payload-type,
+// payload } — terminated by a one-byte checksum. Omitting the length/type/flag transport
+// header (as the previous revision did) makes the pack reject the frame in
+// verify_rui3type()/verify_checksum() and never reply — the 0-byte symptom.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] beegee-tokyo/RAK-OneWireSerial
+//   src/onewire_master_protocol.h — RUI3_Api_t{wakeup,start,length,type,flag,payload} and
+//   SNHub_Api_t{dest,source,sequence,type,payload_length,payload_type,payload}; WAKEUPBYTE
+//   0xFF, DELIMTER 0x7E, RUI3API_TYPE_SENSORHUB 2, RUI3API_FLG_REQ 0, SNHUB_TYPE_PROVISION
+//   1, SNHUB_TYPE_SENDAT 3, PLD_PROVI_TYPE_BOOT 2, PLD_SDATA_TPYE_SENDAT 2.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] meshtastic/firmware @ 02050a4
+//   variants/rak2560/RAK9154Sensor.cpp — the working nRF52840 reader. runOnce() calls
+//   RakSNHub_Protocl_API.init(), which sends an SNHUB_TYPE_PROVISION/BOOT frame first, and
+//   only then requests data (get.data) for the PID the pack announces. We replicate that
+//   boot-then-request order.
+constexpr uint8_t kWakeByte  = 0xFF; // RUI3_Api_t.wakeup
+constexpr uint8_t kDelimiter = 0x7E; // RUI3_Api_t.start
+constexpr uint8_t kWakeCount = 4;    // extra 0xFF settle the line; the pack scans for 0x7E
 
 // CITE(prior-art): [CIT-MESHTASTIC-9154] probe addressing on the Sensor Hub bus.
-constexpr uint8_t kProbeId  = 0x01;
-constexpr uint8_t kMasterId = 0x00;
+constexpr uint8_t kProbeId     = 0x01; // dest of the single provisioned probe
+constexpr uint8_t kMasterId    = 0x00; // PID_MASTER (source)
+constexpr uint8_t kBroadcastId = 0xFF; // PID_UNKNOW — BOOT/provision is addressed here
 
-// Request "send your latest sensor data".
-constexpr uint8_t kTypeSendData    = 0x03;
-constexpr uint8_t kPayloadSendData = 0x02;
+// RUI3 transport header, between the delimiter and the SensorHub frame.
+constexpr uint8_t kRui3TypeSensorHub = 0x02; // RUI3API_TYPE_SENSORHUB
+constexpr uint8_t kRui3FlagReq       = 0x00; // RUI3API_FLG_REQ
+// SHORT_SWAP(sizeof(SNHub_Api_t)=6) in wire order (low byte, then high byte). Both the
+// BOOT and SENDAT requests carry a zero-length payload, so the length is 6 for both.
+constexpr uint8_t kLenLo = 0x00;
+constexpr uint8_t kLenHi = 0x06;
+
+// SensorHub frame fields.
+constexpr uint8_t kHubTypeProvision = 0x01; // SNHUB_TYPE_PROVISION
+constexpr uint8_t kHubTypeSendData  = 0x03; // SNHUB_TYPE_SENDAT
+constexpr uint8_t kPldBoot          = 0x02; // PLD_PROVI_TYPE_BOOT
+constexpr uint8_t kPayloadSendData  = 0x02; // PLD_SDATA_TPYE_SENDAT
 
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] IPSO codes, already reduced by the 3200 offset.
 //   These are the same numbers the payload encoder uses on the LoRaWAN side, because RAK
@@ -36,9 +63,9 @@ constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 constexpr size_t   kRxCapacity         = 96;
 
-// Header bytes between the delimiter and the first record: dest, source, sequence, type,
-// length, payload type.
-constexpr size_t kHeaderBytes = 6;
+// SensorHub frame header (inside the RUI3 payload) before the first record: dest, source,
+// sequence, hub-type, payload-length, payload-type.
+constexpr size_t kHubHeaderBytes = 6;
 
 } // namespace
 
@@ -105,26 +132,52 @@ int Battery::rx_byte(uint32_t timeout_us)
     return v;
 }
 
-void Battery::send_query()
+void Battery::send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type)
 {
+    // SensorHub frame: dest, source, sequence, hub-type, payload-length(0), payload-type.
+    const uint8_t seq    = ++m_seq;
+    const uint8_t hub[6] = {dest, kMasterId, seq, hub_type, 0x00, payload_type};
+
+    // Checksum is NOT an XOR. It is the sum of the set-bit counts (popcount) of the RUI3
+    // type byte, the RUI3 flag byte, and every byte the length field covers (the six
+    // SensorHub bytes), accumulated into a uint8_t.
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] onewire_master_protocol.c cal_chksum():
+    //   chsum = popcount(type) + popcount(flag) + sum popcount(payload[0..len-1]).
+    uint8_t checksum = (uint8_t)(__builtin_popcount(kRui3TypeSensorHub) +
+                                 __builtin_popcount(kRui3FlagReq));
+    for (size_t i = 0; i < sizeof(hub); i++) {
+        checksum += __builtin_popcount(hub[i]);
+    }
+
     for (uint8_t i = 0; i < kWakeCount; i++) {
         tx_byte(kWakeByte);
     }
-
-    const uint8_t body[] = {
-        kDelimiter, kProbeId, kMasterId, 0x00, kTypeSendData, 0x01, kPayloadSendData,
-    };
-
-    // Checksum is the XOR of everything after the delimiter.
-    uint8_t checksum = 0;
-    for (size_t i = 1; i < sizeof(body); i++) {
-        checksum ^= body[i];
-    }
-
-    for (size_t i = 0; i < sizeof(body); i++) {
-        tx_byte(body[i]);
+    tx_byte(kDelimiter);
+    tx_byte(kLenLo);
+    tx_byte(kLenHi);
+    tx_byte(kRui3TypeSensorHub);
+    tx_byte(kRui3FlagReq);
+    for (size_t i = 0; i < sizeof(hub); i++) {
+        tx_byte(hub[i]);
     }
     tx_byte(checksum);
+}
+
+// Broadcast BOOT/provision request. The reference driver sends this at init before any
+// data request; an un-provisioned pack does not answer a SENDAT.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] onewire_master_protocol.c api_init() ->
+//   snhub_provision_command(PID_UNKNOW, SNHUB_GS_SET, PLD_PROVI_TYPE_BOOT).
+void Battery::send_boot()
+{
+    send_frame(kBroadcastId, kHubTypeProvision, kPldBoot);
+}
+
+// "Send your latest sensor data" to the provisioned probe.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] onewire_master_protocol.c snhub_snsrdat_command()
+//   with SNHUB_TYPE_SENDAT + PLD_SDATA_TPYE_SENDAT, zero-length payload.
+void Battery::send_query()
+{
+    send_frame(kProbeId, kHubTypeSendData, kPayloadSendData);
 }
 
 size_t Battery::receive(uint8_t *buf, size_t cap)
@@ -152,51 +205,45 @@ size_t Battery::receive(uint8_t *buf, size_t cap)
 
 BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out)
 {
-    size_t start = 0;
-    while (start < len && buf[start] != kDelimiter) {
-        start++;
+    size_t d = 0;
+    while (d < len && buf[d] != kDelimiter) {
+        d++;
     }
-    if (start >= len) {
+    if (d >= len) {
         return BatteryResult::BadFrame;
     }
 
-    // Everything after the delimiter, excluding the trailing checksum byte.
-    const size_t body = start + 1;
-    if (body + kHeaderBytes >= len) {
+    // RUI3 payload length (covers the SensorHub frame + records), from the 16-bit length
+    // field just after the delimiter. LSB_COMB(hbyte, lbyte) = (lbyte << 8) + hbyte, with
+    // lbyte at delimiter+1 and hbyte at delimiter+2.
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] onewire_master_protocol.c LSB_COMB +
+    //   verify_checksum(): checksum = cal_chksum(); compare rui3->payload[payload_len].
+    if (d + 4 >= len) {
+        return BatteryResult::BadFrame;
+    }
+    const size_t payload_len = ((size_t)buf[d + 1] << 8) | buf[d + 2];
+
+    const size_t payload   = d + 5; // after length[2] + rui3 type + rui3 flag
+    const size_t cksum_idx = payload + payload_len;
+    if (cksum_idx >= len) {
         return BatteryResult::BadFrame;
     }
 
-    // The header's fifth byte is the declared payload length, counting the records that
-    // follow the payload-type byte. Trusting it is what stops the record scan from running
-    // off into whatever trailing noise the line picked up.
-    const size_t declared    = buf[body + 4];
-    const size_t records     = body + kHeaderBytes;
-    const size_t records_end = records + declared;
-
-    // The checksum sits immediately after the records. If the declared length disagrees
-    // with how many bytes actually arrived, the frame is not trustworthy regardless of
-    // what the records look like.
-    if (records_end >= len) {
-        return BatteryResult::BadFrame;
+    // Checksum: popcount(rui3 type) + popcount(rui3 flag) + popcount over every byte the
+    // length field covers. Same algorithm as the request (cal_chksum).
+    uint8_t expected = (uint8_t)(__builtin_popcount(buf[d + 3]) + __builtin_popcount(buf[d + 4]));
+    for (size_t i = 0; i < payload_len; i++) {
+        expected += __builtin_popcount(buf[payload + i]);
     }
 
-    // Same convention as the request: XOR of every byte between the delimiter and the
-    // checksum itself.
-    //
-    // ASSUMPTION, not yet confirmed against hardware: that the pack's reply uses the same
-    // checksum convention as the request. The prior-art codec never checked the reply at
-    // all, so there is nothing to copy here. If the first real pack reply is rejected,
-    // compare the logged expected and received bytes before changing anything — the frame
-    // may simply be framed differently. Tracked in issue #5.
-    uint8_t expected = 0;
-    for (size_t i = body; i < records_end; i++) {
-        expected ^= buf[i];
-    }
-
-    if (expected != buf[records_end]) {
-        LOGF("   battery : checksum %02X, expected %02X\n", buf[records_end], expected);
+    if (expected != buf[cksum_idx]) {
+        LOGF("   battery : checksum %02X, expected %02X\n", buf[cksum_idx], expected);
         return BatteryResult::BadChecksum;
     }
+
+    // Records occupy payload[6 .. payload_len-1], i.e. after the 6-byte SensorHub header.
+    const size_t records     = payload + kHubHeaderBytes;
+    const size_t records_end = cksum_idx;
 
     // Records are { sensor id, IPSO type, value }, with the value width implied by the
     // type. An unknown type therefore has an unknown width, and there is no way to find
@@ -208,6 +255,10 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     // simply wrong. A pack that reports a number nobody can challenge is worse than one
     // that reports nothing, so whatever was decoded before the unknown record is kept and
     // the rest is abandoned.
+    // Multi-byte values in the pack's SENDAT response are little-endian (LSB first).
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] RAK9154Sensor.cpp SNHUBAPI_EVT_SDATA_REQ path
+    //   decodes dc_cur/dc_vol as (msg[2] << 8) + msg[1], i.e. value byte 0 is the low byte.
+    //   (The unsolicited REPORT path uses the opposite order; a GET elicits SDATA_REQ.)
     size_t i = records;
     while (i + 2 < records_end) {
         const uint8_t type = buf[i + 1];
@@ -216,15 +267,17 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
             out.soc.set(buf[i + 2]);
             i += 3;
         } else if (type == kIpsoDcCurrent && (i + 3) < records_end) {
-            out.current.set((int16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
+            out.current.set((int16_t)(((uint16_t)buf[i + 3] << 8) | buf[i + 2]));
             i += 4;
         } else if (type == kIpsoDcVoltage && (i + 3) < records_end) {
-            out.voltage.set((uint16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
+            out.voltage.set((uint16_t)(((uint16_t)buf[i + 3] << 8) | buf[i + 2]));
             i += 4;
         } else if (type == kIpsoTemperature && (i + 3) < records_end) {
-            // Type 103 is the same code the pack's own LoRaWAN uplinks use for
-            // temperature, carried as a signed 16-bit value.
-            out.temperature.set((int16_t)(((uint16_t)buf[i + 2] << 8) | buf[i + 3]));
+            // Type 103 is the same code the pack's own LoRaWAN uplinks use for temperature,
+            // a signed 16-bit value. ASSUMED little-endian to match the current/voltage
+            // records above; the Meshtastic reader does not decode this type, so confirm
+            // the byte order against a real reply before trusting the sign.
+            out.temperature.set((int16_t)(((uint16_t)buf[i + 3] << 8) | buf[i + 2]));
             i += 4;
         } else {
             // Worth logging: it means the pack sends something this build does not know
@@ -244,6 +297,19 @@ BatteryReading Battery::read()
     pinMode(m_pin, INPUT_PULLUP);
     delay(2);
 
+    // Phase 1: BOOT/provision handshake. The reference driver always does this first (via
+    // RakSNHub_Protocl_API.init); the pack replies with its provision record, which is what
+    // enumerates the probe. We ignore the reply's contents and address the probe as 0x01,
+    // exactly as the single-probe Meshtastic reader does.
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] RAK9154Sensor::runOnce -> API.init() ->
+    //   provision BOOT, then get.data for the announced PID.
+    send_boot();
+    delay(2); // let the probe turn the line around
+    uint8_t provision[kRxCapacity];
+    (void)receive(provision, sizeof(provision));
+    delay(2);
+
+    // Phase 2: request the latest sensor data.
     send_query();
     delay(2); // let the probe turn the line around
 

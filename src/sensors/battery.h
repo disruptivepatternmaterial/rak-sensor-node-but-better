@@ -47,6 +47,8 @@ class Battery {
     BatteryResult last_result() const { return m_last; }
 
   private:
+    void   send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type);
+    void   send_boot();
     void   send_query();
     size_t receive(uint8_t *buf, size_t cap);
     void   tx_byte(uint8_t b);
@@ -60,5 +62,6 @@ class Battery {
     BatteryResult parse(const uint8_t *buf, size_t len, BatteryReading &out);
 
     uint8_t       m_pin;
+    uint8_t       m_seq  = 0; // per-request sequence, mirrors menu.seq in the reference
     BatteryResult m_last = BatteryResult::NoReply;
 };
