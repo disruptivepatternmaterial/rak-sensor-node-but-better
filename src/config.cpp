@@ -43,16 +43,30 @@ void Config::begin()
         return;
     }
 
+#if FEATURE_BENCH_INTERVAL
+    // The stored interval is deliberately not read on a bench build, and the bench value is
+    // never written back. A field image leaves 1800-86400 s in flash, all of which is inside
+    // the bench build's widened range, so loading it would quietly restore a half-hour
+    // cadence on a board the operator is standing in front of — the setting would look
+    // ignored. Not writing 60 s back keeps the flash clean for the next field image, which
+    // would reject it as out of range anyway.
+    LOGF("   config  : bench build — interval forced to %lu s, stored value ignored\n",
+         (unsigned long)kIntervalDefaultSeconds);
+    m_interval = kIntervalDefaultSeconds;
+#else
     if (!load()) {
         LOGLN(F("   config  : no stored settings — writing defaults"));
     }
+#endif
 
     // The boot counter is the cheapest possible watchdog diagnostic: if it climbs between
     // uplinks, something is resetting the node.
     m_boots++;
+#if !FEATURE_BENCH_INTERVAL
     if ((m_boots % kBootPersistEvery) == 0) {
         save();
     }
+#endif
 
     LOGF("   config  : interval %lu s, boot #%lu\n", (unsigned long)m_interval,
          (unsigned long)m_boots);

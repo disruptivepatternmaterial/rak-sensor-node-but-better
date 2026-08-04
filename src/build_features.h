@@ -62,6 +62,18 @@
 #define FEATURE_CONSOLE 1
 #endif
 
+// Bench cadence. OFF everywhere by default, and config.h refuses to compile it together
+// with FEATURE_RADIO, so the field image cannot acquire it by accident or by someone
+// copying a stage environment's flags. When ON, the reporting interval floor and default
+// both drop to 60 s so the operator can watch a sensor respond at the bench instead of
+// waiting out a half-hour field interval.
+//
+// Deliberately not a runtime setting and deliberately not a downlink. A node already in
+// the woods must have no path to a 60 s cadence at all — see docs/FIRMWARE_SPEC.md §4.
+#ifndef FEATURE_BENCH_INTERVAL
+#define FEATURE_BENCH_INTERVAL 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)
@@ -78,4 +90,4 @@
 // the C library uses F as a parameter name in its own macros. That mistake turned into a
 // wall of errors inside stdio.h and cmath that pointed nowhere near this file.
 
-#define FIRMWARE_VERSION "0.2.1"
+#define FIRMWARE_VERSION "0.3.0"

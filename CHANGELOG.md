@@ -8,6 +8,30 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+Firmware version is now `0.3.0` — a new capability, backward compatible with the decoder.
+
+### Added
+
+- **A bench-only 60 s reading cadence, `FEATURE_BENCH_INTERVAL`.** Bring-up needed a reading
+  about once a minute; the field floor is 1800 s, so confirming a wiring change took half an
+  hour. The flag lowers the interval floor and default to 60 s and is defined only by the
+  `stage1` and `stage2` environments — never by `[env:rak4631]`.
+
+  It is deliberately awkward to misuse. `src/config.h` **fails the build** if it is combined
+  with `FEATURE_RADIO`, because a 60 s cadence is roughly 1440 uplinks a day against a
+  fair-use allowance of about 30 seconds of airtime; rather than guarding that at run time,
+  no such image can be produced. It is compile-time only, so no downlink and no stored
+  setting can talk a node in the woods into it. And a bench build ignores the stored interval
+  outright — every field value sits inside the bench build's widened range, so loading flash
+  would have quietly restored a half-hour cadence on a board the operator was standing in
+  front of, reading as if the setting had been ignored. The bench value is never written
+  back. The boot banner now prints the interval bounds and the bench flag, so a build's
+  cadence is identifiable from the console alone.
+
+  The sleep-disabled wait cap, previously a flat 30 s, now rises to the bench interval on a
+  bench build; left at 30 s it would have silently overridden the cadence it exists to serve.
+  Issue #25.
+
 ### Fixed
 
 - **The node now transmits proof of life when both sensors are silent.** It previously skipped

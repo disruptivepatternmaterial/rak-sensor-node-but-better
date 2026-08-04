@@ -22,6 +22,21 @@
 
 #include <stdint.h>
 
+#include "build_features.h"
+
+// A bench build that could also transmit is refused at compile time rather than guarded at
+// run time. Sixty-second uplinks are roughly 1440 a day; at the slowest US915 rate that is
+// well over an hour of airtime against an allowance of thirty seconds, so such a build has
+// no legitimate use on the shared network and the only safe number of ways to produce one
+// is zero. If bench-cadence radio testing is ever genuinely needed it belongs on a private
+// network, where the allowance does not apply — see issue #26.
+//
+// CITE(policy): [CIT-TTN-FUP] the sandbox allowance is 30 s of uplink airtime per node per
+//   24 h, and the same page states the limits do not apply on a private network.
+#if FEATURE_BENCH_INTERVAL && FEATURE_RADIO
+#error "FEATURE_BENCH_INTERVAL is bench-only and must not be built with FEATURE_RADIO — a 60 s uplink cadence breaches the TTN fair use allowance (docs/FIRMWARE_SPEC.md §4)."
+#endif
+
 // Bounds from docs/FIRMWARE_SPEC.md §4. The lower bound is a network-airtime limit rather
 // than anything the hardware cares about.
 //
@@ -34,9 +49,26 @@
 // The slow rate is not a corner case. Adaptive data rate moves nodes with weak coverage
 // down, so the node most likely to sit at the worst rate is the remote one this design is
 // for. A guard that only holds in good coverage would be no guard at all.
+#if FEATURE_BENCH_INTERVAL
+// Bench cadence. Only reachable with the radio compiled out, so no airtime is spent at all
+// and the fair-use arithmetic above does not apply — the node reads the sensor and prints.
+//
+// Sixty seconds rather than something shorter because it is the number the bench actually
+// needs: long enough that a full RK900 poll, including both retries at a 1000 ms timeout,
+// finishes with margin, and short enough that a wiring change is confirmed or refuted while
+// the operator's hand is still on the harness.
+//
+// CITE(spec): [CIT-MODBUS-SERIAL] the master's response timeout and retry behavior, which
+//   is what sets the floor on how long one poll can take before the next is due.
+// CITE(policy): [CIT-TTN-FUP] why this value may never reach a build that transmits.
+constexpr uint32_t kIntervalMinSeconds     = 60;
+constexpr uint32_t kIntervalMaxSeconds     = 86400;
+constexpr uint32_t kIntervalDefaultSeconds = 60;
+#else
 constexpr uint32_t kIntervalMinSeconds     = 1800;
 constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 3600;
+#endif
 
 class Config {
   public:

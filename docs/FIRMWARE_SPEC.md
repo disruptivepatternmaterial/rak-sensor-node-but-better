@@ -112,6 +112,41 @@ mean 288 uplinks and roughly 107 seconds of airtime — over three times the all
 with the weakest coverage on that rate, which is exactly this deployment, so the worst case
 is the one to design against.
 
+### Bench cadence (`FEATURE_BENCH_INTERVAL`) — never in the field image
+
+Bring-up needs a reading about once a minute; a half-hour field interval makes a wiring
+change take half an hour to confirm. `FEATURE_BENCH_INTERVAL` lowers both the floor and the
+default to **60 s**. It is defined only by the `stage1` and `stage2` environments in
+`platformio.ini` and is `0` everywhere else, including `[env:rak4631]`.
+
+| Property | Field image | Bench build |
+|---|---|---|
+| Minimum interval | 1800 s | 60 s |
+| Default interval | 3600 s | 60 s |
+| Maximum interval | 86400 s | 86400 s |
+| Stored interval honored | yes | **no** — forced to 60 s, and never written back |
+| `FEATURE_RADIO` | 1 | **must be 0** |
+
+Three properties make this safe rather than merely documented:
+
+- **`src/config.h` fails the build** when `FEATURE_BENCH_INTERVAL` and `FEATURE_RADIO` are
+  both set. A 60 s cadence is roughly 1440 uplinks a day; at the slowest US915 rate that is
+  well over an hour of airtime against an allowance of about 30 s [CIT-TTN-FUP]. There is no
+  legitimate build combining the two on the shared network, so the number that can be
+  produced is zero rather than one guarded at run time. Private-network bench testing with
+  the radio is tracked separately — the fair-use limits do not apply there [CIT-TTN-FUP].
+- **It is compile-time only.** No downlink and no stored setting can reach a 60 s cadence,
+  so a node already in the woods cannot be talked into one. `set_interval_seconds()` still
+  refuses anything outside the bounds compiled into the running image.
+- **The stored interval is ignored on a bench build** and the bench value is never
+  persisted. Every field interval (1800–86400 s) falls inside the bench build's widened
+  range, so loading flash would quietly restore a half-hour cadence and read as the setting
+  having been ignored.
+
+With sleep compiled out the between-cycle wait is capped so bring-up is not spent watching
+a blank screen; that cap rises to the bench interval on a bench build, or it would override
+the cadence it is supposed to serve.
+
 The leading opcode replaces an earlier plan for a bare 4-byte interval. A bare integer has
 no room to express any other request, so adding one later would have meant guessing at a
 message's meaning from its length — and a node already in the woods cannot be taught the

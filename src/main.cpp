@@ -44,6 +44,16 @@ constexpr uint32_t kWatchdogSeconds = 120;
 // waiting forever would make a perfectly healthy board look dead.
 constexpr uint32_t kConsoleWaitMs = 3000;
 
+// Ceiling on the between-cycle wait when sleep is compiled out, so bring-up is not spent
+// watching a blank screen for an hour. On a bench build the ceiling has to be at least the
+// bench interval or it would silently override the cadence the operator asked for — a 30 s
+// cap against a 60 s interval reads as the setting having been ignored.
+#if FEATURE_BENCH_INTERVAL
+constexpr uint32_t kAwakeWaitCapSeconds = kIntervalDefaultSeconds;
+#else
+constexpr uint32_t kAwakeWaitCapSeconds = 30;
+#endif
+
 Config           config;
 Radio            radio;
 RK900            weather_sensor;
@@ -77,6 +87,13 @@ void print_banner()
     LOGF("built    : %s %s\n", __DATE__, __TIME__);
     LOGF("features : rk900=%d battery=%d radio=%d sleep=%d wdt=%d\n", FEATURE_RK900,
          FEATURE_BATTERY, FEATURE_RADIO, FEATURE_SLEEP, FEATURE_WATCHDOG);
+    // Compile-time bounds, not the live value — config.begin() prints that a moment later,
+    // and the two together say whether a stored setting is in play. Printed because a build
+    // running the bench cadence must be identifiable from the console alone; nothing else
+    // distinguishes it from the field image at a glance.
+    LOGF("interval : bench=%d, bounds %lu-%lu s, default %lu s\n", FEATURE_BENCH_INTERVAL,
+         (unsigned long)kIntervalMinSeconds, (unsigned long)kIntervalMaxSeconds,
+         (unsigned long)kIntervalDefaultSeconds);
 
 #if FEATURE_RADIO
     // Printed so the identity the node is actually joining with can be compared against what
@@ -222,9 +239,9 @@ void loop()
     power::sleep_seconds(sleep_for);
 #else
     // Without sleep the node stays awake and simply waits, which keeps the console
-    // attached and every cycle observable. Capped so bring-up is not spent watching a
-    // blank screen for an hour.
-    const uint32_t awake_wait = (sleep_for > 30) ? 30 : sleep_for;
+    // attached and every cycle observable.
+    const uint32_t awake_wait =
+        (sleep_for > kAwakeWaitCapSeconds) ? kAwakeWaitCapSeconds : sleep_for;
     LOGF("   wait    : %lu s (sleep disabled)\n\n", (unsigned long)awake_wait);
     for (uint32_t i = 0; i < awake_wait; i++) {
         delay(1000);
