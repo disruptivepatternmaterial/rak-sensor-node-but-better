@@ -13,9 +13,11 @@
  *   enumerates as probe id 0x01, with the master as 0x00.
  * CITE(sibling): [CIT-RAK45WIRE] rak-4-5-wire/firmware/nanoc6-onewire-poll @ efc0e3c —
  *   clean-room
- *   codec this one follows for framing and bit timing. It decoded only three TLV types;
- *   this implementation adds temperature, which the protocol carries as type 103 and that
- *   codec silently discarded as unrecognized.
+ *   codec this one follows for framing. It decoded only three TLV types; this
+ *   implementation adds temperature, which the protocol carries as type 103 and that codec
+ *   silently discarded as unrecognized. Its bit timing is NOT followed: that codec runs on
+ *   an ESP32-C6, where a bit-banged pin write is cheap enough to work. On the nRF52840 it
+ *   is not — see the transport rationale at the top of battery.cpp.
  */
 
 #pragma once
@@ -51,8 +53,12 @@ class Battery {
     void   send_boot();
     void   send_query();
     size_t receive(uint8_t *buf, size_t cap);
-    void   tx_byte(uint8_t b);
-    int    rx_byte(uint32_t timeout_us);
+
+    // Byte-level transport. The bit timing lives in beegee-tokyo/RAK-OneWireSerial, not
+    // here — see the rationale at the top of battery.cpp. Deliberately not a member of this
+    // class: the library's type is nRF-only, and every other sensor header in this tree
+    // stays free of Arduino headers so the off-target tests keep building.
+    void tx_byte(uint8_t b);
 
     // Verifies the frame before believing any of it, then fills `out`. Returns the reason
     // when it refuses. Validation matters more here than it looks: an unverified record

@@ -3,6 +3,7 @@
 #include "../build_features.h"
 
 #include <Arduino.h>
+#include <SoftwareHalfSerial.h>
 
 namespace {
 
@@ -54,10 +55,51 @@ constexpr uint8_t kIpsoCapacity    = 184; // 3384 - 3200
 constexpr uint8_t kIpsoDcCurrent   = 185; // 3385 - 3200
 constexpr uint8_t kIpsoDcVoltage   = 186; // 3386 - 3200
 
-// 9600 8N1, bit-banged because the line is a single open-drain wire shared between both
-// directions — a hardware UART would need external direction control that is not there.
-constexpr uint32_t kBitUs     = 104; // 1 / 9600 s, rounded
-constexpr uint32_t kHalfBitUs = 52;
+// 8N1 on a single open-drain wire shared between both directions — a hardware UART would
+// need external direction control that is not there, so the bit timing is done in software.
+//
+// It is NOT done here, though, and that distinction is the whole point of this revision.
+// The previous implementation drove the line with digitalWrite() and delayMicroseconds(104)
+// per bit. On the nRF52840 an Arduino digitalWrite() is a function call that resolves the
+// pin through the variant table and then does a read-modify-write on the port register;
+// that cost lands *on top of* every delay, so each bit period overshoots 104 us and the
+// error accumulates across the ten bits of a byte. By the stop bit the frame is skewed far
+// enough that the pack discards it — which is exactly the observed symptom: a correct frame
+// (375e99a fixed the content) that still draws zero bytes in reply.
+//
+// The reference implementation avoids that by caching the port output register and the pin
+// bit mask once, then setting each bit with a single `*reg |= mask` / `*reg &= ~mask`. The
+// write is a couple of instructions instead of a function call, so delayMicroseconds()
+// dominates the bit period and 9600 comes out accurate. RX is not polled at all: a GPIOTE
+// falling-edge event fires on the start bit, and the handler centres the first sample at
+// half a bit minus 2 us to pay for interrupt latency, then walks the byte at one bit minus
+// 1 us with sixteen NOPs of padding to trim the residual.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 src/SoftwareHalfSerial.cpp — write():
+//   `volatile uint32_t *reg = _transmitPortRegister; ... *reg |= reg_mask` per bit, with
+//   only NRF_GPIOTE->INTENCLR masked (not global interrupts, which the SoftDevice forbids
+//   holding); setTX()/setRX() cache portOutputRegister(digitalPinToPort(pin)) and
+//   digitalPinToBitMask(pin); recv() is the GPIOTE handler with _rx_delay_centering =
+//   bit/2 - 2, _rx_delay_intrabit = bit - 1, and the 16-NOP block.
+// CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification, GPIO — the OUT/OUTSET/
+//   OUTCLR port registers are what a pin write ultimately touches; writing them directly is
+//   what removes the per-bit software overhead the Arduino wrapper adds.
+// CITE(datasheet): [CIT-NRF-GPIOTE] nRF52840 Product Specification, GPIOTE — IN events with
+//   CONFIG.POLARITY = HiToLo give a hardware edge-detect on the start bit, which is how RX
+//   starts on time instead of inside a polling loop that may already be a bit late.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+//   drives this same library on an nRF52840: `static SoftwareHalfSerial mySerial(pin);`
+//   mySerial.begin(9600); then write() on send and available()/read() on receive.
+constexpr long kBaud = 9600;
+
+// One wire, one bus. The library holds its RX ring buffer and `active_object` in class
+// statics, so it is a singleton by construction; binding it to the pin on first use keeps
+// the pin in one place (main.cpp) and keeps this nRF-only type out of battery.h.
+SoftwareHalfSerial &bus(uint8_t pin)
+{
+    static SoftwareHalfSerial instance(pin);
+    return instance;
+}
 
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
@@ -82,54 +124,16 @@ const char *battery_result_name(BatteryResult r)
     return "?";
 }
 
+// One byte out. The library turns the line around for us: write() detaches the RX edge
+// interrupt, drives the pin as an output for the ten bit periods, then puts it back to
+// input-with-pull-up and re-attaches — so the probe can answer the moment we stop talking,
+// and our own start bit never re-triggers our own receiver.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 SoftwareHalfSerial::write() ->
+//   beginTx()/beginRx(); this per-byte turnaround is the same path Meshtastic's
+//   SNHUBAPI_EVT_QSEND takes when it hands a whole frame to mySerial.write(msg, len).
 void Battery::tx_byte(uint8_t b)
 {
-    // Interrupts off for the duration of the byte: at 104 us per bit, a single interrupt
-    // landing mid-byte is enough to shift a bit boundary and corrupt the frame.
-    noInterrupts();
-
-    pinMode(m_pin, OUTPUT);
-    digitalWrite(m_pin, LOW); // start bit
-    delayMicroseconds(kBitUs);
-
-    for (uint8_t i = 0; i < 8; i++) {
-        digitalWrite(m_pin, (b & 0x01) ? HIGH : LOW);
-        b >>= 1;
-        delayMicroseconds(kBitUs);
-    }
-
-    digitalWrite(m_pin, HIGH); // stop bit
-    delayMicroseconds(kBitUs);
-
-    // Release to the pull-up so the probe can drive the shared line.
-    pinMode(m_pin, INPUT_PULLUP);
-
-    interrupts();
-}
-
-int Battery::rx_byte(uint32_t timeout_us)
-{
-    const uint32_t start = micros();
-    while (digitalRead(m_pin) == HIGH) {
-        if ((micros() - start) > timeout_us) {
-            return -1;
-        }
-    }
-
-    // Land in the middle of bit 0: half a bit to the centre of the start bit, then one
-    // full bit forward. Sampling at the centre is what tolerates clock mismatch.
-    delayMicroseconds(kHalfBitUs + kBitUs);
-
-    uint8_t v = 0;
-    for (uint8_t i = 0; i < 8; i++) {
-        if (digitalRead(m_pin) == HIGH) {
-            v |= (uint8_t)(1 << i);
-        }
-        delayMicroseconds(kBitUs);
-    }
-
-    delayMicroseconds(kBitUs); // stop bit
-    return v;
+    bus(m_pin).write(b);
 }
 
 void Battery::send_frame(uint8_t dest, uint8_t hub_type, uint8_t payload_type)
@@ -180,25 +184,36 @@ void Battery::send_query()
     send_frame(kProbeId, kHubTypeSendData, kPayloadSendData);
 }
 
+// Drain whatever the GPIOTE receiver has buffered. Bytes are assembled in the interrupt
+// handler and queued, so this no longer has to be sitting on the pin when the start bit
+// arrives — the previous polling loop could miss a reply simply by being one bit late.
+//
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp onewireHandle():
+//   `while (mySerial.available()) { buff[bufflen++] = mySerial.read(); delay(2); }` — a
+//   per-byte grace period is what delimits the frame, because there is no length field we
+//   can trust before parsing. Same shape here, with the gap expressed as a timeout.
 size_t Battery::receive(uint8_t *buf, size_t cap)
 {
-    size_t n = 0;
+    SoftwareHalfSerial &link = bus(m_pin);
 
-    int v = rx_byte(kFirstByteTimeoutUs);
-    if (v < 0) {
-        return 0;
-    }
-    buf[n++] = (uint8_t)v;
+    // The first byte gets the long window: the probe may still be waking.
+    uint32_t deadline_us = kFirstByteTimeoutUs;
+    uint32_t mark        = micros();
+    size_t   n           = 0;
 
-    // Every subsequent byte gets a short window. A gap longer than that means the probe
-    // has finished talking, which is what delimits the frame — there is no length field
-    // we can trust before parsing.
     while (n < cap) {
-        v = rx_byte(kInterByteTimeoutUs);
-        if (v < 0) {
+        const int v = link.read();
+        if (v >= 0) {
+            buf[n++] = (uint8_t)v;
+            // Every subsequent byte gets a short window. A gap longer than that means the
+            // probe has finished talking, which is what delimits the frame.
+            deadline_us = kInterByteTimeoutUs;
+            mark        = micros();
+            continue;
+        }
+        if ((micros() - mark) > deadline_us) {
             break;
         }
-        buf[n++] = (uint8_t)v;
     }
     return n;
 }
@@ -294,8 +309,12 @@ BatteryReading Battery::read()
 {
     BatteryReading out;
 
-    pinMode(m_pin, INPUT_PULLUP);
-    delay(2);
+    // begin() caches the port registers, arms the GPIOTE falling-edge interrupt, and leaves
+    // the pin as input-with-pull-up so the idle line reads high. Everything after this point
+    // is timing-critical only inside the library.
+    SoftwareHalfSerial &link = bus(m_pin);
+    link.begin(kBaud);
+    link.flush();
 
     // Phase 1: BOOT/provision handshake. The reference driver always does this first (via
     // RakSNHub_Protocl_API.init); the pack replies with its provision record, which is what
@@ -308,6 +327,7 @@ BatteryReading Battery::read()
     uint8_t provision[kRxCapacity];
     (void)receive(provision, sizeof(provision));
     delay(2);
+    link.flush(); // anything still queued from phase 1 is not part of the data reply
 
     // Phase 2: request the latest sensor data.
     send_query();
@@ -335,8 +355,14 @@ BatteryReading Battery::read()
         LOGLN("");
     }
 
-    // Leave the pin as a plain input. Holding the pull-up enabled costs current through
-    // the pack's line resistor for the whole sleep interval.
+    // Release the GPIOTE channel and the edge interrupt, then leave the pin as a plain
+    // input. end() alone is not enough: the library idles RX with the pull-up enabled, and
+    // holding that costs current through the pack's line resistor for the whole sleep
+    // interval — which on a node that runs unattended for months is not a rounding error.
+    // CITE(datasheet): [CIT-NRF-GPIO] nRF52840 PS, GPIO — PIN_CNF[n].PULL selects the pin's
+    //   pull resistor independently of DIR, so re-running pinMode(INPUT) after end() is what
+    //   actually removes it.
+    link.end();
     pinMode(m_pin, INPUT);
 
     if (m_last != BatteryResult::Ok) {
