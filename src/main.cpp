@@ -315,6 +315,13 @@ void loop()
 
     if (!payload.empty()) {
         empty_cycles = 0;
+    } else {
+        // Counted here, unconditionally, so a brownout hold (below) still advances the
+        // quiet-cycle count. It previously lived in the heartbeat branch's condition, where
+        // short-circuit evaluation skipped the increment whenever the brownout branch was
+        // taken instead — a silent-and-low-power node under-reported how long it had been
+        // silent in the first log line after recovery. Refs #24.
+        ++empty_cycles;
     }
 
     uint32_t sleep_for = config.interval_seconds();
@@ -325,7 +332,7 @@ void loop()
         // recovers on sunlight, not on being left alone, and the node has to notice the
         // moment it can transmit again.
         LOGLN(F("   uplink  : held — pack too low to transmit"));
-    } else if (payload.empty() && !heartbeat_due(++empty_cycles)) {
+    } else if (payload.empty() && !heartbeat_due(empty_cycles)) {
         // Both sensors silent, and the last proof-of-life was recent enough. Reading
         // continues on schedule because the fault may clear on its own.
         LOGF("   uplink  : nothing to send (%lu quiet cycle(s))\n", (unsigned long)empty_cycles);

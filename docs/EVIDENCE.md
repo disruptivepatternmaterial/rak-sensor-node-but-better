@@ -37,8 +37,8 @@ From [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §7. None of these can be closed by 
 | H2 | Deep sleep between cycles; radio sleeps | Measured sleep current on battery | ⬜ none |
 | H3 | Brownout: no flash thrash, no TX when low | Sag the supply → observed skip | ⬜ none |
 | H4 | Bounded backoff; survives multi-day no-gateway | Gateway off ≥48 h → observed backoff | ⬜ none |
-| H5 | Interval + keys survive power loss | Set interval, cut power, confirm retained | ⬜ none |
-| H6 | RK900 absent → no livelock | Unplug sensor → cycle continues | ⬜ none |
+| H5 | Interval + keys survive power loss | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
+| H6 | RK900 absent → no livelock | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
 | H7 | BMS silent → no livelock | Unplug BMS data → cycle continues | ⬜ none |
 | H8 | Bench soak ≥24 h, field shadow ≥7 d | Soak log + TTN ingest history | ⬜ none |
 
@@ -52,7 +52,10 @@ only a measurement recorded here closes it.
 
 ## Log
 
-Newest first.
+Newest first, by the date the entry was committed (`git log --format='%ad' -- docs/EVIDENCE.md`),
+not by the date embedded in its heading — two 2026-08-03 entries and two 2026-07-31 entries each
+span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
+add it at the top.
 
 ### 2026-08-03 — The RK900 answers, and it is at 9600 baud, not the 4800 the firmware asks at
 
@@ -123,7 +126,10 @@ Newest first.
   only the 115200 transients. Something changed between then and 19:59, during which the
   operator was at the bench and pushed `420558e` and `be06c98`. The reply has been stable
   across every sweep since. Worth knowing before treating the 19:27 capture as contradicting
-  this one — it was taken of a different physical setup.
+  this one — it was taken of a different physical setup. **What changed physically between
+  19:27 and 19:59 is not recorded anywhere and is load-bearing for the #30 decision below —
+  append it here once known** (rewiring, a WisToolBox setting, a reseated connector, or
+  something else).
 
   Still unproven: a full five-register read, any non-zero wind value, the register map beyond
   `0x0000`, the payload encoding, the join, and the uplink. **No TTN uplink carrying real
@@ -202,6 +208,90 @@ Newest first.
   bench to press it. Until someone does, no firmware can be loaded and the RK900 cannot be
   read. The pack, the radio, and sleep are untouched by this.
 
+### 2026-08-03 — bench 60 s cadence builds and tests; RK900 read still unproven
+
+- **Commit:** `2b3b500`
+- **Host:** Heliotrope Ridge (`ComputerName` confirmed over SSH), RAK4631 on USB
+  (`USB VID:PID=239A:8029 SER=4BC1FCC87D1343AB`, `WisCore RAK4631 Board`)
+- **Measured:** that `FEATURE_BENCH_INTERVAL` compiles into `stage1`, that the off-target
+  suite still passes at that commit, and whether `stage1` could be flashed to the board
+- **Observation:**
+  ```
+  HEAD 2b3b5005fd7df3579ca6450a70fed7cc340c5a0c
+  HOST Heliotrope Ridge
+  native         test_crc16    PASSED    00:00:00.933
+  native         test_payload  PASSED    00:00:00.552
+  ================= 20 test cases: 20 succeeded in 00:00:01.485 =================
+  RAM:   [=         ]   7.0% (used 17372 bytes from 248832 bytes)
+  Flash: [=         ]  12.2% (used 99344 bytes from 815104 bytes)
+  stage1         SUCCESS   00:00:06.247
+  ```
+  Flash attempt — a poll loop on the build host checked for `/dev/cu.usbmodem*` every 0.3 s
+  in order to catch the awake window of the sleeping field image:
+  ```
+  catch: start 18:52:18 sha 2b3b500
+  --- ports ---
+  /dev/cu.Bluetooth-Incoming-Port
+  /dev/cu.PT-P710BT3824
+  /dev/cu.debug-console
+  ```
+  No `usbmodem` port appeared in the first ~6 minutes of polling.
+- **Verdict:** PASS for the build and the off-target suite. **INCONCLUSIVE for the flash, and
+  the RK900 remains entirely unproven — no sensor read has been observed on hardware, ever.**
+- **Notes:** The board is running the `ffec8aa` full image, which has `FEATURE_SLEEP=1`;
+  `src/power.cpp` calls `Serial.end()` and disables the USB peripheral before sleeping, so
+  the port genuinely does not exist while it sleeps. That is designed behavior, not a fault.
+  The awake window is therefore the only opportunity to flash, and the interval between
+  windows is whatever the stored config says — up to 3600 s. A double-tap of RESET on the
+  RAK19007 drops the board into its DFU bootloader, where the port appears immediately and
+  persists, which is the reliable way to do this rather than racing a sleep cycle. **Racing a
+  sleep window is never the flash strategy — put the board in DFU deliberately, every time.**
+
+  Nothing here says anything about the RK900. The sensor was physically connected just before
+  this session and no read has ever been attempted on hardware. Do not read the passing
+  `stage1` build as evidence that the wiring, the RS-485 direction control, the 4800 8N1
+  framing, or the register map are correct — none of that has been exercised.
+
+### 2026-07-31 — first LoRaWAN join and first uplink accepted by The Things Network
+
+- **Commit:** `stage3` build, after the DevEUI byte-order and empty-uplink fixes
+- **Host:** Heliotrope Ridge, RAK4631 on USB, antenna attached, no sensors connected
+- **Device:** `puma-concolor-001`, DevEUI `42BB96EF76E200F1`, US915 FSB2, MAC 1.0.3
+- **Observation:** device side —
+  ```
+  session : restored 0x260CE734, counter 32
+  [cycle 1]
+     RK900   : no data (timeout)
+     battery : no data (no reply, 0 bytes)
+     uplink  : proof of life — no sensor data for 1 cycle(s)
+     radio   : sent 0 bytes on port 2
+     session : saved 0x260CE734, resume at 64
+  ```
+  network side — Network Server `nam1` reports `has session: True`, `has pending: False`,
+  `adr_data_rate_index: 3`, `rx1_delay: 5`. Gateway `9181014c6051030034` heard the join at
+  **RSSI −62, SNR 14** at 48.71066, −122.05389.
+- **Verdict:** PASS — the radio path works end to end. Join, join-accept, session
+  establishment, and an accepted uplink are all confirmed from both sides. Session
+  persistence (H5) also demonstrated: the second boot restored DevAddr `0x260CE734` from
+  flash and transmitted without rejoining.
+- **Notes:** Two real defects were found getting here, both of which would have been far
+  worse to diagnose in the field.
+
+  First, `src/secrets.h` held the DevEUI **byte-reversed**. `SX126x-Arduino` requires
+  most-significant-byte-first and reverses the bytes itself; the generator script had written
+  the opposite convention. The node transmitted flawlessly and TTN logged **nothing at all** —
+  an unrecognised DevEUI is neither answered nor reported, so it is indistinguishable from a
+  dead radio or an absent gateway. The boot banner now prints the DevEUI so this comparison
+  takes seconds.
+
+  Second, the node did not join at all when both sensors were silent, and `Radio::send()`
+  additionally discarded zero-length payloads. Together these meant a station installed with
+  one bad wire would have sat in the woods transmitting nothing and been unreachable by
+  downlink, since Class A only opens a receive window after an uplink.
+
+  Still unproven: real sensor data (nothing is wired yet), sleep current, and the decoder
+  against a live non-empty payload.
+
 ### 2026-07-31 — First flash. Firmware runs on real hardware; sensor not yet connected
 
 - **Commit:** `8d4a41c` (first flash), then the attempt-log fix
@@ -236,22 +326,6 @@ Newest first.
   (product ID `002A` instead of `8029`); re-running `flash.sh` recovered it, which confirms
   the documented recovery path works.
 
-### 2026-07-30 — The build host and CI disagreed on the same commit
-
-- **Commit:** `24c5d5e` (failing) → `fe3fc47` (passing)
-- **Host:** Heliotrope Ridge and GitHub Actions, same source
-- **Measured:** `pio test -e native` on both.
-- **Observation:** the build host reported 20 of 20 tests passing on a commit where CI
-  failed to compile them at all. Two causes, found in order: a stale object file in
-  `.pio/build/native` that survived a header change and hid a missing include, and
-  `src/features.h` shadowing the C library's own `<features.h>` once `src/` was on the
-  include path.
-- **Verdict:** the build host alone is **not** sufficient evidence for the off-target tests.
-  Its result was wrong and confidently so.
-- **Notes:** `scripts/build.sh` now wipes the native build directory and runs the tests
-  before compiling, and the header is renamed `build_features.h`. On-target builds were
-  never affected — the shadowing needs `-I src`, which only the test environment sets.
-
 ### 2026-07-30 — Release 0.2.0: all four stages build, off-target tests pass
 
 - **Commit:** `80de312` (tagged `v0.2.0`)
@@ -277,6 +351,22 @@ Newest first.
   are what settle them. Same caveat applies to the low-voltage gate, the session
   persistence, the pack frame validation, and the sleep-current change: all compile, none
   have been exercised. H1–H8 remain open.
+
+### 2026-07-30 — The build host and CI disagreed on the same commit
+
+- **Commit:** `24c5d5e` (failing) → `fe3fc47` (passing)
+- **Host:** Heliotrope Ridge and GitHub Actions, same source
+- **Measured:** `pio test -e native` on both.
+- **Observation:** the build host reported 20 of 20 tests passing on a commit where CI
+  failed to compile them at all. Two causes, found in order: a stale object file in
+  `.pio/build/native` that survived a header change and hid a missing include, and
+  `src/features.h` shadowing the C library's own `<features.h>` once `src/` was on the
+  include path.
+- **Verdict:** the build host alone is **not** sufficient evidence for the off-target tests.
+  Its result was wrong and confidently so.
+- **Notes:** `scripts/build.sh` now wipes the native build directory and runs the tests
+  before compiling, and the header is renamed `build_features.h`. On-target builds were
+  never affected — the shadowing needs `-I src`, which only the test environment sets.
 
 ### 2026-07-30 — Full firmware compiles for all four stages; off-target tests pass
 
@@ -325,89 +415,6 @@ Newest first.
 - **Notes:** This closes none of H1–H8. It says nothing about whether the board runs,
   enumerates USB, joins, sleeps, or draws the current we hope. The first real evidence
   comes from flashing hardware and reading the serial banner.
-
-### 2026-07-31 — first LoRaWAN join and first uplink accepted by The Things Network
-
-- **Commit:** `stage3` build, after the DevEUI byte-order and empty-uplink fixes
-- **Host:** Heliotrope Ridge, RAK4631 on USB, antenna attached, no sensors connected
-- **Device:** `puma-concolor-001`, DevEUI `42BB96EF76E200F1`, US915 FSB2, MAC 1.0.3
-- **Observation:** device side —
-  ```
-  session : restored 0x260CE734, counter 32
-  [cycle 1]
-     RK900   : no data (timeout)
-     battery : no data (no reply, 0 bytes)
-     uplink  : proof of life — no sensor data for 1 cycle(s)
-     radio   : sent 0 bytes on port 2
-     session : saved 0x260CE734, resume at 64
-  ```
-  network side — Network Server `nam1` reports `has session: True`, `has pending: False`,
-  `adr_data_rate_index: 3`, `rx1_delay: 5`. Gateway `9181014c6051030034` heard the join at
-  **RSSI −62, SNR 14** at 48.71066, −122.05389.
-- **Verdict:** PASS — the radio path works end to end. Join, join-accept, session
-  establishment, and an accepted uplink are all confirmed from both sides. Session
-  persistence (H5) also demonstrated: the second boot restored DevAddr `0x260CE734` from
-  flash and transmitted without rejoining.
-- **Notes:** Two real defects were found getting here, both of which would have been far
-  worse to diagnose in the field.
-
-  First, `src/secrets.h` held the DevEUI **byte-reversed**. `SX126x-Arduino` requires
-  most-significant-byte-first and reverses the bytes itself; the generator script had written
-  the opposite convention. The node transmitted flawlessly and TTN logged **nothing at all** —
-  an unrecognised DevEUI is neither answered nor reported, so it is indistinguishable from a
-  dead radio or an absent gateway. The boot banner now prints the DevEUI so this comparison
-  takes seconds.
-
-  Second, the node did not join at all when both sensors were silent, and `Radio::send()`
-  additionally discarded zero-length payloads. Together these meant a station installed with
-  one bad wire would have sat in the woods transmitting nothing and been unreachable by
-  downlink, since Class A only opens a receive window after an uplink.
-
-  Still unproven: real sensor data (nothing is wired yet), sleep current, and the decoder
-  against a live non-empty payload.
-
-### 2026-08-03 — bench 60 s cadence builds and tests; RK900 read still unproven
-
-- **Commit:** `2b3b500`
-- **Host:** Heliotrope Ridge (`ComputerName` confirmed over SSH), RAK4631 on USB
-  (`USB VID:PID=239A:8029 SER=4BC1FCC87D1343AB`, `WisCore RAK4631 Board`)
-- **Measured:** that `FEATURE_BENCH_INTERVAL` compiles into `stage1`, that the off-target
-  suite still passes at that commit, and whether `stage1` could be flashed to the board
-- **Observation:**
-  ```
-  HEAD 2b3b5005fd7df3579ca6450a70fed7cc340c5a0c
-  HOST Heliotrope Ridge
-  native         test_crc16    PASSED    00:00:00.933
-  native         test_payload  PASSED    00:00:00.552
-  ================= 20 test cases: 20 succeeded in 00:00:01.485 =================
-  RAM:   [=         ]   7.0% (used 17372 bytes from 248832 bytes)
-  Flash: [=         ]  12.2% (used 99344 bytes from 815104 bytes)
-  stage1         SUCCESS   00:00:06.247
-  ```
-  Flash attempt — a poll loop on the build host checked for `/dev/cu.usbmodem*` every 0.3 s
-  in order to catch the awake window of the sleeping field image:
-  ```
-  catch: start 18:52:18 sha 2b3b500
-  --- ports ---
-  /dev/cu.Bluetooth-Incoming-Port
-  /dev/cu.PT-P710BT3824
-  /dev/cu.debug-console
-  ```
-  No `usbmodem` port appeared in the first ~6 minutes of polling.
-- **Verdict:** PASS for the build and the off-target suite. **INCONCLUSIVE for the flash, and
-  the RK900 remains entirely unproven — no sensor read has been observed on hardware, ever.**
-- **Notes:** The board is running the `ffec8aa` full image, which has `FEATURE_SLEEP=1`;
-  `src/power.cpp` calls `Serial.end()` and disables the USB peripheral before sleeping, so
-  the port genuinely does not exist while it sleeps. That is designed behavior, not a fault.
-  The awake window is therefore the only opportunity to flash, and the interval between
-  windows is whatever the stored config says — up to 3600 s. A double-tap of RESET on the
-  RAK19007 drops the board into its DFU bootloader, where the port appears immediately and
-  persists, which is the reliable way to do this rather than racing a sleep cycle.
-
-  Nothing here says anything about the RK900. The sensor was physically connected just before
-  this session and no read has ever been attempted on hardware. Do not read the passing
-  `stage1` build as evidence that the wiring, the RS-485 direction control, the 4800 8N1
-  framing, or the register map are correct — none of that has been exercised.
 
 <!-- Template:
 
