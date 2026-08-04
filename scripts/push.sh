@@ -64,9 +64,15 @@ ssh "$BUILD_HOST" "zsh -l -c '
   cd ~/${REMOTE_PATH}
   git fetch origin main -q || true
   git checkout main -q
-  if ! git merge --ff-only ${RELAY_REF##refs/heads/} -q; then
-    echo \"build host main has commits not in this workspace — refusing to discard them.\"
-    echo \"Reconcile by hand, then re-run.\"
+  if git show-ref --verify --quiet refs/heads/${RELAY_REF##refs/heads/}; then
+    if ! git merge --ff-only ${RELAY_REF##refs/heads/} -q; then
+      echo \"build host main has commits not in this workspace — refusing to discard them.\"
+      echo \"Reconcile by hand, then re-run.\"
+      exit 1
+    fi
+  elif [[ \"\$(git rev-parse HEAD)\" != \"${SHA}\" ]]; then
+    echo \"relay branch is missing and build host main is not the requested commit.\"
+    echo \"Refusing to push an unverified build-host state.\"
     exit 1
   fi
   git push ${GH_SSH} main
