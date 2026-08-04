@@ -26,6 +26,10 @@
 #include "sensors/battery.h"
 #include "sensors/rk900.h"
 
+#if FEATURE_BUS_SCAN
+#include "sensors/crc16.h"
+#endif
+
 namespace {
 
 // CITE(datasheet): [CIT-RAK19007] the base board's IO slot exposes WB_IO1..WB_IO6; the
@@ -76,6 +80,103 @@ constexpr uint32_t kQuietCyclesPerHeartbeat = 8;
 bool heartbeat_due(uint32_t quiet_cycles)
 {
     return quiet_cycles == 1 || (quiet_cycles % kQuietCyclesPerHeartbeat) == 0;
+}
+#endif
+
+#if FEATURE_BUS_SCAN
+// The driver collapses every unproductive outcome into "timeout", which cannot tell a
+// sensor that said nothing at all apart from one that answered in a framing this build
+// cannot read. That distinction decides whether the next move is a code change or a trip to
+// the bench, so this reports the raw bytes and lets the reader judge.
+//
+// CITE(datasheet): [CIT-RK900] the sensor is fixed at 4800 8N1, slave 0x01. The other
+//   combinations are swept only to establish that the line is silent everywhere, not
+//   because any of them is expected to answer.
+// CITE(sibling): forest-weather-machines LoRaWAN/docs/RAK2560_weather_station_settings.md @ efc0e3c
+//   — the deployed Sensor Hub reads this same sensor at 4800 8N1, slave 01, FC 0x03,
+//   holding registers 0x0000-0x0004. The constants under test are field-proven, so a
+//   silent line is not a wrong constant.
+// CITE(spec): [CIT-MODBUS-APP] FC 0x03 request framing, address first, CRC low byte first.
+constexpr uint32_t kScanBauds[]  = {4800, 9600, 19200, 38400, 115200};
+constexpr uint8_t  kScanSlaves[] = {0x01, 0x02, 0x03, 0x6E};
+
+// Long enough for a five-register reply to finish at the slowest rate swept, short enough
+// that the whole sweep stays well inside the watchdog window.
+constexpr uint32_t kScanListenMs = 400;
+
+uint32_t scan_one(uint32_t baud, uint8_t slave)
+{
+    uint8_t req[8];
+    req[0] = slave;
+    req[1] = 0x03;
+    req[2] = 0x00;
+    req[3] = 0x00;
+    req[4] = 0x00;
+    req[5] = 0x01;
+
+    const uint16_t crc = modbus_crc16(req, 6);
+    req[6] = (uint8_t)(crc & 0xFF);
+    req[7] = (uint8_t)(crc >> 8);
+
+    while (Serial1.available()) {
+        (void)Serial1.read();
+    }
+    Serial1.write(req, sizeof(req));
+    Serial1.flush();
+
+    // Every byte is kept, valid or not. A malformed reply is the most informative result
+    // this scan can produce — it proves the sensor is powered and the pair is the right way
+    // round, leaving only the framing to fix.
+    uint8_t        got[64];
+    uint32_t       n     = 0;
+    const uint32_t start = millis();
+    while ((millis() - start) < kScanListenMs && n < sizeof(got)) {
+        if (Serial1.available()) {
+            got[n++] = (uint8_t)Serial1.read();
+        }
+    }
+
+    LOGF("   %6lu baud  slave 0x%02X : %lu byte(s)", (unsigned long)baud, slave,
+         (unsigned long)n);
+    if (n > 0) {
+        LOG("  <-");
+        for (uint32_t i = 0; i < n; i++) {
+            LOGF(" %02X", got[i]);
+        }
+    }
+    LOGLN();
+    return n;
+}
+
+void bus_scan()
+{
+    LOGLN(F("[bus scan] WB_IO2 HIGH, A/B as wired, FC 0x03 read 0x0000 x1"));
+
+    // CITE(datasheet): [CIT-RAK5802] the transceiver runs from the switched 3V3_S rail,
+    //   gated by WB_IO2. Held HIGH for the whole sweep so no result can be blamed on the
+    //   module having been unpowered when it was tried.
+    pinMode(WB_IO2, OUTPUT);
+    digitalWrite(WB_IO2, HIGH);
+    delay(50);
+
+    uint32_t total = 0;
+    for (uint32_t b = 0; b < (sizeof(kScanBauds) / sizeof(kScanBauds[0])); b++) {
+        Serial1.begin(kScanBauds[b]);
+        delay(20);
+        for (uint32_t s = 0; s < (sizeof(kScanSlaves) / sizeof(kScanSlaves[0])); s++) {
+            total += scan_one(kScanBauds[b], kScanSlaves[s]);
+            power::watchdog_feed();
+        }
+        Serial1.end();
+    }
+
+    LOGF("[bus scan] total bytes seen on the line: %lu\n", (unsigned long)total);
+    if (total == 0) {
+        LOGLN(F("[bus scan] silent at every combination tried. No constant this firmware"));
+        LOGLN(F("           controls can make an unpowered or reverse-wired transceiver"));
+        LOGLN(F("           answer — check 12 V at the RK900 and the A/B pair first."));
+    }
+    LOGLN();
 }
 #endif
 
@@ -144,6 +245,14 @@ void loop()
     power::watchdog_feed();
 
     LOGF("[cycle %lu]\n", (unsigned long)++cycle);
+
+#if FEATURE_BUS_SCAN
+    // Nothing below this runs in a scan build. The point is to look at the line, not to
+    // produce a reading or an uplink from it.
+    bus_scan();
+    delay(5000);
+    return;
+#endif
 
     WeatherReading weather;
     BatteryReading pack;

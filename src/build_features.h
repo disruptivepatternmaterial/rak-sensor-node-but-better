@@ -74,6 +74,15 @@
 #define FEATURE_BENCH_INTERVAL 0
 #endif
 
+// Bring-up diagnostic, OFF everywhere except its own environment. Sweeps the RS-485 line
+// and reports the raw bytes seen, instead of the driver's single "timeout" verdict. It
+// answers one question the normal path cannot: did the sensor say nothing at all, or did it
+// answer in a framing this build cannot read. Never compiled into a field image — it drives
+// the bus with addresses the node has no business talking to.
+#ifndef FEATURE_BUS_SCAN
+#define FEATURE_BUS_SCAN 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)
