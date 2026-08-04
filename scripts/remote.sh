@@ -14,7 +14,9 @@
 #   scripts/remote.sh run '<command>'    run in the remote repo under a login shell
 #   scripts/remote.sh sha                remote HEAD
 #   scripts/remote.sh devices            USB serial devices on the build host
-#   scripts/remote.sh usbpid             RAK4631 USB product ID (8029 = app, 0029/002A = DFU)
+#   scripts/remote.sh usbpid [serial]     RAK4631 USB product ID (8029 = app, 0029/002A = DFU)
+#                                          pin against a serial (or $RAK_SERIAL) when more
+#                                          than one 239A device is on the bus -- see #29
 
 set -euo pipefail
 
@@ -64,12 +66,37 @@ cmd_devices() {
 # application from one sitting in DFU with nothing to run -- both print the same
 # reassuring nothing on a serial capture. Prints the 4-hex PID, or nothing when no RAK is
 # on the bus. Enumeration only: this never opens the port. Table: docs/FIRST_FLASH.md.
+#
+# 239A is Adafruit's vendor ID, not RAK's -- it is shared by any Adafruit board or
+# Adafruit-bootloader device, including a second WisBlock. Picking "the first 239A match"
+# is a silent guess that lands on the evidence path (issue #29): a fresh board could
+# enumerate ahead of the RAK4631 and this would confidently report the wrong PID. Pin
+# against a known serial (arg 1, or $RAK_SERIAL) to disambiguate; unpinned is only safe
+# when exactly one 239A device is on the bus, and this refuses -- rather than guesses --
+# when more than one is present and no serial was given.
 cmd_usbpid() {
+  local pin="${1:-${RAK_SERIAL:-}}"
   local out
   out=$(rsh 'pio device list --serial 2>/dev/null' || true)
-  printf '%s\n' "$out" \
-    | grep -oE 'VID:PID=239A:[0-9A-Fa-f]{4}' \
-    | head -1 | cut -d: -f3 | tr '[:lower:]' '[:upper:]' || true
+
+  if [[ -n "$pin" ]]; then
+    printf '%s\n' "$out" \
+      | grep -i "SER=${pin}" \
+      | grep -oE 'VID:PID=239A:[0-9A-Fa-f]{4}' \
+      | head -1 | cut -d: -f3 | tr '[:lower:]' '[:upper:]' || true
+    return
+  fi
+
+  local matches
+  matches=$(printf '%s\n' "$out" | grep -oE 'VID:PID=239A:[0-9A-Fa-f]{4}')
+  local count
+  count=$(printf '%s\n' "$matches" | grep -c . || true)
+  if [[ "$count" -gt 1 ]]; then
+    warn "usbpid: ${count} devices matching Adafruit VID 239A on the bus; refusing to guess" >&2
+    warn "usbpid: pin one -- scripts/remote.sh usbpid <serial>, or export RAK_SERIAL=<serial>" >&2
+    return 1
+  fi
+  printf '%s\n' "$matches" | head -1 | cut -d: -f3 | tr '[:lower:]' '[:upper:]' || true
 }
 
 # Git is the ONLY transport between machines. Never scp/rsync source across --
