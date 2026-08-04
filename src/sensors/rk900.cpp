@@ -4,9 +4,14 @@
 
 namespace {
 
-// CITE(datasheet): [CIT-RK900] Modbus slave address and line rate. Fixed, not configurable
-//   — ADR-0004 dedicated the RAK5802 to this sensor precisely so it could stay fixed.
-// CITE(bench): [CIT-RK900-BAUD-2026-08-03] busscan bus scan at multiple rates; valid reply at 9600
+// CITE(bench): [CIT-RK900-BAUD-2026-08-03] busscan bus scan at multiple rates; valid reply at
+//   9600, none at 4800, on this physical unit.
+// ADR-0006 has the full picture: this is the sensor's Rika factory default and matches an
+// independent open-source integration ([CIT-BEEGEE-RS485-WIND]), but the one real fleet
+// precedent for this exact sensor+battery combo runs it at 4800 instead
+// ([CIT-FWM-RK900-FIELD]). The sensor's baud is field-settable in place — see ADR-0006's
+// reprovisioning sequence — so this is a fleet-consistency question to revisit after the
+// full five-register frame is read, not a hardware constraint.
 constexpr uint8_t  kSlave = 0x01;
 constexpr uint32_t kBaud  = 9600;
 
@@ -68,6 +73,13 @@ WeatherReading RK900::read()
         LOGF("   RK900   : no data (%s)\n", modbus_result_name(m_last));
         return out; // every field stays invalid — the encoder will omit them all
     }
+
+    // Raw dump first, ahead of any interpretation. ADR-0006 documents a genuine conflict
+    // between two RK900-09 sources on what 0x0000-0x0004 actually mean; printing the words
+    // as received lets that be re-checked against either candidate map without re-wiring
+    // anything, and costs nothing once a map is settled.
+    LOGF("   RK900   : raw 0x0000-0x0004 = %04X %04X %04X %04X %04X\n",
+         regs[0], regs[1], regs[2], regs[3], regs[4]);
 
     // The span either arrives whole and CRC-checked or not at all, so all five fields
     // become valid together. Values are stored exactly as the sensor reported them;
