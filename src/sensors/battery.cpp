@@ -73,15 +73,13 @@ constexpr uint8_t kBroadcastId = 0xFF; // PID_UNKNOW — where an un-provisioned
 constexpr uint8_t kRui3TypeSensorHub = 0x02; // RUI3API_TYPE_SENSORHUB
 constexpr uint8_t kRui3FlagReq       = 0x00; // RUI3API_FLG_REQ
 constexpr uint8_t kRui3FlagRsp       = 0x01; // RUI3API_FLG_RSP
-// The RUI3 length field is no longer a constant. BOOT and SENDAT carry a zero-length
-// payload and so still transmit SHORT_SWAP(6) = 0x00 0x06, but PARAMGET adds a sid byte and
-// PARAMSET adds a 43-byte parameter block, so send_frame() derives it — see there.
+// The RUI3 length field is derived rather than constant: send_frame() computes it from the
+// payload it is given. Every frame this driver now sends -- BOOT and SENDAT -- carries a
+// zero-length payload and so transmits SHORT_SWAP(6) = 0x00 0x06.
 
 // SensorHub frame fields.
 constexpr uint8_t kHubTypeProvision = 0x01; // SNHUB_TYPE_PROVISION
-constexpr uint8_t kHubTypeParamSet  = 0x02; // SNHUB_TYPE_PARAMSET
 constexpr uint8_t kHubTypeSendData  = 0x03; // SNHUB_TYPE_SENDAT
-constexpr uint8_t kHubTypeParamGet  = 0x05; // SNHUB_TYPE_PARAMGET
 constexpr uint8_t kPldBoot          = 0x02; // PLD_PROVI_TYPE_BOOT
 constexpr uint8_t kPayloadSendData  = 0x02; // PLD_SDATA_TPYE_SENDAT
 
@@ -128,38 +126,6 @@ constexpr size_t kParamIntv  = 1;
 constexpr size_t kParamRule  = 5;
 constexpr size_t kParamBytes = 43;
 
-// The interval the rule runs at, and its unit — which is no longer a guess.
-//
-// The reference library documents `intv` only as "rule to be applied" and never states a
-// unit, so every previous revision refused to choose one and echoed back whatever the pack
-// reported. That was the right call while the unit was unknown, but it left the enable path
-// unable to act when PARAMGET drew no reply — which is every cycle, because the pack refuses
-// PARAMGET while it still considers itself unprovisioned.
-//
-// RAK's own WisToolBox command catalogue settles it. The UI field bound to `ATC+SNSR_INTV`
-// is titled "Sensor interval, s" and validates `{min: 60, max: 86400}` — seconds, with a
-// vendor-declared floor of 60 s and a ceiling of one day. `ATC+PRB_INTV` and `ATC+SNSR_CONF`
-// carry the identical validation block. So 60 is not "the smallest round number that cannot
-// be a runaway sampler under any plausible unit" any more; it is the vendor's own minimum,
-// in the vendor's own unit.
-//
-// The floor is chosen rather than something larger because the pack's sampling cadence and
-// this node's wake cadence are independent: the node wakes on its own interval and reads
-// whatever the pack last sampled, so a fast pack cadence costs the pack a little energy and
-// costs the node nothing, while a slow one risks every read returning the same stale sample.
-//
-// CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 368291 —
-//   field `sensor_interval_sensorInterval` for `ATC+SNSR_INTV`, `"title":"Sensor interval,
-//   s"` with `"validation":{"regexp":"^[0-9]+$","min":60,"max":86400,...}`. The unit is
-//   seconds and the valid range is 60..86400; anything below 60 is outside RAK's own range.
-// CITE(datasheet): [CIT-WISTOOLBOX-AT] same file @ byte 389344 — the `ATC+SNSR_CONF`
-//   accordion repeats `"title":"Sensor interval, s"` with the identical 60..86400
-//   validation, so the probe-config write and the per-sensor write share one unit.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_api.h — the binary API is
-//   `void (*param)(U8 pid, U8 sid, U8 enable, U32 intv)` with the doxygen comment
-//   "@param intv rule to be applied"; no unit is stated anywhere in the library, which is
-//   why the vendor catalogue rather than prior art is the source for this constant.
-constexpr uint32_t kParamIntvSeconds = 60;
 constexpr uint32_t kParamIntvMax     = 86400;
 
 // How long to wait for the pack to acknowledge a parameter write, and how many times to
@@ -256,12 +222,6 @@ constexpr size_t kProvIdOffset = 22;
 constexpr size_t kProvSnsrNumOffset = 54;
 constexpr size_t kProvSnsrOffset    = 55;
 constexpr size_t kSnsrNodeBytes     = 4;
-
-// Sensor ids worth enabling: the four the pack reports in its SENDAT records (0x15..0x18).
-// Sized rather than unbounded because the array is only ever a work list for the enable
-// pass, and a probe that announces more sensors than this simply gets the first few
-// enabled — which is a degraded outcome, not a buffer overrun.
-constexpr size_t kMaxSensors = 8;
 
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] IPSO codes, already reduced by the 3200 offset.
 //   These are the same numbers the payload encoder uses on the LoRaWAN side, because RAK
