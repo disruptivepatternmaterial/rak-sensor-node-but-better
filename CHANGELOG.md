@@ -10,6 +10,39 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The USB console no longer dies after the first sleep**
+  ([#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)).
+  This is the defect that made hardware verification impossible for most of a day. After a
+  reflash the board would enumerate as `239A:8029` and the application would demonstrably keep
+  running — TTN showed `f_cnt` advancing 898 → 960 during one window — while the serial port
+  delivered zero bytes across repeated 60 s reads. Alive and mute is the hardest failure to
+  read from the bench, because it is indistinguishable from a hang.
+
+  Two independent causes, both in the pre-sleep path, and either one alone is sufficient:
+
+  1. `NRF_USBD->ENABLE = 0` was written directly and nothing restored it. The core only ever
+     runs the USBD enable sequence — errata 171/187/166, the `EVENTCAUSE.READY` handshake, the
+     HFCLK start — from its VBUS power-event handler, which fires on a cable transition and
+     never again. `Serial.begin()` re-registers the CDC interface but cannot bring the
+     peripheral back, so the endpoint stayed dead for the rest of the boot.
+  2. `Serial.end()` calls `TinyUSBDevice.clearConfiguration()`, which discards the whole
+     configuration descriptor. The following `Serial.begin()` rebuilt it, but with no detach in
+     between there was no re-enumeration, so the host kept addressing endpoints from a
+     descriptor the device had thrown away.
+
+  Both are replaced by the one reversible pair the core exposes as public API:
+  `TinyUSBDevice.detach()` before sleep, `attach()` after. The descriptor is left alone.
+
+  This also explains the intermittency. The guard is `(bool)Serial`, which reports whether a
+  host has the port *open*, so the destructive path was taken only when nobody was watching —
+  precisely the reflash-then-attach ordering used all day. A cable plugged in mid-deployment
+  now gets a console at the next awake window, where before it got nothing until a reset.
+
+  The peripheral now stays enabled while asleep, where the old code intended to shut it down.
+  The residual draw is unmeasured in both directions — the old write left the pull-up, the USBD
+  interrupt, and HFCLK all running, so it was never the documented teardown either. Measurement
+  is [#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47).
+
 - **The join backoff message now reports the real next attempt**
   ([#24](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/24)).
   It printed the radio's backoff — `next try in 60 s` — but while both sensors are silent

@@ -182,7 +182,9 @@ harmlessly instead of being misread.
 4. Poll BMS (timeouts)  
 5. Build uplink; TX Class A; handle RX1/RX2 for downlink  
 6. Persist any new interval  
-7. `Serial.end` / radio sleep / MCU sleep until next interval  
+7. USB detach / radio sleep / MCU sleep until next interval  
+
+Step 7 detaches the USB device with `TinyUSBDevice.detach()` and re-attaches on wake. It must **not** clear `NRF_USBD->ENABLE` and must **not** call `Serial.end()`. Neither is reversible from application code: the core re-runs the USBD enable sequence only from its VBUS power-event handler, and `Serial.end()` clears the configuration descriptor with no re-enumeration to reconcile the host's view. Either one leaves the console dead for the rest of the boot while the application keeps running and transmitting — indistinguishable from a hung node from the bench, and the reason hardware verification was blocked repeatedly ([CITE(prior-art): Adafruit TinyUSB detach/attach](https://github.com/adafruit/Adafruit_TinyUSB_Arduino), [CITE(datasheet): nRF52840 USBD](https://docs.nordicsemi.com/bundle/ps_nrf52840/page/usbd.html)).
 
 Failing one sensor does not skip the other or skip uplink (uplink may be battery-only or weather-only with validity flags).
 

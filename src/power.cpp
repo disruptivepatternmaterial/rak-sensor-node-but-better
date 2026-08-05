@@ -4,6 +4,18 @@
 
 #include <Arduino.h>
 
+#if FEATURE_CONSOLE
+// CITE(prior-art): Adafruit TinyUSB for Arduino — `Adafruit_USBD_Device::detach()`/`attach()`
+// wrap `tud_disconnect()`/`tud_connect()`, which on the nRF5x port set `USBD->USBPULLUP` and
+// raise the stack's unplugged event. The one attach/detach pair the core exposes as public
+// API, and symmetric — unlike a bare `USBD->ENABLE` write, which the core only ever restores
+// from its VBUS power-event handler. [CIT-TINYUSB] — docs/CITATIONS.md
+// CITE(datasheet): nRF52840 Product Specification — USBD [CIT-NRF-USBD]. Endpoint traffic is
+// host-paced, so a host that still believes it is enumerated will keep issuing IN tokens
+// against endpoints the device is no longer servicing. Detaching is what makes the host stop.
+#include <Adafruit_TinyUSB.h>
+#endif
+
 #if FEATURE_RADIO
 #include <SX126x-Arduino.h>
 #endif
@@ -85,18 +97,28 @@ void sleep_seconds(uint32_t seconds)
     const bool console_in_use = (bool)Serial;
 
     if (!console_in_use) {
-        // Closing the USB serial device is required, not tidy-up. The USB peripheral keeps
-        // its clock and its pull-up alive otherwise, and the measured difference between
-        // leaving it on and shutting it down is roughly a milliamp — far more than
-        // everything the node spends on actually taking a reading.
-        Serial.end();
-
-        // Peripherals are per-instance; the ones this node touches are closed by their
-        // owners when a read finishes. This disables the USB device itself, which nothing
-        // else owns. Written straight to the register: the core's USB stack has no public
-        // "power this down" call, and leaving the peripheral enabled is the single largest
-        // sleep-current mistake available on this chip.
-        NRF_USBD->ENABLE = 0;
+        // Detaching releases the D+ pull-up and tells the device stack it is unplugged, so
+        // the host stops polling and the endpoints stop being serviced across the sleep.
+        //
+        // This deliberately does not touch NRF_USBD->ENABLE. Clearing that register by hand
+        // is not reversible from application code: the core only re-runs the enable sequence
+        // — errata 171/187/166, the READY handshake, the HFCLK start — from its USB power
+        // event handler, which fires on a VBUS transition and never again. A node that slept
+        // once with no host attached came back with a permanently dead console for the rest
+        // of the boot, which is what made every hardware session unverifiable.
+        //
+        // Serial.end() is not called either, and that is the second half of the same bug: it
+        // clears the whole configuration descriptor, so the interface the host enumerated no
+        // longer matches the one the device offers, and there is no re-enumeration to
+        // reconcile them. Leaving the CDC interface in place and cycling only the attach
+        // state keeps the descriptor and the host's view of it identical.
+        //
+        // The peripheral itself therefore stays enabled while asleep, where the old code
+        // intended to shut it down. Both the old and the new residual draw are unmeasured —
+        // the old write left the pull-up, the USBD interrupt, and HFCLK all running, so it
+        // was never the documented teardown either. Measurement is issue #47; a console that
+        // works is worth more than an unverified microamp claim in the meantime.
+        TinyUSBDevice.detach();
     }
 
     // FreeRTOS underlies the Arduino core here, so a delay parks this task and the idle
@@ -120,9 +142,10 @@ void sleep_seconds(uint32_t seconds)
 
 #if FEATURE_CONSOLE
     if (!console_in_use) {
-        // Bring the console back for the awake portion. With no host attached this
-        // enumerates and goes nowhere, which costs a little current only while awake.
-        Serial.begin(115200);
+        // The exact inverse of the detach above. Restoring the pull-up lets a host enumerate
+        // again, so a cable plugged in mid-deployment gets a console at the next awake
+        // window instead of never.
+        TinyUSBDevice.attach();
     }
 #endif
 }
