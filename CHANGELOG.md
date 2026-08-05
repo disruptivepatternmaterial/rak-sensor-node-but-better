@@ -10,6 +10,23 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **`docs/FIRMWARE_SPEC.md` no longer contradicts the decided ADRs or the running firmware**
+  ([#41](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/41)).
+  Three sections had drifted, and each one sent a maintainer down a wrong path during a failure.
+  §2.1 listed the RK900 at 4800 while the code runs 9600 ([ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md)),
+  so debugging a silent sensor by the spec produced silence and a false "the sensor is dead."
+  §2.2 named Modbus the preferred battery path and one-wire the alternate — backwards relative to
+  [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md) and to the harness now reporting live
+  values, pointing anyone tracing a battery fault at the wrong socket; the shared-RS-485
+  baud-switching note is marked historical rather than live. §6 listed humidity as "104/112" as
+  though the two were interchangeable, when type 104 decodes to `humidity_4`, a key absent from
+  the formatter's `CHANNEL_NAMES` and therefore dropped without an error anywhere.
+
+  `kTurnaroundMs` also gains a `bench` citation and an explicit note that the pack's datasheet
+  specifies no receiver re-arm time. The 2 ms guard gap is held by measurement alone, and it is
+  precisely the constant an optimiser deletes as redundant — after which battery telemetry stops
+  and the symptom looks like a wiring fault. ADR-0002 (battery current sign) stays open.
+
 - **The USB console no longer dies after the first sleep**
   ([#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)).
   This is the defect that made hardware verification impossible for most of a day. After a

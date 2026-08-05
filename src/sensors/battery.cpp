@@ -97,6 +97,16 @@ constexpr uint8_t kWakeCount = kBatteryWakeCount;
 //   onewireHandle(): `while (mySerial.available()) { buff[bufflen++] = mySerial.read();
 //   delay(2); }` — the final loop iteration reads the last byte and then delays 2 ms, so the
 //   reference's reply cannot leave sooner than that after the pack's stop bit.
+// CITE(bench): docs/EVIDENCE.md §"Root cause: reply turnaround timing, not frame construction"
+//   — 2026-08-05, 1a203d3. With this gap at 0 the pack never latched a provId across weeks of
+//   attempts; at 2 ms it latched pid 0x01 and reported live values on seven consecutive cycles.
+//   5 ms and 10 ms were swept and were not needed.
+//
+// There is deliberately no datasheet citation here, and that absence is the point: the RAK9154
+// documentation specifies no receiver re-arm time at all. The value is therefore held by
+// measurement alone. Deleting it as a redundant delay re-breaks battery telemetry, and the
+// symptom — the pack answering nothing on a correctly wired line — reads exactly like a wiring
+// fault. Re-test it with the FEATURE_BATTERY_TURNAROUND_MS sweep, never by inspection.
 constexpr uint32_t kTurnaroundMs = FEATURE_BATTERY_TURNAROUND_MS;
 
 // Probe addressing. kProbeId is the id the master *assigns*, not an id the pack has before

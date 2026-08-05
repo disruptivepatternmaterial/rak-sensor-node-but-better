@@ -28,9 +28,11 @@ Cross-links (sibling repos on this machine / org):
 | Param | Value | Source |
 |---|---|---|
 | Interface | Modbus-RTU over RAK5802 | Field + RAK Weather Station Solution Manual |
-| Baud | **4800** 8N1 | `RAK2560_weather_station_settings.md` §1 / §5 |
+| Baud | **9600** 8N1 — this unit | [ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md), bench-measured 2026-08-03 |
 | Slave | **0x01** | Same |
 | FC | 0x03 Read Holding | Same |
+
+**On the baud.** The datasheet and the sibling fleet run 4800 — [CITE(datasheet): RK900-09 register map / RAK Weather Station Solution Manual](CITATIONS.md) — but the unit on this node answers only at 9600, which is where `src/sensors/rk900.cpp` is set. 4800 may be reinstated later for fleet consistency; until then the spec records what the hardware does, not what the sheet says. [CITE(bench): full 5-register read at 9600, `998dc26`](EVIDENCE.md)
 
 | Reg | Name | Type | Scale | Unit |
 |---|---|---|---|---|
@@ -53,9 +55,18 @@ counter resets as soon as any field is read. Implemented in `src/main.cpp`
 
 **Timeouts:** per-transaction max wait ≤ 1000 ms; max retries 2; then mark sensor fail and continue cycle.
 
-### 2.2 RAK9154 (battery) — preferred path
+### 2.2 RAK9154 (battery) — implemented path
 
-**Preferred:** 4-pin **Gateway Load** SP11/P4 Modbus (same map as field Hub / `rak-4-5-wire`).
+**Implemented: 5-pin Sensor Hub Load one-wire** (TXD+RXD bridged, 9600 half-duplex, IPSO TLV),
+chosen in [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) and working on hardware since
+2026-08-05. This is the socket to go to when battery reads fail.
+[CITE(prior-art): Meshtastic `RAK9154Sensor`, `beegee-tokyo/RAK-OneWireSerial`, `forest-weather-machines/rak-4-5-wire/firmware/nanoc6-onewire-poll`](CITATIONS.md)
+[CITE(bench): pack latches pid `0x01` and reports 12.23 V / 98 % / 23.0 °C, `1a203d3`](EVIDENCE.md)
+
+**Not used — held in reserve:** 4-pin **Gateway Load** SP11/P4 Modbus (same map as field Hub /
+`rak-4-5-wire`). Raw Modbus at slave `0x6E` over the one-wire line was proven dead (0 bytes every
+cycle; the adapter does not bridge it) and that path was removed in `b6bbf31`. The register map
+below is retained only so a future 4-pin harness does not have to rediscover it.
 
 | Param | Value |
 |---|---|
@@ -73,9 +84,11 @@ counter resets as soon as any field is read. Implemented in `src/main.cpp`
 
 **Power:** P+/P− from 4-pin or 5-pin → **12 V→5 V buck** → WisBlock 5 V. Never feed P+ to `BAT`.
 
-**Alternate:** 5-pin Sensor Hub Load one-wire (TXD+RXD bridged, 9600 half-duplex, IPSO TLV). Only if 4-pin is occupied or unavailable. Refs: Meshtastic `RAK9154Sensor`, `beegee-tokyo/RAK-OneWireSerial`, `forest-weather-machines/rak-4-5-wire/firmware/nanoc6-onewire-poll`.
-
-**Bus conflict note:** RK900 is 4800; BMS Modbus is 9600. Same RAK5802 transceiver **must** reconfigure baud between polls (or use one-wire for BMS and 5802 only for RK900). Spec default: **5802 for RK900; BMS via one-wire on Serial1 half-duplex** OR **5802 baud-switch** — pick one in implementation and document in HARDWARE. Recommendation for P0: **one RAK5802 + baud switch** if both Modbus; else **5802@4800 for RK900 + one-wire for BMS**.
+**Bus conflict note — HISTORICAL, resolved.** An earlier draft proposed sharing one RAK5802
+between the RK900 and the BMS by switching baud between polls. [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md)
+rejected it: the RAK5802 is dedicated to the RK900, and the BMS talks one-wire on its own line.
+Two buses, no baud switching, one fewer failure mode. Recorded here only so the option is not
+re-proposed as though it were still open.
 
 ## 3. LoRaWAN
 
@@ -197,7 +210,7 @@ Prefer **RAK Standardized / Cayenne LPP–style** types already decoded by `fore
 | Wind 158/190 | speed |
 | Wind dir 159/191 | direction |
 | Temp 103 | air |
-| Humidity 104/112 | RH |
+| Humidity — ch **4**, type **112** only | RH. Type 104 is a single byte and decodes to key `humidity_4`, which is absent from the formatter's `CHANNEL_NAMES` and is therefore **silently discarded**. See [ADR-0002](decisions/ADR-0002-payload-contract-conflicts.md). |
 | Pressure 115 | hPa |
 | Cap 184 | SoC |
 | Current 185 | pack I |
