@@ -4,6 +4,14 @@
 **Target**: RAK4631 nRF52840 LoRaWAN Field Node  
 **Status**: Stage 1-2 proven, Stage 3 in progress  
 
+> **Correction (2026-08-05).** This review repeats the project's then-current belief that the
+> RAK9154 pack is provisioned out-of-band through RAK's WisToolBox app ("post-WisToolBox
+> provisioning", §4). **That premise was fabricated** — the pack has no NFC or BLE radio, and id
+> assignment is performed by this firmware over the one-wire link in `acquire_pid()`. Read
+> "post-WisToolBox" here as "once the pack has latched an assigned id"; the review's timing and
+> watchdog findings are unaffected by the correction. See [`../EVIDENCE.md`](../EVIDENCE.md)
+> 2026-08-05.
+
 ---
 
 ## 1. Executive Summary & Hardening Gaps (H1-H8)
