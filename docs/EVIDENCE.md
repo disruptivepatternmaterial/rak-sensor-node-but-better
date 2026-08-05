@@ -57,6 +57,63 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-05 — Board recovered via UF2; "off the USB bus" turns out to be the sleep detach, not a fault
+
+**Host:** Heliotrope Ridge. **Commit on the board:** `7dfc26f` (see the stale-binary note below —
+**not** `bf5ceb2`, which is what was intended). **Verification still incomplete.**
+
+Two operational findings, both of which cost time today and neither of which is a code defect.
+
+**1. Serial DFU can fail while the bootloader is healthy; UF2 mass storage works.** With the
+board in the UF2 bootloader (`239A:0029`), the port present at `/dev/cu.usbmodem1101`, and
+`lsof` showing nothing holding it, `pio run -t upload` failed twice with *"No data received on
+serial port. Not able to proceed."* The UF2 route succeeded on the first try. The non-obvious
+step is that **macOS left the bootloader's drive unmounted** — `diskutil list` showed
+`/dev/disk6` as `RAK4631`, 33.7 MB, with no `/Volumes` entry until `diskutil mount disk6`. That
+absence is what made the UF2 path look unavailable. Procedure now in
+[`FIRST_FLASH.md`](FIRST_FLASH.md).
+
+Converted with the framework's own tool, `uf2conv.py -c -f 0xADA52840`, which reported
+`start address: 0x26000` — the application offset above the SoftDevice. Copy, then the
+bootloader flashes and resets itself; the application was up about 12 s later.
+
+**2. A sleeping node has no USB device at all, and that is the fix working.** This reading was
+gotten wrong twice in one session, so it is written down. After the flash the board enumerated,
+uplinked, and then vanished completely from the bus: no `239A:*`, no `/dev/cu.usbmodem*`, no
+`RAK4631` disk. That looks identical to the dead-board state, and `flash.sh` says so in as many
+words — *"no 239A device on the bus at all"* → *"THE BOARD HAS NO VALID APPLICATION."*
+
+It was asleep. `TinyUSBDevice.detach()` releases the D+ pull-up, so the host sees the device
+removed, exactly as intended. TTN settled it: `last_f_cnt_up` **1024**, session `updated_at`
+`2026-08-05T15:15:56Z`, against a build-host clock reading `08:17:13 PDT` — the node had uplinked
+**77 seconds** before the bus was declared empty. `dev_addr 260CE734`,
+`last_n_f_cnt_down`/`last_a_f_cnt_down` both 26.
+
+The lesson is procedural: **USB presence is not a liveness test on a build that sleeps.** TTN
+session state is, and it costs one command.
+
+**Stale binary — what is actually on the board.** `pio run -e rak4631` reported `SUCCESS` in
+1.0 s and reused a `firmware.hex` built from `7dfc26f`, even though `git diff 7dfc26f bf5ceb2`
+shows `src/sensors/battery.cpp` and `src/sensors/battery.h` changed and both compile into that
+environment. The UF2 was converted from that stale hex, so **the board is running `7dfc26f`,
+not `bf5ceb2`.** A later `rm -rf .pio/build/rak4631 && pio run` produced a fresh hex which has
+not been flashed. `7dfc26f` does contain the CDC fix, so the pending verification is still
+meaningful, but no result from this board may be attributed to `bf5ceb2`.
+
+**What is still not proven.** Everything the session set out to prove:
+
+- **CDC across sleep — not yet.** The detach half is demonstrated (the device disappears on
+  schedule). The half that matters, `attach()` restoring a working console *after* a sleep, needs
+  the wake. Stored interval is 1800 s, so the wake was due at `08:45:56` host time, past the
+  session budget. A capture armed on the build host at `/tmp/wakecap.log` waits for the port to
+  reappear and then records 240 s of console. Neither branch of the `(bool)Serial` guard has been
+  exercised on hardware yet.
+- **900 s interval** — not sent. **Persistence across reset** — not tested. **`v0.4.0`** — not
+  tagged, correctly, because none of the legs closed.
+
+[#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) stays
+open on both halves.
+
 ### 2026-08-05 — USB CDC death root-caused in source; verification blocked, board off the bus
 
 **Host:** Heliotrope Ridge. **Commit built:** `7dfc26f`. **Commit previously on the board:** `406df01`.

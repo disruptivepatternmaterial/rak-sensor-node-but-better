@@ -66,6 +66,60 @@ watch land. See [`EVIDENCE.md`](EVIDENCE.md).
 **Recovery when the PID is `0029` or `002A`:** double-tap RESET on the RAK19007 to re-enter
 DFU cleanly, then re-run `flash.sh`. Nothing else is needed and nothing is lost.
 
+### An absent USB device does not mean a dead board
+
+Since the sleep path detaches the USB device (`docs/FIRMWARE_SPEC.md` §5 step 7), a **sleeping
+node has no `239A` device on the bus and no `/dev/cu.usbmodem*` at all.** That is the fix
+working, not a failure.
+
+This matters because `flash.sh`'s failure text — *"no 239A device on the bus at all"* →
+*"THE BOARD HAS NO VALID APPLICATION"* — is only true immediately after a failed upload. Run it
+against a node that is simply asleep and it reads like a brick. On 2026-08-05 that reading was
+made twice in one session before TTN showed the node had uplinked 77 seconds earlier.
+
+Before concluding a board is dead, check the two observers that do not depend on USB:
+
+```
+ttn-lw-cli end-device get my-app-tobi puma-concolor-001 --session --mac-state | grep last_f_cnt_up
+date            # compare against the session's updated_at, in UTC
+```
+
+A `last_f_cnt_up` that advanced within the last interval means the application is running fine
+and the console will return at the next wake. Wait for it rather than reflashing.
+
+### When serial DFU fails but the bootloader is present
+
+Symptom: the PID is `0029`, the port exists, nothing holds it (`lsof`), and the upload still
+fails with *"No data received on serial port. Not able to proceed."* Two attempts is enough to
+stop retrying — the serial DFU transport is not going to start answering.
+
+The UF2 mass-storage route works when the serial one does not, and it is what recovered the
+board on 2026-08-05 after two clean failures. **macOS does not always auto-mount the
+bootloader's drive**, which is the step that makes this look unavailable when it isn't:
+
+```
+diskutil list | grep -i rak                 # find it -- e.g. /dev/disk6, "RAK4631", ~33 MB
+diskutil mount disk6                        # macOS often leaves it unmounted
+ls /Volumes/RAK4631/                        # expect CURRENT.UF2, INFO_UF2.TXT, INDEX.HTM
+
+python3 ~/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py \
+    .pio/build/rak4631/firmware.hex -c -f 0xADA52840 -o /tmp/fw.uf2
+cp /tmp/fw.uf2 /Volumes/RAK4631/
+```
+
+`0xADA52840` is the UF2 family ID for the nRF52840 with a SoftDevice; the converter reports
+`start address: 0x26000`, which is the application offset above the SoftDevice — if it reports
+anything else, stop, because the image will not be bootable
+([CITE(prior-art): Adafruit\_nRF52\_Bootloader UF2 family](https://github.com/adafruit/Adafruit_nRF52_Bootloader)).
+
+The bootloader flashes on write and resets itself; the drive disappears and the application
+comes up within about 12 seconds. Confirm with the PID table above before reading any capture.
+
+**Verify the binary is not stale before converting.** `pio run` reused a `firmware.hex` from an
+earlier commit on 2026-08-05 even though `src/sensors/battery.cpp` had changed underneath it, so
+a UF2 built from it would have carried the wrong commit into an evidence entry. Check the mtime
+against the sync, or `rm -rf .pio/build/<env>` first.
+
 ## Stage 1 — wind sensor only
 
 Radio off, battery reader off, no sleep. Powered from USB, printing to the serial monitor.
