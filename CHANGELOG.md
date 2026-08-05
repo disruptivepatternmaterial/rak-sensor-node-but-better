@@ -8,7 +8,27 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
-Firmware version is now `0.3.0` — a new capability, backward compatible with the decoder.
+## [0.4.0] — 2026-08-05
+
+**Battery telemetry works on hardware.** A new working subsystem, backward compatible with the
+TTN decoder, so a minor bump per SemVer and [`docs/RELEASE.md`](docs/RELEASE.md). Firmware
+version emitted in the uplink is now `0.4.0`.
+
+Gates for this release: `scripts/preflight.sh` PASS; **decoder parity PASS across all nine
+emitted fields** against the live TTN formatter in `forest-weather-machines`; LoRaWAN airtime
+well inside the TTN Fair Use Policy at the 3600 s default interval. Parity is the gate that
+matters most here — a drifted encoder does not lose one field, it makes the decoder throw and
+discard the whole uplink.
+
+Two High findings are **open and known** against the battery path, deliberately deferred to a
+consolidated fix pass:
+[#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36) — the
+SENDAT response is not matched to the query, so flag, dest, source and sequence go unverified;
+[#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) — a
+partial record set can return `Ok` carrying stale values from a previous read.
+
+Status remains **`🚧 NOT YET DEPLOYED`**. No H1–H8 gate closed, and the ≥24 h soak and ≥7 d
+field shadow have not run.
 
 ### Added
 
@@ -32,23 +52,17 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
 
   This closes no H1–H8 gate and does not change the `🚧 NOT YET DEPLOYED` status.
 
-- **The battery driver now tries a plain Modbus RTU register read before any SensorHub
-  handshake.** Slave `0x6E`, FC `0x03`, 21 registers from `0x6000`, on the existing one-wire
-  harness — the same address, framing and register map the deployed sibling node reads this pack
-  with ([CIT-RAK45WIRE] `forest-weather-machines` @ `efc0e3c`,
-  `LoRaWAN/docs/RAK2560_weather_station_settings.md` §5d).
+- **The success path hex-dumps its frame.** Every failure path in the battery driver has always
+  printed its bytes; the one path that produces a number printed only the number, so the first
+  real reading arrived with no frame behind it. It now dumps under the same `sendat` label and
+  format the other paths use, which is what makes a reading evidence rather than an assertion.
 
-  The reasoning is that a register read has no provisioning step to get stuck in: no id to
-  assign, no rule to arm, no sampling handshake to complete. It costs one 8-byte request and a
-  bounded 1 s wait, changes no state, and short-circuits the entire cycle if the one-wire peer
-  turns out to bridge Modbus. Every non-`Ok` outcome falls through to the existing SensorHub
-  path untouched, and an all-zero register block returns `Unsampled` rather than a reading —
-  §5b documents all-zero as this system's signature for "probe present, not sampling", which is
-  a null and never a 0.00 V pack.
-
-  The current register's sign is carried through raw and logged as raw. §5d says negative means
-  charging; the live TTN decoder asserts the opposite. That contradiction is
-  [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) and is not resolved here.
+- **The raw sensor integers are logged unscaled.** The temperature scale was inferred, not
+  measured: `src/payload.cpp` hands the value to Cayenne LPP type 103 unscaled and the decoder
+  divides by 10, which is correct only if the pack reports tenths. A bench "23.0 °C" cannot
+  distinguish raw `230` (tenths, correct) from raw `23` (whole degrees, in which case every
+  temperature ever shipped is 10× low). The capture reads `v=1223 i=0 soc=98 t=230`, so
+  **tenths is confirmed and the decoder's `/10` is right.**
 
 - **New `battdiag` build environment** — battery only, RK900 out, radio and sleep out, ~10 s
   cycle. `stage2` ran 110.5 s, of which the battery driver alone took 50.5 s and the RK900 added
@@ -58,6 +72,11 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
   enough to test what the full-length versions exist to test.
 
 ### Changed
+
+- **Awake time drops from ~50 s to ~5 s per cycle.** `acquire_pid()` was 45.4 s of a 50.5 s
+  wake. It is now not entered at all in the steady state, because the pack latches the id and the
+  phase-0 direct probe answers instead. [`docs/DEPLOY.md`](docs/DEPLOY.md) is updated; any
+  power-budget arithmetic written against the 50 s figure is stale.
 
 - **The provisioning window is capped at 5 s, down from 45 s.** It was 45 s to test one
   hypothesis: that the pack latches an id only if the master is still answering when it next
@@ -122,6 +141,19 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
 Roughly 700 lines, none of which a field image ever executed. Each was kept at the time
 because "it might be needed for the next pack"; together they had become the thing every
 reader has to rule out before touching the battery driver.
+
+- **The raw-Modbus path and `FEATURE_BATTERY_MODBUS`. Negative result — do not re-attempt it.**
+  A plain Modbus RTU read at slave `0x6E`, FC `0x03`, 21 registers from `0x6000` — request
+  `6E 03 60 00 00 15 93 5A`, the same register map the deployed sibling node reads this pack with
+  over its own RS-485 harness — **returned 0 bytes on every cycle it ran.** The one-wire peer is a
+  Generic Probe IO adapter that speaks SensorHub northbound and Modbus southbound to the BMS; it
+  does not forward a Modbus frame arriving from the north.
+
+  It was a reasonable experiment while the SensorHub handshake was stuck, because a register read
+  has no provisioning step to get stuck in. The handshake now works and returns 12.23 V on the
+  same wire, so the path costs an 8-byte request plus a 1 s wait per wake to re-derive an answer
+  already in [`docs/EVIDENCE.md`](docs/EVIDENCE.md). Recorded here so the next reader who notices
+  that the sibling reads this pack over Modbus finds the result instead of repeating it.
 
 - **The PARAMGET/PARAMSET pass (~210 lines) and `FEATURE_BATTERY_PARAM_PASS`.** Built on the
   hypothesis that the pack's sensors sit at `RULE_DISABLE` until armed. Falsified three ways:
