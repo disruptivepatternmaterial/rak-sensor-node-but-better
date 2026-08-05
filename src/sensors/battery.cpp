@@ -255,6 +255,30 @@ SoftwareHalfSerial &bus(uint8_t pin)
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 
+// How long to wait for the pack to push a reading of its own accord.
+//
+// The poll only ever returns a record template, so the measurement has to come from the
+// unsolicited report — and that arrives on the pack's own sampling cadence, not on ours. The
+// previous 500 ms wait was therefore a bet that the two coincided, which the bench lost every
+// cycle. This is deliberately generous because the cadence is configurable on the pack (it is
+// exposed in RAK's WisToolBox) and is not readable from anything the firmware has been able to
+// interrogate so far: PARAMGET is refused while the pack still considers itself unprovisioned.
+//
+// It costs awake time, which on a node meant to last months is not free — 20 s per cycle
+// against an hourly interval is roughly 0.6% duty. Acceptable to prove the mechanism, and it
+// should be narrowed to just over the pack's real cadence once that is known. Tracked with the
+// rest of the battery bring-up in issue #5.
+//
+// Well inside the 120 s watchdog window in src/main.cpp, so a long listen cannot look like a
+// hang.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+//   onewireHandle() reschedules itself every 50 ms forever and drains on every tick, i.e. the
+//   reference is *always* listening. A wake-transact-sleep driver has to buy an approximation
+//   of that with a window wide enough to contain one push.
+// CITE(bench): docs/EVIDENCE.md — stage3 on 246add8: the poll returned a checksum-valid
+//   all-zero template every cycle and the 500 ms push listen that followed it caught nothing.
+constexpr uint32_t kPushListenUs = 20000000; // 20 s
+
 // One buffer, used by every phase in turn, and sized like the reference's.
 //
 // 96 was too small in two separate ways. The bench capture shows a 28-byte SENDAT reply and
@@ -915,12 +939,16 @@ bool Battery::enable_sampling(uint8_t *buf, size_t cap)
 //   `while (mySerial.available()) { buff[bufflen++] = mySerial.read(); delay(2); }` — a
 //   per-byte grace period is what delimits the frame, because there is no length field we
 //   can trust before parsing. Same shape here, with the gap expressed as a timeout.
-size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision)
+size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision,
+                        uint32_t first_byte_timeout_us)
 {
     SoftwareHalfSerial &link = bus(m_pin);
 
-    // The first byte gets the long window: the probe may still be waking.
-    uint32_t deadline_us = kFirstByteTimeoutUs;
+    // The first byte gets the long window: the probe may still be waking. Callers waiting on
+    // an unsolicited push override it, because that wait is bounded by the pack's sampling
+    // cadence rather than by its wake time.
+    uint32_t deadline_us =
+        (first_byte_timeout_us > 0) ? first_byte_timeout_us : kFirstByteTimeoutUs;
     uint32_t mark        = micros();
     size_t   n           = 0;
 
@@ -1242,7 +1270,8 @@ BatteryReading Battery::read()
     //   received the pack's spontaneous PROVISION announcement every cycle. The pack is
     //   demonstrably willing to talk unprompted on this wire.
     if (m_last != BatteryResult::Ok) {
-        const size_t pushed = receive(rx, sizeof(rx));
+        const size_t pushed = receive(rx, sizeof(rx), /*stop_on_provision=*/false,
+                                      kPushListenUs);
         if (pushed >= 8) {
             BatteryReading      candidate;
             const BatteryResult r = parse(rx, pushed, candidate);

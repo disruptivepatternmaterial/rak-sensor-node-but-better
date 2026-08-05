@@ -68,7 +68,11 @@ class Battery {
     // Off by default, and deliberately not applied to the data path: the pack concatenates its
     // spontaneous announcement behind a SENDAT reply, so stopping at the first complete frame
     // there would throw the second one away.
-    size_t receive(uint8_t *buf, size_t cap, bool stop_on_provision = false);
+    // `first_byte_timeout_us` of 0 means "use the normal short window". The push-listen path
+    // passes a much longer one: the pack samples on its own periodic schedule, so waiting only
+    // half a second for an unsolicited report is waiting for a coincidence.
+    size_t receive(uint8_t *buf, size_t cap, bool stop_on_provision = false,
+                   uint32_t first_byte_timeout_us = 0);
 
     // Hex-dump under a label, for the paths where the decoded verdict is not enough evidence.
     void dump(const char *what, const uint8_t *buf, size_t len);
