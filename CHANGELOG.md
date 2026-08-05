@@ -32,6 +32,20 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   all. No H1–H8 gate closes on this; the evidence needs a bench measurement that has not
   been taken.
 
+- **The fair-use guard now checks the effective uplink cadence rather than one bad flag
+  pair** ([#44](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/44)).
+  `src/config.h` refused `FEATURE_BENCH_INTERVAL` together with `FEATURE_RADIO`, but
+  `FEATURE_SLEEP=0` with the radio on reached the same place by another route: with sleep
+  compiled out the awake-wait cap *is* the cadence, and at 30 s that is roughly 2880
+  uplinks/day. The cap lived in `main.cpp`, where no fair-use check could see it. It now
+  lives in `config.h`, the effective minimum interval is derived from the flags rather than
+  enumerated, and a `static_assert` requires any transmitting build to be incapable of a
+  cadence below the 900 s floor — so a flag combination nobody has thought of yet still has
+  to pass through it. The floor is single-sourced as `kFupFloorSeconds`, so the assertion
+  cannot contradict the interval floor it defends. The awake-wait cap no longer applies when
+  the radio is compiled in, which restores what `stage3` already claimed in its own
+  `platformio.ini` comment: it runs at the field floor.
+
 ### Changed
 
 - **Minimum reporting interval lowered from 1800 s to 900 s**, so the operator can run

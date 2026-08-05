@@ -56,6 +56,11 @@
 //   24 h — the figure the arithmetic above is measured against.
 // CITE(spec): [CIT-LORA-RP002] US915 data rate to spreading factor mapping, which is what
 //   turns a payload size into the per-uplink airtime used here.
+// The shortest cadence any transmitting build may be capable of. Single-sourced here so the
+// field floor and the compile-time assertion that defends it cannot drift apart — the bench
+// build widens kIntervalMinSeconds below, so that constant cannot serve as the reference.
+constexpr uint32_t kFupFloorSeconds = 900;
+
 #if FEATURE_BENCH_INTERVAL
 // Bench cadence. Only reachable with the radio compiled out, so no airtime is spent at all
 // and the fair-use arithmetic above does not apply — the node reads the sensor and prints.
@@ -83,9 +88,68 @@ constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 60;
 #endif
 #else
-constexpr uint32_t kIntervalMinSeconds     = 900;
+constexpr uint32_t kIntervalMinSeconds     = kFupFloorSeconds;
 constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 3600;
+#endif
+
+// Ceiling on the between-cycle wait when sleep is compiled out, so bring-up is not spent
+// watching a blank screen for an hour.
+//
+// This lives here rather than beside the loop that uses it because it is an interval policy,
+// not a detail of the main loop: with sleep compiled out it *is* the reporting cadence, and
+// the guard below has to be able to see it. That was the defect in issue #44 — the cap sat
+// in main.cpp where no fair-use check could reach it, so `stage3` (sleep off, radio on)
+// waited 30 s between uplinks, roughly 2880 a day, without touching FEATURE_BENCH_INTERVAL
+// and without tripping the #error above.
+//
+// The cap does not apply when the radio is compiled in. A build that transmits has to honor
+// the interval floor by whichever path produces it, and stage3's own comment in
+// platformio.ini already said it was expected to run at the field floor. Capping the wait
+// there was silently overriding the cadence the environment asked for.
+#if FEATURE_RADIO
+constexpr uint32_t kAwakeWaitCapSeconds = kIntervalMaxSeconds;
+#elif FEATURE_BENCH_INTERVAL
+// On a bench build the ceiling has to be at least the bench interval or it would silently
+// override the cadence the operator asked for — a 30 s cap against a 60 s interval reads as
+// the setting having been ignored.
+constexpr uint32_t kAwakeWaitCapSeconds = kIntervalDefaultSeconds;
+#else
+constexpr uint32_t kAwakeWaitCapSeconds = 30;
+#endif
+
+// The shortest gap between uplinks this build can actually produce, by any route.
+//
+// Sleep on: the interval floor is the cadence. Sleep off: the awake wait is capped, so the
+// cadence is whichever of the two is smaller. Deriving it rather than checking flags is the
+// point — the previous guard enumerated one bad combination (bench interval plus radio) and
+// a second, unenumerated one reached the same place. A combination nobody has thought of yet
+// still has to pass through this expression.
+#if FEATURE_SLEEP
+constexpr uint32_t kEffectiveMinIntervalSeconds = kIntervalMinSeconds;
+#else
+constexpr uint32_t kEffectiveMinIntervalSeconds =
+    (kIntervalMinSeconds < kAwakeWaitCapSeconds) ? kIntervalMinSeconds : kAwakeWaitCapSeconds;
+#endif
+
+// Any build that transmits must be capable of no cadence faster than the fair-use floor.
+// Asserted rather than clamped at run time: a build that can breach the shared network's
+// allowance has no legitimate use, so the number of ways to produce one should be zero.
+//
+// Set to the field floor itself, so the assertion cannot contradict the floor it is
+// defending — lowering the floor lowers this with it, and the airtime reasoning for the
+// value lives in one place above.
+//
+// CITE(policy): [CIT-TTN-FUP] the sandbox allowance is 30 s of uplink airtime per node per
+//   24 h, and the same page states the limits do not apply on a private network — which is
+//   why radio bench cadence testing belongs there instead of behind an exception here.
+#if FEATURE_RADIO
+static_assert(kEffectiveMinIntervalSeconds >= kFupFloorSeconds,
+              "This build can transmit faster than the fair-use interval floor. Some "
+              "combination of FEATURE_SLEEP, FEATURE_BENCH_INTERVAL and the awake-wait cap "
+              "produces an effective uplink cadence below 900 s, which breaches the TTN "
+              "fair use allowance (docs/FIRMWARE_SPEC.md §4). Either raise the effective "
+              "interval or build with FEATURE_RADIO=0.");
 #endif
 
 class Config {

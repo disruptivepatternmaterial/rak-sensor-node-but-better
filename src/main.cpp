@@ -51,15 +51,8 @@ constexpr uint32_t kWatchdogSeconds = 120;
 // waiting forever would make a perfectly healthy board look dead.
 constexpr uint32_t kConsoleWaitMs = 3000;
 
-// Ceiling on the between-cycle wait when sleep is compiled out, so bring-up is not spent
-// watching a blank screen for an hour. On a bench build the ceiling has to be at least the
-// bench interval or it would silently override the cadence the operator asked for — a 30 s
-// cap against a 60 s interval reads as the setting having been ignored.
-#if FEATURE_BENCH_INTERVAL
-constexpr uint32_t kAwakeWaitCapSeconds = kIntervalDefaultSeconds;
-#else
-constexpr uint32_t kAwakeWaitCapSeconds = 30;
-#endif
+// kAwakeWaitCapSeconds moved to src/config.h. With sleep compiled out the cap *is* the
+// reporting cadence, so it has to sit where the fair-use guard can see it — see issue #44.
 
 Config           config;
 Radio            radio;
