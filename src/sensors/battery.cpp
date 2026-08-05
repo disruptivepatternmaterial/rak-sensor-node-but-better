@@ -1379,8 +1379,9 @@ BatteryReading Battery::read()
         }
     }
 
-    // A pack that has once produced a real measurement never needs configuring again, and
-    // saying so here is what stops the enable pass from running on every future wake.
+    // First real measurement of this boot is worth one line on the console; the same line on
+    // every wake for months is not. The flag exists to make it once. It does not gate any
+    // configuration work — there is none left to gate.
     if (m_last == BatteryResult::Ok && !m_ever_sampled) {
         m_ever_sampled = true;
         LOGLN(F("   battery : sampling confirmed — pack is reporting live values"));

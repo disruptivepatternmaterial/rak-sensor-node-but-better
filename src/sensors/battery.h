@@ -209,10 +209,15 @@ class Battery {
     // that has cost the most bench time is held explicitly instead of re-derived from hex.
     bool m_pack_latched = false;
 
-    // Set once the pack has produced a genuine measurement. Sampling is a persistent setting
-    // on the pack, so a pack that has reported real values does not need configuring again —
-    // this is what keeps the enable pass off the critical path for the rest of the node's
-    // deployment rather than repeating it on every wake for months.
+    // Set once the pack has produced a genuine measurement, and used for exactly one thing:
+    // announcing that fact to the console a single time instead of on every wake for months.
+    //
+    // It used to mean more. An earlier revision ran a PARAMGET/PARAMSET enable pass on the
+    // theory that the pack's sensors had to be armed before they would sample, and this flag
+    // suppressed that pass once sampling was confirmed. The pass was deleted in 98486f0 /
+    // e0df6af once reply turnaround turned out to be the real blocker, and kParamPassEnabled
+    // no longer exists. Nothing gates on this beyond the log line — do not read it as evidence
+    // that a configuration path still exists somewhere.
     bool m_ever_sampled = false;
 
     BatteryResult m_last = BatteryResult::NoReply;

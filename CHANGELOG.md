@@ -10,6 +10,15 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **`m_ever_sampled` no longer advertises a configuration path that was deleted**
+  ([#43](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/43)).
+  Its comment claimed the flag stopped a PARAMGET/PARAMSET enable pass from repeating on every
+  wake. That pass went away in `98486f0` / `e0df6af` when reply turnaround turned out to be the
+  actual blocker, and `kParamPassEnabled` no longer exists in `src/`. The flag itself survives
+  because it does one useful thing — it announces the first live measurement of a boot once
+  instead of on every wake — but nothing configures the pack any more, and the comment now says
+  so plainly rather than pointing the next reader at machinery that is gone.
+
 - **`docs/FIRMWARE_SPEC.md` no longer contradicts the decided ADRs or the running firmware**
   ([#41](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/41)).
   Three sections had drifted, and each one sent a maintainer down a wrong path during a failure.
