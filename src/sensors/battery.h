@@ -68,6 +68,16 @@ enum class BatteryResult : uint8_t {
     // at the receive path instead of at the protocol.
     Truncated,
 
+    // A structurally valid SENDAT frame arrived, but it was not an answer to the request this
+    // driver had outstanding: wrong flag, wrong destination, wrong source, or a sequence that
+    // does not match the one sent.
+    //
+    // Distinct from BadFrame because nothing is wrong with the frame — it is somebody else's,
+    // or the pack's own spontaneous push arriving inside a window where a solicited reply was
+    // expected. Previously such a frame was accepted outright, which let a spontaneous report
+    // falsely validate the address the driver had just queried. See issue #36.
+    Unmatched,
+
     // A complete, checksum-valid PROVISION announcement arrived where a SENDAT reply was
     // expected, and no SENDAT frame arrived at all.
     //
@@ -78,6 +88,14 @@ enum class BatteryResult : uint8_t {
 };
 
 const char *battery_result_name(BatteryResult r);
+
+// Declared rather than included: battery_frame.h includes this header, and the brownout gate
+// lives behind an Arduino-dependent translation unit. Both are only ever dereferenced inside
+// battery.cpp.
+struct BatteryQueryMatch;
+namespace power {
+class Brownout;
+}
 
 class Battery {
   public:
@@ -96,6 +114,16 @@ class Battery {
     BatteryReading read();
 
     BatteryResult last_result() const { return m_last; }
+
+    // Hand the driver the node's brownout gate so it can decline to go hunting for a pack that
+    // is not talking while the pack is also too low to spend energy on.
+    //
+    // Injected rather than reached for, because the instance lives in src/main.cpp and this
+    // class must stay linkable in the off-target tests, which have no power subsystem. Null
+    // until wired, in which case the ladder runs exactly as it did before — a missing gate
+    // must never be read as "brownout engaged" and silently stop the battery from being read
+    // at all. See issue #39.
+    void set_brownout(const power::Brownout *b) { m_brownout = b; }
 
   private:
     // `payload` is the SensorHub payload behind the six-byte header: empty for BOOT and
@@ -150,11 +178,18 @@ class Battery {
     void tx_byte(uint8_t b);
 
     // Verifies the frame before believing any of it, then fills `out`. Returns the reason
-    // when it refuses. Validation matters more here than it looks: an unverified record
-    // scan will happily turn line noise into a plausible pack voltage, and a wrong battery
-    // reading is worse than none — it is the number a human uses to decide whether the
-    // node needs rescuing.
-    BatteryResult parse(const uint8_t *buf, size_t len, BatteryReading &out);
+    // when it refuses.
+    //
+    // The decoding itself lives in battery_frame.cpp, which has no Arduino dependency and is
+    // therefore covered by host tests (issue #42). This wrapper exists to print what the codec
+    // observed — the codec cannot log — and to supply the match criteria that tie a reply to
+    // the request that asked for it (issue #36).
+    BatteryResult parse(const uint8_t *buf, size_t len, BatteryReading &out,
+                        const BatteryQueryMatch &match);
+
+    // May this cycle pay for the announcement window and the push listen, or is it a cheap
+    // probe only? See issue #39 and the constants in battery.cpp.
+    bool ladder_allowed();
 
     uint8_t m_pin;
     uint8_t m_seq = 0; // per-request sequence, mirrors menu.seq in the reference
@@ -181,4 +216,22 @@ class Battery {
     bool m_ever_sampled = false;
 
     BatteryResult m_last = BatteryResult::NoReply;
+
+    // The brownout gate, or null when nothing has wired one in. See set_brownout().
+    const power::Brownout *m_brownout = nullptr;
+
+    // Consecutive cycles in which the pack produced no reading at all.
+    //
+    // The happy path is cheap: the pack answers the direct query in well under a second. The
+    // expensive part — the 5 s announcement window and the 20 s push listen — only runs when
+    // that fails, so a pack that has stopped talking costs roughly 28 s of wake time every
+    // cycle, forever, with nothing to show for it. Counting the failures is what turns that
+    // into a cheap probe plus an occasional full retry. See issue #39.
+    uint16_t m_silent_cycles = 0;
+
+    // Cycle count at which the full ladder is next allowed to run again, once the driver has
+    // dropped back to probe-only. Compared against m_cycles rather than millis() so it does
+    // not depend on the wall clock surviving sleep.
+    uint32_t m_cycles          = 0;
+    uint32_t m_next_full_cycle = 0;
 };

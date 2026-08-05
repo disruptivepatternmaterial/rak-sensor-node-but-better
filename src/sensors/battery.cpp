@@ -2,6 +2,7 @@
 
 #include "../build_features.h"
 #include "../power.h"
+#include "battery_frame.h"
 #include "crc16.h"
 
 #include <Arduino.h>
@@ -41,8 +42,9 @@ namespace {
 //   RakSNHub_Protocl_API.init(), which sends an SNHUB_TYPE_PROVISION/BOOT frame first, and
 //   only then requests data (get.data) for the PID the pack announces. We replicate that
 //   boot-then-request order.
-constexpr uint8_t kWakeByte  = 0xFF; // RUI3_Api_t.wakeup
-constexpr uint8_t kDelimiter = 0x7E; // RUI3_Api_t.start
+constexpr uint8_t kWakeByte = 0xFF; // RUI3_Api_t.wakeup
+// kDelimiter and the rest of the protocol field constants now live in battery_frame.h, so the
+// codec and the transport cannot drift apart on them.
 
 // Exactly one wake byte, because that is what the reference master emits and because on the
 // provisioning path every extra byte is latency the pack is waiting through.
@@ -110,23 +112,22 @@ constexpr uint32_t kTurnaroundMs = FEATURE_BATTERY_TURNAROUND_MS;
 // CITE(bench): docs/EVIDENCE.md — SENDAT dest sweep at 9600 on commit 3d3425d: dest 0x01,
 //   0x02 and 0x03 each returned 0 bytes; dest 0xFF returned a full 28-byte SENDAT response.
 //   The pack listens on 0xFF because nothing had ever provisioned it.
+// kMasterId is in battery_frame.h — the codec needs it to tell a reply addressed to us from
+// one addressed to somebody else.
 constexpr uint8_t kProbeId     = 0x01; // first assignable PID (record index 0 -> pid 1)
-constexpr uint8_t kMasterId    = 0x00; // PID_MASTER (source)
 constexpr uint8_t kBroadcastId = 0xFF; // PID_UNKNOW — where an un-provisioned pack listens
 
-// RUI3 transport header, between the delimiter and the SensorHub frame.
-constexpr uint8_t kRui3TypeSensorHub = 0x02; // RUI3API_TYPE_SENSORHUB
-constexpr uint8_t kRui3FlagReq       = 0x00; // RUI3API_FLG_REQ
-constexpr uint8_t kRui3FlagRsp       = 0x01; // RUI3API_FLG_RSP
+// The RUI3 transport header constants (kRui3TypeSensorHub, kRui3FlagReq, kRui3FlagRsp) and the
+// SensorHub frame types (kHubTypeProvision, kHubTypeSendData) are in battery_frame.h.
+//
 // The RUI3 length field is derived rather than constant: send_frame() computes it from the
 // payload it is given. Every frame this driver now sends -- BOOT and SENDAT -- carries a
 // zero-length payload and so transmits SHORT_SWAP(6) = 0x00 0x06.
 
-// SensorHub frame fields.
-constexpr uint8_t kHubTypeProvision = 0x01; // SNHUB_TYPE_PROVISION
-constexpr uint8_t kHubTypeSendData  = 0x03; // SNHUB_TYPE_SENDAT
-constexpr uint8_t kPldBoot          = 0x02; // PLD_PROVI_TYPE_BOOT
-constexpr uint8_t kPayloadSendData  = 0x02; // PLD_SDATA_TPYE_SENDAT
+// Payload types for the frames this driver sends. Kept here rather than in the codec because
+// the codec never composes a frame, it only reads one.
+constexpr uint8_t kPldBoot         = 0x02; // PLD_PROVI_TYPE_BOOT
+constexpr uint8_t kPayloadSendData = 0x02; // PLD_SDATA_TPYE_SENDAT
 
 // The per-sensor sampling rule, which is the thing this revision is here to reach.
 //
@@ -228,7 +229,7 @@ constexpr uint32_t kEnablePassBudgetMs = 30000;
 // CITE(bench): docs/EVIDENCE.md — passive listen at 9600 on commit 3d3425d, no bytes
 //   transmitted: `FF 7E 00 55 02 00 | 00 FF 00 01 50 03 | ...`. hub_type 0x01 PROVISION,
 //   payload_type 0x03 = VER3, dest 0x00 master, source 0xFF unprovisioned.
-constexpr uint8_t kPldProvVer3 = 0x03; // PLD_PROVI_TYPE_VER3
+// kPldProvVer3 itself is defined in battery_frame.h, where provision_ready() needs it.
 
 // Byte offset of `provId` inside SNHub_Api_Provision_t: hw_version(1) + sw_version(3) +
 // sn(18) = 22. Confirmed against the captured announcement, where model_name — the field
@@ -268,35 +269,9 @@ constexpr size_t kProvSnsrNumOffset = 54;
 constexpr size_t kProvSnsrOffset    = 55;
 constexpr size_t kSnsrNodeBytes     = 4;
 
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] IPSO codes, already reduced by the 3200 offset.
-//   These are the same numbers the payload encoder uses on the LoRaWAN side, because RAK
-//   reuses the IPSO table in both places — which is a convenience, not a coincidence.
-constexpr uint8_t kIpsoTemperature = 103; // 3303 - 3200
-constexpr uint8_t kIpsoCapacity    = 184; // 3384 - 3200
-constexpr uint8_t kIpsoDcCurrent   = 185; // 3385 - 3200
-constexpr uint8_t kIpsoDcVoltage   = 186; // 3386 - 3200
-
-// Not a measurement. Type 243 is a 16-bit status bitfield, and this pack announces two
-// sensors carrying it (sid 0x19 and 0x1A). It matters twice over.
-//
-// First, the record walker has to know its width or it stops dead at the first one and
-// discards every record behind it — and on this pack the two 243 sensors are announced last,
-// so anything appended after them would be lost. "Bit Values (16bits)" is two bytes.
-//
-// Second, and more important, it must never count toward the all-zero template test below.
-// A status word is a legitimate zero *and* a legitimate non-zero regardless of whether the
-// pack has sampled anything: a non-zero one would let an untouched record template pass as a
-// live measurement, and a zero one must not veto a frame whose physical sensors did report.
-// So it is decoded for its width and deliberately contributes nothing to the verdict.
-//
-// CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 347583 —
-//   the sensor-type table lists `{"displayValue":"Bit Values (16bits)","sendValue":"243"}`
-//   alongside `{"displayValue":"Bit Values (32bits)","sendValue":"244"}` and the physical
-//   types `Temperature 103` / `DC Voltage 186`. 243 is a 16-bit bitfield, not a quantity.
-// CITE(bench): docs/EVIDENCE.md — the pack's own announcement descriptor tail on afefec3
-//   reads `19 F3 08 00 1A F3 08 00`: sid 0x19 and sid 0x1A both carry ipso 0xF3 = 243 with
-//   rule 0x0008. Two of this pack's six sensors are status words.
-constexpr uint8_t kIpsoBitValues16 = 243;
+// The IPSO type codes (kIpsoTemperature, kIpsoCapacity, kIpsoDcCurrent, kIpsoDcVoltage and the
+// kIpsoBitValues16 status word) live in battery_frame.h alongside the record walker that is the
+// only thing that reads them.
 
 // 8N1 on a single open-drain wire shared between both directions — a hardware UART would
 // need external direction control that is not there, so the bit timing is done in software.
@@ -398,6 +373,35 @@ constexpr uint32_t kPushListenUs = 2000000; // 2 s
 constexpr uint32_t kPushListenUs = 20000000; // 20 s
 #endif
 
+// How many consecutive cycles with no reading before the driver stops paying for the expensive
+// half of the ladder, and how long it then waits before trying the full ladder again.
+//
+// The happy path is cheap: the pack answers the direct probe in well under a second. The
+// announcement window (5 s) and the push listen (20 s) only run when that fails — so a pack
+// that has stopped talking costs roughly 28 s of wake time every cycle, forever, with nothing
+// to show for it. That is the wrong way round. The cost should be paid while the failure is new
+// and there is a plausible chance of recovery, not for months after the pack has gone quiet.
+//
+// Three cycles is deliberately more than one: a single silent cycle is routine after a boot,
+// where the pack needs a couple of cycles to sample before it answers anything, and dropping to
+// probe-only on the first miss would slow first acquisition. Twenty-four cycles at the field
+// interval is roughly a day, so a pack that recovers — a cell that warmed up, a connector that
+// re-seated — is found within a day rather than never.
+//
+// CITE(policy): docs/POWER_BUDGET.md — the node runs unattended indefinitely on a
+//   solar-recharged pack, so wake time spent with nothing to show for it is the budget item
+//   that has no upside. Never let the pack reach a state it cannot recover from by itself.
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — on 1a203d3, cycle 1 ran the full ladder and
+//   cycles 2-7 were answered by the direct probe alone in well under a second. The expensive
+//   phases have only ever been useful on the first cycle after a cold pack.
+constexpr uint16_t kSilentCyclesBeforeProbeOnly = 3;
+#if FEATURE_BATTERY_FAST
+// A bench build must not lock itself out of the path it is there to exercise.
+constexpr uint32_t kFullLadderRetryCycles = 2;
+#else
+constexpr uint32_t kFullLadderRetryCycles = 24;
+#endif
+
 // One buffer, used by every phase in turn, and sized like the reference's.
 //
 // 96 was too small in two separate ways. The bench capture shows a 28-byte SENDAT reply and
@@ -449,9 +453,7 @@ constexpr uint32_t kProvWindowMs = 3000;
 constexpr uint32_t kProvWindowMs = 5000;
 #endif
 
-// SensorHub frame header (inside the RUI3 payload) before the first record: dest, source,
-// sequence, hub-type, payload-length, payload-type.
-constexpr size_t kHubHeaderBytes = 6;
+// kHubHeaderBytes is in battery_frame.h, where the frame scan and the record walker use it.
 
 // The provisioning announcement is far larger than a data reply: the captured one declares
 // a payload length of 85, so the frame runs 92 bytes, and it grows with the probe's sensor
@@ -461,158 +463,14 @@ constexpr size_t kHubHeaderBytes = 6;
 //   giving delimiter + 5 header + 85 + 1 checksum = 92 bytes from the wake byte.
 constexpr size_t kProvCapacity = kRxCapacity;
 
-// cal_chksum() over a frame already in a buffer: popcount of the RUI3 type byte, plus the
-// RUI3 flag byte, plus every byte the length field covers. Shared by the verify path and the
-// provisioning response so the two can never disagree about the algorithm.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c cal_chksum().
-uint8_t frame_chksum(const uint8_t *buf, size_t delim, size_t payload_len)
-{
-    uint8_t c =
-        (uint8_t)(__builtin_popcount(buf[delim + 3]) + __builtin_popcount(buf[delim + 4]));
-    for (size_t i = 0; i < payload_len; i++) {
-        c += __builtin_popcount(buf[delim + 5 + i]);
-    }
-    return c;
-}
+// frame_chksum(), ScanNotes, SnHubFrame, next_frame() and provision_ready() have moved to
+// battery_frame.{h,cpp}. They are pure byte handling with no Arduino dependency, and the
+// truncated-frame defect that cost days of bench time lived in exactly that code — see issue
+// #42 and the host tests in test/test_battery_frame.
 
-// What a scan saw besides the frame it returned.
-//
-// The scan's boolean answer — "is there a verified frame here" — throws away the two facts that
-// actually distinguish the failures. A frame whose declared length exceeds what arrived is a
-// truncated read; a verified PROVISION frame where SENDAT was expected is the pack talking past
-// us. Both used to collapse into BadFrame, and the collapse is what let a truncated 92-byte
-// announcement be reported as a record set full of zeros.
-struct ScanNotes {
-    bool   bad_cksum     = false;
-    bool   truncated     = false; // a candidate declared more bytes than arrived
-    bool   saw_provision = false; // a verified PROVISION frame was present
-    size_t declared      = 0;     // bytes the truncated candidate said it had, from the wake byte
-    size_t arrived       = 0;     // bytes actually in the buffer
-};
-
-// A located, checksum-verified frame inside a receive buffer.
-struct SnHubFrame {
-    size_t  delim;       // index of the 0x7E
-    size_t  payload;     // index of the first SensorHub byte
-    size_t  payload_len; // RUI3 length field — covers the SensorHub frame and its records
-    size_t  cksum;       // index of the trailing checksum byte
-    uint8_t flag;        // RUI3 flag: request or response
-    uint8_t dest;
-    uint8_t source;
-    uint8_t hub_type;
-    uint8_t hub_payload_type;
-};
-
-// Find the next verified frame at or after `from`.
-//
-// Scanning rather than assuming the buffer starts with one frame is not defensive padding —
-// it is required. The bench capture shows a SENDAT reply and a provisioning announcement
-// arriving back to back inside a single 64-byte read, so "the first delimiter in the buffer"
-// is routinely the wrong frame. The previous parser took the first delimiter unconditionally
-// and would have walked an 80-byte provisioning payload as if it were IPSO records.
-//
-// The checksum is verified here rather than by the caller so that a 0x7E occurring *inside*
-// a payload cannot be mistaken for a frame start: a false start produces a false length and
-// therefore a failed checksum, and the scan simply moves on to the next candidate byte.
-//
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process():
-//   verify_delimter() locates 0x7E, then verify_checksum() -> verify_rui3type() gate the
-//   frame before any program runs. Same order here.
-// CITE(bench): docs/EVIDENCE.md — SENDAT sweep on 3d3425d returned one buffer holding both
-//   `FF 7E 00 15 02 01 ...` (the 28-byte data reply) and `FF 7E 00 55 02 00 ...` (the
-//   announcement) concatenated, which is what makes the scan mandatory.
-bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, ScanNotes &notes)
-{
-    notes.arrived = len;
-
-    for (size_t d = from; d < len; d++) {
-        if (buf[d] != kDelimiter) {
-            continue;
-        }
-        // length[2] + type + flag, and at least the SensorHub header behind it.
-        if (d + 5 + kHubHeaderBytes > len) {
-            break; // nothing this short can hold a frame, and later candidates are shorter
-        }
-        if (buf[d + 3] != kRui3TypeSensorHub) {
-            continue;
-        }
-
-        // LSB_COMB(hbyte, lbyte) = (lbyte << 8) + hbyte, with lbyte first on the wire.
-        const size_t payload_len = ((size_t)buf[d + 1] << 8) | buf[d + 2];
-        if (payload_len < kHubHeaderBytes) {
-            continue;
-        }
-        const size_t payload = d + 5;
-        const size_t cksum   = payload + payload_len;
-        if (cksum >= len) {
-            // Declared longer than what arrived. Recorded rather than silently skipped: this is
-            // the exact shape of the pack's 92-byte announcement caught at 28 bytes, and
-            // treating it as "no frame" is what made a transport fault look like bad data.
-            notes.truncated = true;
-            notes.declared  = cksum + 1; // through the checksum byte, counting from the wake byte
-            continue;
-        }
-        if (frame_chksum(buf, d, payload_len) != buf[cksum]) {
-            notes.bad_cksum = true;
-            continue;
-        }
-        if (buf[payload + 3] == kHubTypeProvision) {
-            notes.saw_provision = true;
-        }
-
-        f.delim            = d;
-        f.payload          = payload;
-        f.payload_len      = payload_len;
-        f.cksum            = cksum;
-        f.flag             = buf[d + 4];
-        f.dest             = buf[payload + 0];
-        f.source           = buf[payload + 1];
-        f.hub_type         = buf[payload + 3];
-        f.hub_payload_type = buf[payload + 5];
-        return true;
-    }
-    return false;
-}
-
-// Is the frame we are here to answer already complete in this buffer?
-//
-// This is the difference between answering the announcement and answering it too late. Our
-// drain loop cannot tell "the pack has stopped talking" from "the pack is between bytes", so
-// it waits out the whole inter-byte gap before returning — and only then does the caller get
-// to reply. The reference never pays that: its drain is `while (available()) { read();
-// delay(2); }`, which at 9600 polls slower than bytes arrive, so `available()` stays true for
-// the length of the frame and goes false roughly one byte-time after the last one. It then
-// replies immediately.
-//
-// The declared length lets us do better than a timeout: the moment the buffer holds a
-// checksum-verified PROVISION request addressed to the master, there is nothing left to wait
-// for. Deliberately narrow — a data reply must NOT short-circuit the drain, because the pack
-// routinely concatenates its spontaneous announcement behind a SENDAT response and stopping at
-// the first complete frame there would discard the second one.
-//
-// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp onewireHandle() —
-//   `while (mySerial.available()) { buff[bufflen++] = mySerial.read(); delay(2); }` then
-//   `RakSNHub_Protocl_API.process(buff, bufflen)` on the same tick. The reply is transmitted
-//   within about one byte-time of the announcement's last byte, not after a frame-gap timeout.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process()
-//   validates in the order verify_checksum -> verify_rui3type -> verify_snhublen and only then
-//   dispatches; a frame is answerable as soon as those hold, which is as soon as the byte at
-//   payload[length] has arrived. Same condition, evaluated as the bytes land.
-bool provision_ready(const uint8_t *buf, size_t len)
-{
-    SnHubFrame f;
-    ScanNotes  notes;
-    size_t     from = 0;
-
-    while (next_frame(buf, len, from, f, notes)) {
-        from = f.delim + 1;
-        if (f.hub_type == kHubTypeProvision && f.flag == kRui3FlagReq &&
-            f.hub_payload_type == kPldProvVer3 && f.dest == kMasterId) {
-            return true;
-        }
-    }
-    return false;
-}
+// The rationale for provision_ready()'s early return — the drain must not wait out the
+// inter-byte gap before the announcement can be answered — is recorded on Battery::receive()
+// below and on the declaration in battery_frame.h.
 
 } // namespace
 
@@ -627,6 +485,7 @@ const char *battery_result_name(BatteryResult r)
     case BatteryResult::NoRecords:   return "no records";
     case BatteryResult::Unsampled:   return "all-zero records (pack not sampled)";
     case BatteryResult::Truncated:   return "truncated frame (declared longer than arrived)";
+    case BatteryResult::Unmatched:   return "SENDAT frame did not answer our query";
     case BatteryResult::ProvisionOnly:
         return "PROVISION announcement, no SENDAT reply";
     }
@@ -1140,213 +999,87 @@ size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision,
     return n;
 }
 
-BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out)
+BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out,
+                             const BatteryQueryMatch &match)
 {
-    // Pick the SENDAT frame out of the buffer. There may be more than one frame in there,
-    // and the data reply is not reliably the first — see next_frame().
-    SnHubFrame f;
-    ScanNotes  notes;
-    bool       found = false;
-    size_t     from  = 0;
+    BatteryFrameNotes   notes;
+    const BatteryResult r = battery_decode_frame(buf, len, out, notes, match);
 
-    while (next_frame(buf, len, from, f, notes)) {
-        from = f.delim + 1;
-        if (f.hub_type == kHubTypeSendData) {
-            found = true;
-            break;
-        }
+    // Everything below this point is diagnostics. The codec runs on the build host and has no
+    // Arduino, so the lines that used to be LOGF calls inside the record walker are printed
+    // here from what it recorded. None of it changes the verdict.
+    if (r == BatteryResult::Truncated && !notes.truncated_record) {
+        // The single most misleading line in this driver's history was the one that did not
+        // exist here. State both numbers: the length the frame declared and the length that
+        // arrived. Everything the next reader needs to look at the transport is in it. Both
+        // are measured from the delimiter, so they are directly comparable.
+        LOGF("   battery : truncated frame — declared %u bytes from the delimiter, %u arrived\n",
+             (unsigned)notes.declared, (unsigned)notes.arrived);
+    }
+    if (notes.truncated_record) {
+        // A different fault with a different fix from the branch below. This means "the frame
+        // was cut short", which is answered by looking at the transport: a truncating receive
+        // buffer, an inter-byte gap that expired mid-record, or a length field that disagrees
+        // with what arrived. The whole frame is rejected — see issue #37.
+        LOGF("   battery : record type %u truncated — %u byte(s) left, needs 4; frame rejected\n",
+             notes.truncated_record_type, (unsigned)notes.truncated_record_left);
+    }
+    if (notes.unknown_record) {
+        // Worth logging: it means the pack sends something this build does not know about, and
+        // every record behind it is being discarded. Answered by adding a decoder.
+        LOGF("   battery : unknown record type %u — stopping here\n", notes.unknown_record_type);
+    }
+    for (uint8_t s = 0; s < notes.status_count; s++) {
+        LOGF("   battery : status word sid 0x%02X = 0x%04X (not a measurement)\n",
+             notes.status_sid[s], notes.status_value[s]);
+    }
+    if (r == BatteryResult::Unmatched) {
+        LOGF("   battery : SENDAT frame does not answer our query — flag 0x%02X dest 0x%02X "
+             "source 0x%02X seq %u; discarded\n",
+             notes.unmatched_flag, notes.unmatched_dest, notes.unmatched_source,
+             notes.unmatched_sequence);
+    }
+    if (r == BatteryResult::ProvisionOnly) {
+        // The pack is alive and framing correctly; it is announcing rather than answering.
+        // This is its actual observed behaviour on this link and it is not a fault in the
+        // frame, so it must not read as one.
+        LOGLN(F("   battery : PROVISION announcement where a SENDAT reply was expected — "
+                "the pack is announcing, not answering"));
     }
 
-    // Classify the failure instead of flattening it. Order matters: a truncated read is the most
-    // specific and most actionable diagnosis, and it must not be masked by the checksum failures
-    // that a truncated buffer also tends to produce further along.
+    return r;
+}
+
+// May this cycle pay for the announcement window and the push listen?
+//
+// Two independent reasons to say no, and they are different in kind. The brownout gate is about
+// energy the node must not spend at all; the failure count is about energy that has repeatedly
+// bought nothing. Both are cheap probes only — the direct SENDAT query still runs either way,
+// because that is what detects the pack coming back, and it costs at most half a second.
+bool Battery::ladder_allowed()
+{
+    // A node that has correctly stopped transmitting to save the pack must not then burn ~28 s
+    // per cycle hunting for a pack that is not talking. Issue #39.
     //
-    // Nothing below this point can yield a reading, so no `out` field is ever written on any of
-    // these paths — a wrong-type or short frame produces no value at all, not a zero.
-    if (!found) {
-        if (notes.truncated) {
-            // The single most misleading line in this driver's history was the one that did not
-            // exist here. State both numbers: the length the frame declared and the length that
-            // arrived. Everything the next reader needs to look at the transport is in it.
-            LOGF("   battery : truncated frame — declared %u bytes, %u arrived\n",
-                 (unsigned)notes.declared, (unsigned)notes.arrived);
-            return BatteryResult::Truncated;
-        }
-        if (notes.saw_provision) {
-            // The pack is alive and framing correctly; it is announcing rather than answering.
-            // This is its actual observed behaviour on this link and it is not a fault in the
-            // frame, so it must not read as one.
-            LOGLN(F("   battery : PROVISION announcement where a SENDAT reply was expected — "
-                    "the pack is announcing, not answering"));
-            return BatteryResult::ProvisionOnly;
-        }
-        return notes.bad_cksum ? BatteryResult::BadChecksum : BatteryResult::BadFrame;
+    // Null when nothing has wired the gate in, which is read as "not engaged": a missing gate
+    // must never silently stop the battery from being read. See set_brownout().
+    if (m_brownout != nullptr && m_brownout->engaged()) {
+        LOGLN(F("   battery : brownout engaged — probe only, skipping the fallback ladder"));
+        return false;
     }
 
-    // The same records arrive in opposite byte orders depending on which way the exchange
-    // went, and the reference driver decodes them differently in each case. A response to
-    // our GET (flag = RSP) is little-endian; a push the pack sends unbidden (flag = REQ) is
-    // big-endian. Getting this from the flag rather than assuming one of them is what stops
-    // a 12.80 V pack being reported as 0.05 V.
-    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the
-    //   SNHUBAPI_EVT_SDATA_REQ case (reached via protocol_list[SENDAT].rsp) decodes
-    //   `(msg[2] << 8) + msg[1]`, while SNHUBAPI_EVT_REPORT (reached via .req) decodes
-    //   `(msg[1] << 8) + msg[2]`. msg[0] is the IPSO type, so msg[1] is the first value byte.
-    // CITE(bench): docs/EVIDENCE.md — the reply captured on 3d3425d carries flag 0x01 (RSP),
-    //   so a solicited read takes the little-endian path. Its values are all zero, which is
-    //   why the byte order could not be settled from the capture alone and had to come from
-    //   the reference.
-    const bool lsb_first = (f.flag == kRui3FlagRsp);
-
-    auto val16 = [&](size_t at) -> uint16_t {
-        return lsb_first ? (uint16_t)(((uint16_t)buf[at + 1] << 8) | buf[at])
-                         : (uint16_t)(((uint16_t)buf[at] << 8) | buf[at + 1]);
-    };
-
-    // Records occupy payload[6 ..], i.e. everything after the 6-byte SensorHub header up to
-    // the checksum byte.
-    const size_t records     = f.payload + kHubHeaderBytes;
-    const size_t records_end = f.cksum;
-
-    // Records are { sensor id, IPSO type, value }, the value width implied by the type. The
-    // widths are not guessed — they are the `size` column of the reference's IPSO table, and
-    // they check out exactly against the captured reply: four records in fifteen bytes as
-    // 4 + 4 + 3 + 4, ending precisely on the checksum.
-    //
-    // An unknown type therefore has an unknown width, and there is no way to find where the
-    // next record begins. Parsing stops there instead of guessing. Skipping a byte at a time
-    // would leave the scan pointing into the middle of a value and read the tail of one
-    // record as the head of another — producing a voltage or temperature that looks entirely
-    // plausible and is simply wrong. A pack that reports a number nobody can challenge is
-    // worse than one that reports nothing, so whatever was decoded before the unknown record
-    // is kept and the rest is abandoned.
-    //
-    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
-    //   SNHub_Api_sData_Snsr_t { sid, ipso, value[] }; onewire_master_protocol.c walks it as
-    //   `sData = &sData->value[rakipso_tbl[sData->ipso].size]` with table sizes CAPACITY 1,
-    //   DC_CURRENT 2, DC_VOLTAGE 2, TEMP_SENSOR 2.
-    // CITE(bench): docs/EVIDENCE.md — SENDAT reply on 3d3425d: `15 BA 00 00 | 16 B9 00 00 |
-    //   17 B8 00 | 18 67 00 00` then checksum 0x2F. Sensor ids 0x15-0x18 lead each record,
-    //   the IPSO type follows, and the strides land on the checksum byte with nothing left
-    //   over — the walker below is verified against real bytes, not inferred.
-    // Whether any *physical* record in this frame carried a non-zero value. This is the
-    // template detector, and it has to be accumulated during the walk rather than
-    // reconstructed from `out` afterwards, because `out` cannot distinguish "the pack
-    // reported 0" from "no record of that type was present".
-    //
-    // "Physical" is load-bearing. Only voltage, current, capacity and temperature count
-    // toward it. The 16-bit status bitfields this pack also carries are excluded in both
-    // directions: a non-zero status word must not license an otherwise untouched record
-    // template to be reported as a live measurement, and a zero status word must not veto a
-    // frame whose voltage and current did report. A bitfield says nothing about whether the
-    // pack has sampled.
-    bool any_nonzero = false;
-
-    size_t i = records;
-    while (i + 2 < records_end) {
-        const uint8_t type = buf[i + 1];
-
-        if (type == kIpsoCapacity) {
-            out.soc.set(buf[i + 2]);
-            any_nonzero |= (buf[i + 2] != 0);
-            i += 3;
-        } else if (type == kIpsoDcCurrent && (i + 3) < records_end) {
-            out.current.set((int16_t)val16(i + 2));
-            any_nonzero |= (val16(i + 2) != 0);
-            i += 4;
-        } else if (type == kIpsoDcVoltage && (i + 3) < records_end) {
-            out.voltage.set(val16(i + 2));
-            any_nonzero |= (val16(i + 2) != 0);
-            i += 4;
-        } else if (type == kIpsoTemperature && (i + 3) < records_end) {
-            // Type 103 is the same code the pack's own LoRaWAN uplinks use for temperature,
-            // a signed 16-bit value. Byte order follows the flag like the others; the
-            // Meshtastic reader does not decode this type, so the sign is still unconfirmed
-            // against a non-zero reading.
-            out.temperature.set((int16_t)val16(i + 2));
-            any_nonzero |= (val16(i + 2) != 0);
-            i += 4;
-        } else if (type == kIpsoBitValues16 && (i + 3) < records_end) {
-            // Stepped over, not stored and not counted. Decoding its width is what keeps the
-            // walker aligned so any record behind it is still readable; everything else about
-            // it is deliberately ignored. Logged so the next capture shows what the pack puts
-            // in these two words, which is currently unknown — it is the only field on this
-            // pack whose meaning is still open. See kIpsoBitValues16.
-            LOGF("   battery : status word sid 0x%02X = 0x%04X (not a measurement)\n",
-                 buf[i], val16(i + 2));
-            i += 4;
-        } else if (type == kIpsoDcCurrent || type == kIpsoDcVoltage ||
-                   type == kIpsoTemperature || type == kIpsoBitValues16) {
-            // Recognized type, but the frame ends before its payload does — the four branches
-            // above all require two value bytes and this one has fewer left.
-            //
-            // Reported separately because it is a different fault with a different fix. The
-            // branch below means "the pack speaks a record this build has never heard of",
-            // which is answered by adding a decoder. This means "the frame was cut short",
-            // which is answered by looking at the transport: a truncating receive buffer, an
-            // inter-byte gap that expired mid-record, or a length field that disagrees with
-            // what arrived. Collapsing the two would have sent the next reader to write a
-            // parser for type 185, which is already parsed here.
-            LOGF("   battery : record type %u truncated — %u byte(s) left, needs 4\n", type,
-                 (unsigned)(records_end - i));
-            break;
-        } else {
-            // Worth logging: it means the pack sends something this build does not know
-            // about, and every record behind it is being discarded.
-            LOGF("   battery : unknown record type %u — stopping here\n", type);
-            break;
-        }
+    if (m_silent_cycles < kSilentCyclesBeforeProbeOnly) {
+        return true;
     }
-
-    if (!out.any()) {
-        return BatteryResult::NoRecords;
+    if (m_cycles >= m_next_full_cycle) {
+        LOGF("   battery : %u silent cycles — retrying the full ladder\n",
+             (unsigned)m_silent_cycles);
+        m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
+        return true;
     }
-
-    // A verified frame full of zeros is not a measurement, and this is the one place that
-    // distinction can still be made before the number becomes an uplink.
-    //
-    // The pack is powered by the cell it is reporting on. It cannot be at 0.00 V and also be
-    // driving this wire, so a zero voltage means "I have no sample", not "the battery is
-    // flat". Encoding it would put 0.00 V into a payload that the decoder cannot tell apart
-    // from a real reading, and the operator would read it as a dead pack — which is the exact
-    // failure the repo's null policy exists to prevent. So the whole record set is discarded
-    // rather than partially trusted: if the voltage is a placeholder, the current, charge and
-    // temperature beside it are placeholders too.
-    //
-    // The sentinel is "every record in this frame read zero", not "the voltage read zero".
-    // Voltage alone was the previous test and it leaves a hole: a SENDAT reply that carries
-    // capacity, current and temperature but no voltage record has no sentinel to trip, so a
-    // template full of placeholders would be encoded as a real 0 A / 0 % / 0.0 degC reading.
-    // That is precisely the fabricated zero the repo's null policy exists to forbid, and it
-    // is reachable — the record set is whatever the pack chooses to include, not a fixed
-    // four.
-    //
-    // Judging the whole frame instead keeps every genuine zero: 0 A is a real idle current,
-    // 0 % is a real (alarming) charge state, and 0.0 degC is an ordinary temperature in the
-    // woods — each of those survives as long as one other record in the same frame is
-    // non-zero, which for a pack that is powered by the cell it measures is always true of
-    // the voltage. Only the all-zero case, which cannot be a live measurement from a device
-    // that is simultaneously driving this wire, is discarded.
-    //
-    // Discarded wholesale rather than field by field: if one value is a placeholder the
-    // others beside it are placeholders too, and a partially trusted record set is how a
-    // plausible-looking wrong number reaches an uplink.
-    //
-    // CITE(bench): docs/EVIDENCE.md — the SENDAT reply captured on 3d3425d verified its
-    //   checksum and decoded cleanly to voltage 0, current 0, capacity 0, temperature 0 while
-    //   the pack was demonstrably alive, metered at 11.6 V, and re-announcing itself
-    //   unprovisioned. A live pack cannot be at 0.00 V and also be driving this line.
-    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the reference
-    //   consumer applies no such guard: it assigns dc_vol/dc_cur/dc_prec straight from the
-    //   frame. It gets away with it because it re-reads forever on a 50 ms tick and a stale
-    //   zero is overwritten seconds later. A node that wakes, reads once and sleeps for an
-    //   hour has no such second chance, so the guard is added here deliberately.
-    if (!any_nonzero) {
-        out = BatteryReading{};
-        return BatteryResult::Unsampled;
-    }
-
-    return BatteryResult::Ok;
+    LOGF("   battery : %u silent cycles — probe only until cycle %lu\n",
+         (unsigned)m_silent_cycles, (unsigned long)m_next_full_cycle);
+    return false;
 }
 
 BatteryReading Battery::read()
@@ -1435,13 +1168,22 @@ BatteryReading Battery::read()
     // data we already hold would waste a second round trip on the common path.
     size_t n = 0;
     m_last   = BatteryResult::NoReply;
+    m_cycles++;
+
+    // Whether this cycle may pay for the expensive half of the ladder: the announcement window
+    // and the push listen. See kBatterySilentCyclesBeforeProbeOnly.
+    const bool full_ladder = ladder_allowed();
 
     bool answered_direct = false;
     {
         const size_t got = query(kProbeId, rx, sizeof(rx));
         if (got >= 8) {
-            BatteryReading      candidate;
-            const BatteryResult r = parse(rx, got, candidate);
+            BatteryReading candidate;
+            // Only a genuine response to the request just sent proves the pack holds kProbeId.
+            // Accepting any SENDAT frame here is what let a spontaneous push validate an
+            // address nothing was listening on — issue #36.
+            const BatteryQueryMatch match{BatteryMatchMode::Response, kProbeId, m_seq};
+            const BatteryResult     r = parse(rx, got, candidate, match);
             if (r == BatteryResult::Ok || r == BatteryResult::Unsampled) {
                 m_pid           = kProbeId;
                 answered_direct = true;
@@ -1453,9 +1195,12 @@ BatteryReading Battery::read()
         }
     }
 
-    // Phase 1 runs only when the direct ask failed, i.e. the pack does not hold kProbeId.
+    // Phase 1 runs only when the direct ask failed, i.e. the pack does not hold kProbeId, and
+    // only when this cycle is allowed to pay for it. The announcement window is a 5 s wait for
+    // a pack that has been silent for hours, and repeating it every cycle spends the pack's
+    // remaining energy on hunting for the pack.
     bool provisioned = answered_direct;
-    if (!answered_direct) {
+    if (!answered_direct && full_ladder) {
         provisioned = acquire_pid(rx, sizeof(rx));
         if (!provisioned) {
             LOGLN(F("   battery : no announcement — proceeding unprovisioned"));
@@ -1528,8 +1273,12 @@ BatteryReading Battery::read()
             continue;
         }
 
-        BatteryReading      candidate;
-        const BatteryResult r = parse(rx, got, candidate);
+        BatteryReading candidate;
+        // Same matching as phase 0, and for the same reason: this loop is what latches m_pid
+        // for the rest of the node's life, so "a SENDAT frame arrived" is nowhere near enough
+        // evidence that this candidate address is the live one — issue #36.
+        const BatteryQueryMatch match{BatteryMatchMode::Response, candidates[c], m_seq};
+        const BatteryResult     r = parse(rx, got, candidate, match);
 
         // Ok and Unsampled both mean a SENDAT frame addressed to us came back from this
         // destination — one with data, one with placeholders. Either way the address is
@@ -1576,12 +1325,22 @@ BatteryReading Battery::read()
     // CITE(bench): docs/EVIDENCE.md — passive listen at 9600 on 3d3425d, transmitting nothing,
     //   received the pack's spontaneous PROVISION announcement every cycle. The pack is
     //   demonstrably willing to talk unprompted on this wire.
-    if (m_last != BatteryResult::Ok) {
+    //
+    // Gated on the failure count as well. This is the single most expensive thing in the cycle
+    // — 20 s of wake time — and the condition that triggers it is exactly the condition in which
+    // it has already failed repeatedly. A pack that has been silent for hours does not start
+    // pushing because we listened a fourth time. See issue #39.
+    if (m_last != BatteryResult::Ok && full_ladder) {
         const size_t pushed = receive(rx, sizeof(rx), /*stop_on_provision=*/false,
                                       kPushListenUs);
         if (pushed >= 8) {
-            BatteryReading      candidate;
-            const BatteryResult r = parse(rx, pushed, candidate);
+            BatteryReading candidate;
+            // A push is the pack's own frame, so the sequence is its own and unpredictable — but
+            // the flag must still be REQ and the destination must still be the master. A
+            // solicited reply left in the buffer from the poll above must not be re-counted here
+            // as a spontaneous report.
+            const BatteryQueryMatch match{BatteryMatchMode::Unsolicited, m_pid, 0};
+            const BatteryResult     r = parse(rx, pushed, candidate, match);
             if (r == BatteryResult::Ok) {
                 LOGLN(F("   battery : live values arrived as an unsolicited report"));
                 out    = candidate;
@@ -1591,6 +1350,22 @@ BatteryReading Battery::read()
                 m_last = r;
                 n      = pushed;
             }
+        }
+    }
+
+    // The failure count that decides whether the next cycle pays for the expensive phases.
+    // Reset on any reading, so one good cycle restores the full ladder immediately: the count
+    // exists to stop a permanent silence being expensive, not to punish a pack that recovers.
+    if (m_last == BatteryResult::Ok) {
+        m_silent_cycles   = 0;
+        m_next_full_cycle = 0;
+    } else if (m_silent_cycles < UINT16_MAX) {
+        m_silent_cycles++;
+        if (m_silent_cycles == kSilentCyclesBeforeProbeOnly) {
+            m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
+            LOGF("   battery : %u consecutive silent cycles — dropping to the direct probe "
+                 "alone, full retry at cycle %lu\n",
+                 (unsigned)m_silent_cycles, (unsigned long)m_next_full_cycle);
         }
     }
 
@@ -1608,7 +1383,7 @@ BatteryReading Battery::read()
     // the evidence for whether the zeros are the pack's or ours.
     if (m_last == BatteryResult::BadFrame || m_last == BatteryResult::BadChecksum ||
         m_last == BatteryResult::Unsampled || m_last == BatteryResult::Truncated ||
-        m_last == BatteryResult::ProvisionOnly) {
+        m_last == BatteryResult::Unmatched || m_last == BatteryResult::ProvisionOnly) {
         dump("raw", rx, n);
     }
 
