@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "CURSOR_LIVENESS_DEBUG=1 python3 .cursor/hooks/liveness.py afterAgentResponse",
+        "timeout": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "CURSOR_LIVENESS_DEBUG=1 python3 .cursor/hooks/liveness.py postToolUse",
+        "timeout": 5,
+        "failClosed": false
+      }
+    ]
+  }
+}

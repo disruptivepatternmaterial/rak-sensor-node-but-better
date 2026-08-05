@@ -76,6 +76,14 @@ def main():
     if not isinstance(payload, dict):
         payload = {}
 
+    if os.environ.get("CURSOR_LIVENESS_DEBUG"):
+        try:
+            debug = pathlib.Path(tempfile.gettempdir()) / "cursor-liveness-debug.jsonl"
+            with debug.open("a") as fh:
+                fh.write(json.dumps({"event": event, "keys": sorted(payload)}) + "\n")
+        except Exception:
+            pass
+
     path = state_path(payload)
     now = time.time()
     state = read_state(path)
