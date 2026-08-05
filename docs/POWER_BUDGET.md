@@ -167,3 +167,6 @@ write charge/discharge logic until it is closed.
 1. Cite the manufacturer figure for the claim.
 2. Recalculate this page.
 3. Record a **measured** sleep current in [`EVIDENCE.md`](EVIDENCE.md) before calling it done.
+   The procedure — PPK2 on the battery JST, pack and buck out of circuit, USB cable
+   physically unplugged because `power.cpp` keeps the console alive when a host is
+   attached — is in [`SOAK.md`](SOAK.md).
