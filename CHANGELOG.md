@@ -10,6 +10,23 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **`busscan` no longer sweeps a slave that cannot answer it**
+  ([#34](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/34)).
+  The scan included slave `0x6E`, the RAK9154, reading register `0x0000` when the pack
+  implements `0x6000+`. On 2026-08-04 the resulting silence was read as "the pack is not driving
+  the bus," which was a false negative twice over: the register was wrong, and the pack is not
+  on the RS-485 line at all. [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md) gave it a
+  dedicated one-wire line, raw Modbus at `0x6E` over that line returned zero bytes every cycle
+  because the adapter does not bridge it, and the path was deleted in `b6bbf31`.
+
+  Correcting the register would have been the wrong repair — it would have kept a probe that
+  cannot succeed, on a bus the pack has never been on. The slave is removed instead, with the
+  reasoning recorded at the sweep so it is not re-added. What remains is the RS-485 diagnostic
+  that is actually load-bearing: it is the tool that established the RK900's real baud and
+  register map for [ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md), and its
+  datasheet citation no longer asserts 4800 as though the bench had not contradicted it.
+  Battery bring-up stays with `env:battdiag` and `env:owscan`.
+
 - **`m_ever_sampled` no longer advertises a configuration path that was deleted**
   ([#43](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/43)).
   Its comment claimed the flag stopped a PARAMGET/PARAMSET enable pass from repeating on every

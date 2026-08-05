@@ -15,16 +15,25 @@ namespace {
 // cannot read. That distinction decides whether the next move is a code change or a trip to
 // the bench, so this reports the raw bytes and lets the reader judge.
 //
-// CITE(datasheet): [CIT-RK900] the sensor is fixed at 4800 8N1, slave 0x01. The other
-//   combinations are swept only to establish that the line is silent everywhere, not
-//   because any of them is expected to answer.
-// CITE(sibling): forest-weather-machines (local sibling) — LoRaWAN/docs/RAK2560_weather_station_settings.md
-//   — the deployed Sensor Hub reads this same sensor at 4800 8N1, slave 01, FC 0x03,
-//   holding registers 0x0000-0x0004. The constants under test are field-proven, so a
-//   silent line is not a wrong constant.
+// Slave 0x6E — the RAK9154 — is deliberately absent from this sweep. It was here on the
+// assumption that the pack might answer Modbus on the RS-485 line, and a silent 0x6E was read
+// on 2026-08-04 as "the pack is not driving the bus." That reading was wrong twice over: the
+// sweep asks for register 0x0000 while the pack implements 0x6000+, and the pack is not on
+// this bus at all. ADR-0004 put it on its own one-wire line, raw Modbus at 0x6E over that line
+// returned zero bytes on every cycle because the adapter does not bridge it, and the path was
+// removed in b6bbf31. Re-adding 0x6E here cannot produce a reply — it can only manufacture the
+// same false negative again. Battery bring-up belongs to env:battdiag and env:owscan.
+//
+// CITE(datasheet): [CIT-RK900] slave 0x01, FC 0x03, holding registers 0x0000-0x0004. The
+//   datasheet baud is 4800; the unit on this node answers at 9600 (ADR-0006), which is why
+//   both are swept rather than either being assumed.
+// CITE(sibling): forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 — LoRaWAN/docs/RAK2560_weather_station_settings.md
+//   — the deployed Sensor Hub reads this
+//   same sensor at slave 01, FC 0x03, holding registers 0x0000-0x0004. The constants under
+//   test are field-proven, so a silent line is not a wrong constant.
 // CITE(spec): [CIT-MODBUS-APP] FC 0x03 request framing, address first, CRC low byte first.
 constexpr uint32_t kScanBauds[]  = {4800, 9600, 19200, 38400, 115200};
-constexpr uint8_t  kScanSlaves[] = {0x01, 0x02, 0x03, 0x6E};
+constexpr uint8_t  kScanSlaves[] = {0x01, 0x02, 0x03};
 
 // Long enough for a five-register reply to finish at the slowest rate swept, short enough
 // that the whole sweep stays well inside the watchdog window.
@@ -82,8 +91,8 @@ uint32_t scan_production_frame()
     // its raw frame is the evidence gate for the production driver's selected baud. Refs #30.
     //
     // CITE(datasheet): [CIT-RK900] five consecutive holding registers from 0x0000.
-    // CITE(sibling): forest-weather-machines (local sibling, ~/Documents/GitHub) —
-    //   docs/RK900-09_BRINGUP_AND_FALLBACKS_2026-05-15.md records 9600 8N1, FC 0x03,
+    // CITE(sibling): forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 — docs/RK900-09_BRINGUP_AND_FALLBACKS_2026-05-15.md
+    //   records 9600 8N1, FC 0x03,
     //   slave 0x01, start 0x0000, quantity 5 as the bench procedure.
     constexpr uint32_t kObservedBaud = 9600;
     constexpr uint8_t kObservedSlave = 0x01;
