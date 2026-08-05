@@ -2,6 +2,8 @@
 
 #if FEATURE_ONEWIRE_SCAN
 
+#include "../power.h"
+
 #include <Arduino.h>
 #include <SoftwareHalfSerial.h>
 

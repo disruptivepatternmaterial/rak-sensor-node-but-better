@@ -3,6 +3,7 @@
 #if FEATURE_BUS_SCAN
 
 #include "../sensors/crc16.h"
+#include "../power.h"
 
 #include <Arduino.h>
 
