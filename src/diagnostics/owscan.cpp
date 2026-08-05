@@ -3,6 +3,7 @@
 #if FEATURE_ONEWIRE_SCAN
 
 #include "../power.h"
+#include "../sensors/battery.h" // kBatteryWakeCount — the one value that must not diverge
 
 #include <Arduino.h>
 #include <SoftwareHalfSerial.h>
@@ -93,7 +94,11 @@ constexpr uint32_t kOwSendatMs  = 500; // CITE(prior-art): [CIT-MESHTASTIC-9154]
 // than against a paragraph.
 constexpr uint8_t kOwWake      = 0xFF; // CITE(prior-art): [CIT-ONEWIRE-SERIAL] WAKEUPBYTE
 constexpr uint8_t kOwDelimiter = 0x7E; // CITE(prior-art): [CIT-ONEWIRE-SERIAL] DELIMTER
-constexpr uint8_t kOwWakeCount = 1;    // must equal Battery::kWakeCount -- see owscan.h
+// Taken from battery.h rather than written out, because the comment that used to say "must
+// equal Battery::kWakeCount" did not, and could not, enforce it: the driver went back to 4 and
+// this stayed at 1, leaving the scan unable to draw a reply from a pack that answers the
+// production driver on the first try. A shared constant cannot drift.
+constexpr uint8_t kOwWakeCount = kBatteryWakeCount;
 constexpr uint8_t kOwMaster    = 0x00; // CITE(prior-art): [CIT-ONEWIRE-SERIAL] PID_MASTER
 constexpr uint8_t kOwRui3Type  = 0x02; // CITE(prior-art): [CIT-ONEWIRE-SERIAL] TYPE_SENSORHUB
 constexpr uint8_t kOwRui3Flag  = 0x00; // CITE(prior-art): [CIT-ONEWIRE-SERIAL] RUI3API_FLG_REQ

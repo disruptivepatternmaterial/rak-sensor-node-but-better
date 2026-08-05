@@ -13,11 +13,16 @@
  *
  * Deliberately not trusted to validate production behavior. It drives the line itself rather
  * than going through Battery, so agreement between the two is a coincidence to be checked,
- * not an invariant. The wake-byte count is the case in point: this scanner used to send four
- * wake bytes where the driver sends one, which meant every "the pack answers" result it
- * produced had been obtained with framing the production driver never transmits. The pack
- * tolerates both, so nothing was wrong — but nothing was proven about production either.
- * The count now matches the driver so that gap cannot reopen.
+ * not an invariant.
+ *
+ * The wake-byte count is the case in point, and it drifted in both directions before it was
+ * fixed properly. First this scanner sent four where the driver sent one, so its "the pack
+ * answers" results were obtained with framing production never transmitted. Then the driver
+ * went back to four — because four is what the pack actually replies to — and this scanner was
+ * left at one, which is worse: it reports "no reply" for a pack that answers production on the
+ * first attempt, and sends the next reader hunting a fault that does not exist. It is now taken
+ * from kBatteryWakeCount in sensors/battery.h, the one value the two must share, so a comment
+ * asking a human to keep them equal is no longer the only thing holding it together.
  */
 
 #pragma once

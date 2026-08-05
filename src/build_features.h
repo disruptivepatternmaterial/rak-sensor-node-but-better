@@ -99,14 +99,10 @@
 #define FEATURE_ONEWIRE_SCAN 0
 #endif
 
-// Try a plain Modbus-RTU register read on the pack's one-wire line before spending anything
-// on the Sensor Hub announce/assign handshake. ON by default because it is cheap — one 8-byte
-// request and a bounded wait — and because a register read has no provisioning step to get
-// stuck in. The handshake path is left intact behind it and still runs when this draws
-// nothing.
-#ifndef FEATURE_BATTERY_MODBUS
-#define FEATURE_BATTERY_MODBUS 1
-#endif
+// Deliberately no FEATURE_BATTERY_MODBUS. A raw Modbus read at slave 0x6E on the pack's
+// one-wire line drew 0 bytes on every cycle — the Generic Probe IO adapter does not bridge a
+// Modbus frame arriving from the north — while the SensorHub path on the same wire now returns
+// real measurements. See src/sensors/battery.cpp and docs/EVIDENCE.md 2026-08-05.
 
 // Diagnostic cadence for the battery link, OFF everywhere except its own environment.
 // Collapses the provisioning window and the unsolicited-report listen from 45 s + 20 s to a

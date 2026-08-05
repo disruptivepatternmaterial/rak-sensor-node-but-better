@@ -9,50 +9,20 @@
 
 namespace {
 
-#if FEATURE_BATTERY_MODBUS
-// The RAK9154 also answers plain Modbus RTU, and that path has no provisioning step at all.
+// There is deliberately no raw-Modbus path on this line.
 //
-// This is the whole reason it is tried first. The Sensor Hub announce/assign handshake below
-// has never latched on this pack — twenty-two byte-correct answers across 45 s left provId at
-// 0xFF — and every record it returns is a placeholder zero. A register read cannot be in that
-// state: there is no id to assign, no rule to arm, and no sampling handshake to complete. The
-// slave address, framing and register map are the same numbers the deployed sibling node reads
-// this pack with, so if the pack honours them on the one-wire line the measurement is one
-// 8-byte request away.
+// One was tried: slave 0x6E, FC 0x03, 21 registers from 0x6000 — the same numbers the deployed
+// sibling node reads this pack with over its own RS-485 harness. Request `6E 03 60 00 00 15 93
+// 5A`, sent ahead of the SensorHub handshake on every cycle. It drew **0 bytes, every cycle,
+// across every revision it was compiled into.** The one-wire peer is a Generic Probe IO adapter
+// that speaks SensorHub northbound and Modbus southbound to the BMS; it does not bridge a
+// Modbus frame arriving from the north. That is a settled negative result, recorded in
+// CHANGELOG.md and docs/EVIDENCE.md, and the SensorHub path below now returns real
+// measurements — so re-adding it would cost an 8-byte request and a 1 s wait per wake to
+// re-derive an answer we already have.
 //
-// Slave 0x6E (decimal 110), function 0x03 (read holding registers), 21 registers from 0x6000.
-// One transaction spans every useful slot, so there is no second round trip to get wrong.
-//
-// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
-//   rak-4-5-wire/firmware/nanoc6-rak9154-poll/include/registers.h — SLAVE_ADDRESS 0x6E,
-//   BAUD_RATE 9600 8N1, POLL_START_REG 0x6000, POLL_REG_COUNT 0x0015, IDX_VOLTAGE 0x00,
-//   IDX_CURRENT 0x01, IDX_SOC_PCT 0x02, IDX_TEMPERATURE_C 0x09, SCALE_VOLTAGE 0.01,
-//   SCALE_CURRENT 0.01. That header names LoRaWAN/docs/RAK2560_weather_station_settings.md
-//   §5d as its source of truth, verified against a deployed RAK9154 at Forest Lands Ridge.
-// CITE(spec): [CIT-MODBUS-APP] MODBUS Application Protocol V1.1b3 §6.3 — FC 0x03 request is
-//   { addr, 0x03, start_hi, start_lo, count_hi, count_lo } and the reply is
-//   { addr, 0x03, byte_count, data..., crc }, register values big-endian.
-// CITE(spec): [CIT-MODBUS-SERIAL] MODBUS over Serial Line v1.02 — RTU frames carry a
-//   reflected CRC-16 (poly 0xA001, seed 0xFFFF) appended low byte first.
-constexpr uint8_t  kModbusSlave     = 0x6E;
-constexpr uint8_t  kModbusReadHold  = 0x03;
-constexpr uint16_t kModbusStartReg  = 0x6000;
-constexpr uint16_t kModbusRegCount  = 0x0015; // 21 registers
-constexpr size_t   kModbusIdxVolt   = 0x00;   // 0x6000
-constexpr size_t   kModbusIdxCurr   = 0x01;   // 0x6001
-constexpr size_t   kModbusIdxSoc    = 0x02;   // 0x6002
-constexpr size_t   kModbusIdxTemp   = 0x09;   // 0x6009
-
-// Reply length: addr + function + byte-count + 2 bytes per register + 2 CRC bytes.
-constexpr size_t kModbusReplyBytes = 3 + (size_t)kModbusRegCount * 2 + 2; // 47
-
-// 1000 ms, the "Max wait" the sibling's Modbus POC uses against this same pack. Generous for
-// a 47-byte reply at 9600 (about 49 ms on the wire) because the pack's BMS may still be waking.
-// CITE(sibling): [CIT-RAK45WIRE] @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
-//   nanoc6-rak9154-poll/include/registers.h — MODBUS_TIMEOUT_MS 1000, "per Section 5d Max
-//   wait value".
-constexpr uint32_t kModbusFirstByteUs = 1000000;
-#endif // FEATURE_BATTERY_MODBUS
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — the raw-Modbus probe returned 0 bytes on every
+//   cycle it ran, while the SensorHub path on the same wire returned 12.23 V.
 
 // The RAK Sensor Hub one-wire link is NOT a bare TLV stream. Every frame is a RUI3
 // transport frame — { wakeup, delimiter, 16-bit length, type, flag, payload } — carrying a
@@ -96,6 +66,9 @@ constexpr uint8_t kDelimiter = 0x7E; // RUI3_Api_t.start
 // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the transport under
 //   that event is `case SNHUBAPI_EVT_QSEND: mySerial.write(msg, len);`, one write of the
 //   whole buffer with nothing prepended.
+// The value itself now lives in battery.h as kBatteryWakeCount, because the one-wire scan
+// diagnostic has to send the identical run and a drifted copy there costs a whole bench session.
+//
 // RESTORED to 4, from 1. The reasoning that cut it to 1 was sound about the reference's struct
 // and wrong about which revision worked: `RUI3_Api_t.wakeup` is indeed a single byte, but the
 // only revision that has ever drawn a full SENDAT reply from this pack is the one that sent
@@ -113,7 +86,7 @@ constexpr uint8_t kDelimiter = 0x7E; // RUI3_Api_t.start
 // CITE(bench): docs/EVIDENCE.md — the SENDAT dest sweep that returned a full 28-byte
 //   checksum-valid reply ran with four wake bytes; every revision since has sent one and none
 //   has drawn a SENDAT reply.
-constexpr uint8_t kWakeCount = 4;
+constexpr uint8_t kWakeCount = kBatteryWakeCount;
 
 // Guard gap before the first byte of a response, in milliseconds. See
 // FEATURE_BATTERY_TURNAROUND_MS in src/build_features.h for why this exists and why it is a
@@ -377,14 +350,14 @@ SoftwareHalfSerial &bus(uint8_t pin)
 // (FEATURE_ONEWIRE_SPLIT) on the theory that bridging the pack's TXD and RXD onto one wire
 // caused TX contention that corrupted the long provisioning frame. The bench settled it the
 // other way: the pack talks perfectly well on the bridged harness -- it answers SENDAT with
-// checksum-valid frames and identifies itself -- and what actually blocks provisioning is
-// that the pack will not accept an id assigned over this link at all, from any topology.
+// checksum-valid frames, latches the id this firmware assigns it, and reports live values.
+// What used to block provisioning was reply turnaround timing, not topology (kTurnaroundMs).
 // The split path was therefore removed rather than left switched off, because a second
 // wiring mode that no evidence supports is a thing every future reader has to rule out.
 //
-// CITE(bench): docs/EVIDENCE.md 2026-08-04 -- on the bridged single-wire harness the pack
-//   returns a 28-byte checksum-valid SENDAT reply and a 92-byte announcement, so contention
-//   on the shared line is not preventing the pack from being heard.
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 -- on the bridged single-wire harness the pack
+//   latched pid 0x01 and returned 12.23 V across seven consecutive cycles, so contention on
+//   the shared line prevents neither provisioning nor sampling.
 // CITE(datasheet): [CIT-RAK2560] RAK2560 Hub Datasheet, "Pin Definition" -- a genuine master
 //   drives pin 5 (one-wire UART) only and leaves pin 3 reserved, which is what a single
 //   shared line reproduces.
@@ -398,9 +371,10 @@ constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 // The poll only ever returns a record template, so the measurement has to come from the
 // unsolicited report — and that arrives on the pack's own sampling cadence, not on ours. The
 // previous 500 ms wait was therefore a bet that the two coincided, which the bench lost every
-// cycle. This is deliberately generous because the cadence is configurable on the pack (it is
-// exposed in RAK's WisToolBox) and is not readable from anything the firmware has been able to
-// interrogate so far: PARAMGET is refused while the pack still considers itself unprovisioned.
+// cycle. This is deliberately generous because the pack's sampling cadence is not readable from
+// anything the firmware has been able to interrogate: PARAMGET drew no reply on this link. It is
+// also no longer on the critical path — a latched pack answers the poll with live values and
+// never enters this listen (see the `m_last != Ok` guard on the caller).
 //
 // It costs awake time, which on a node meant to last months is not free — 20 s per cycle
 // against an hourly interval is roughly 0.6% duty. Acceptable to prove the mechanism, and it
@@ -418,7 +392,7 @@ constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 #if FEATURE_BATTERY_FAST
 // Diagnostic builds trade coverage for turnaround: 2 s is far too short to contain the pack's
 // real reporting cadence, so this build cannot refute the push hypothesis — it is here to make
-// the Modbus experiment above cheap to repeat, not to test the push path.
+// one bench cycle cost seconds instead of two minutes, not to test the push path.
 constexpr uint32_t kPushListenUs = 2000000; // 2 s
 #else
 constexpr uint32_t kPushListenUs = 20000000; // 20 s
@@ -443,72 +417,32 @@ constexpr size_t kRxCapacity = 0x100;
 
 // How long to keep answering announcements before giving up on provisioning for this cycle.
 //
-// This replaces a three-attempt loop that answered the first announcement and immediately
-// moved on to polling. Every other explanation for the pack never latching the id has now
-// been eliminated by the bench: the response frame is byte-for-byte what the reference emits
-// (checksum arithmetic independently confirmed), VER3 is the type the reference answers, BOOT
-// is the only frame a master originates, and parameter writes are not involved. What is left
-// is the one behavioural difference between our driver and a real master — a real master
-// never stops answering.
+// 5 s, down from a 45 s bring-up window, and the reason it can be this short is that
+// provisioning now works: on 1a203d3 the pack latched pid 0x01 from a single answered
+// announcement 3031 ms into cycle 1, and every cycle after that took the direct-probe path
+// without entering this window at all. One announcement period plus margin is therefore the
+// whole requirement — the long window existed to test whether *sustained* answering was the
+// missing piece, and it was not. What was missing was reply turnaround; see kTurnaroundMs.
 //
-// The reference is explicit about this. Re-entering snhub_provision_req_program() with a
-// serial number it has already recorded takes the `f_memcmp(...) == 0` break, skips the
-// re-copy, and still echoes provId and still re-fires ADD_PID. Answering the same probe
-// repeatedly is not a degenerate case in that code, it is the steady state. Meshtastic then
-// reschedules the handler every 50 ms for as long as the board is powered, so the answer
-// arrives for every announcement, indefinitely. Our wake-transact-sleep driver cannot do
-// "indefinitely", so it buys a window instead.
+// The path stays because a replacement pack arrives unprovisioned and has to be latched once.
 //
-// 45 s because the pack re-announces on its own cadence and this has to span several of those
-// periods for "answered repeatedly" to be a real test rather than a re-run of "answered once".
+// Awake time is the currency here: 45 s of radio-silent awake time per wake was the single
+// largest avoidable cost in the cycle, and cutting it is most of the ~50 s -> ~5 s improvement
+// in docs/DEPLOY.md. Do not widen it again without a bench reason.
 //
-// THE POWER COST IS NOT AFFORDABLE AS A STEADY STATE. 45 s of radio-silent awake time every
-// wake, on a node meant to run for months on a solar-recharged pack, is a bring-up measure and
-// nothing more — see docs/POWER_BUDGET.md. The intended end state is to provision once and
-// persist the latched id, or at minimum to run the long window only while the pack is not yet
-// latched and a short one afterwards; both are deliberately not done here, because the point
-// of this revision is to find out whether the latch happens at all, and a shortcut taken
-// before that is known would be a shortcut around the evidence. Tracked with the rest of the
-// battery bring-up in issue #5.
-//
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — pid 0x01 latched from one answered announcement at
+//   3031 ms on 1a203d3, then seven consecutive cycles read 12.23 V via the direct probe.
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
 //   snhub_provision_req_program(): the already-known-serial-number path breaks out of the
 //   record search rather than returning, so it falls through to the same body that sets
 //   `hub_api_prov->provId = pid`, recomputes the checksum, raises SNHUBAPI_EVT_QSEND and then
 //   SNHUBAPI_EVT_ADD_PID. A repeat announcement from a known probe is answered exactly like
-//   the first one.
-// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-//   onewireHandle() ends `return 50;`, so the scheduler re-runs it every 50 ms forever, and
-//   the drain plus process() runs unconditionally on every tick. The one consumer this pack is
-//   known to accept never stops listening and never stops answering.
-// CITE(bench): docs/EVIDENCE.md — the announcement carries provId 0xFF on every cycle across
-//   every previous revision, i.e. the pack has never been observed to latch the id it was
-//   handed. That is the observation this window exists to change or to rule out.
+//   the first one, so re-entering this window is harmless.
 // CITE(datasheet): [CIT-NRF-WDT] nRF52840 PS, WDT — the watchdog cannot be stopped once
 //   started, so this window is sized against the 120 s timeout src/main.cpp arms rather than
-//   against patience. Worst case for the whole of Battery::read() is roughly 66 s: a ~0.5 s
-//   direct probe, this 45 s window, two ~0.5 s poll attempts, and the 20 s push listen. That
-//   no longer has to fit between two feeds -- acquire_pid() and receive() now feed the
-//   watchdog themselves -- but it is still the awake time the power budget pays for, and it
-//   is why the direct probe runs first: a provisioned pack never enters this window at all.
-// CAPPED, from 45 s. The 45 s window existed to test one hypothesis: that the pack latches an
-// id only if the master is still answering when it next announces, the way the reference master
-// (which answers forever, on a 50 ms tick) is. That hypothesis is now a verified negative —
-// twenty-two byte-correct answers across 45,382 ms left provId at 0xFF — and the response bytes
-// have been independently confirmed to match the reference's mutate-and-echo exactly. Paying
-// 45 s of a 50.5 s wake to re-run a settled experiment is the single largest avoidable cost in
-// the cycle, so the window is cut to one announcement period plus margin.
-//
-// The path is kept, not deleted: a replacement pack that does latch would still be provisioned
-// by it, and the negative result is about this pack rather than about the protocol.
-//
-// CITE(bench): docs/EVIDENCE.md — 22 answers over 45,382 ms on 8720dea, announced provId 0xFF
-//   on every one. Sustained answering is not the missing piece.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c:443-466
-//   snhub_provision_req_program() — the response is the received packet with flag flipped to
-//   RUI3API_FLG_RSP, dest/source swapped and provId set to `aid + 1`, checksum recomputed.
-//   src/sensors/battery.cpp Battery::provision() performs the identical mutation, so the
-//   framing is not what is failing.
+//   against patience. Worst case for the whole of Battery::read() is now roughly 26 s: a ~0.5 s
+//   direct probe, this 5 s window, two ~0.5 s poll attempts, and the 20 s push listen — and the
+//   provisioned steady state pays only the direct probe.
 #if FEATURE_BATTERY_FAST
 constexpr uint32_t kProvWindowMs = 3000;
 #else
@@ -999,120 +933,6 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
     return false;
 }
 
-#if FEATURE_BATTERY_MODBUS
-// Ask the pack for its holding registers as a plain Modbus RTU master, on the one-wire line.
-//
-// What this tests, precisely: whether the device answering on the 5-pin socket will bridge or
-// answer raw Modbus. The one-wire peer is understood to be a Generic Probe IO adapter that
-// speaks SensorHub northbound and Modbus RTU southbound to the BMS at slave 0x6E — so a raw
-// Modbus frame arriving from the north is not something it is documented to accept. It is
-// tried anyway because it is the cheapest distinguishing experiment available: one 8-byte
-// request, a bounded 1 s wait, no state changed, and a definitive answer either way. If the
-// adapter is transparent, the measurement arrives immediately and the entire SensorHub
-// handshake becomes unnecessary.
-//
-// Returns Ok only on a CRC-valid reply whose registers are not all zero. Every other outcome
-// leaves `out` untouched so the SensorHub path behind this can still run — and, critically, an
-// all-zero register block is reported as Unsampled rather than as a reading. §5b of the
-// sibling's settings doc documents all-zero as this system's signature for "probe present, not
-// sampling", which is a null, never a 0.00 V pack.
-//
-// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
-//   LoRaWAN/docs/RAK2560_weather_station_settings.md §5d — "The BMS uses Modbus slave address
-//   6E (hex), registers in the 0x6000 range, baud 9600", RS485 9600 8N1 NONE parity, Max wait
-//   1000 ms, Max retry 2; register table 6000 UINT16_BE x0.01 V, 6001 INT16_BE x0.01 A,
-//   6002 UINT16_BE x1 %, 6009 INT16_BE x1 degC.
-// CITE(sibling): [CIT-RAK45WIRE] @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 §5b — a wrong
-//   RS-485 baud on this exact pack produced "all-zero readings (Battery value 0.00V, Current
-//   0.00A, Capacity 0%, Temperature 0.0degC)", fixed by setting 9600. Zeros mean not sampling.
-// CITE(spec): [CIT-MODBUS-APP] MODBUS Application Protocol V1.1b3 §6.3 — FC 0x03 request
-//   { addr, 0x03, start_hi, start_lo, count_hi, count_lo }; reply { addr, 0x03, byte_count,
-//   data..., crc } with register values big-endian. An exception reply sets bit 7 of the
-//   function code, which is why the function byte is checked rather than assumed.
-// CITE(spec): [CIT-MODBUS-SERIAL] MODBUS over Serial Line v1.02 §2.5.1 — RTU CRC-16 is
-//   appended low byte first.
-BatteryResult Battery::modbus_read(uint8_t *buf, size_t cap, BatteryReading &out, size_t &n)
-{
-    n = 0;
-
-    uint8_t req[8] = {kModbusSlave,
-                      kModbusReadHold,
-                      (uint8_t)(kModbusStartReg >> 8),
-                      (uint8_t)(kModbusStartReg & 0xFF),
-                      (uint8_t)(kModbusRegCount >> 8),
-                      (uint8_t)(kModbusRegCount & 0xFF),
-                      0,
-                      0};
-    const uint16_t crc = modbus_crc16(req, 6);
-    req[6]             = (uint8_t)(crc & 0xFF); // low byte first
-    req[7]             = (uint8_t)(crc >> 8);
-
-    link_for(m_pin).flush();
-    LOGF("   battery : modbus req %02X %02X %02X %02X %02X %02X %02X %02X\n", req[0], req[1],
-         req[2], req[3], req[4], req[5], req[6], req[7]);
-    for (size_t i = 0; i < sizeof(req); i++) {
-        tx_byte(req[i]);
-    }
-
-    n = receive(buf, cap, /*stop_on_provision=*/false, kModbusFirstByteUs);
-    if (n == 0) {
-        return BatteryResult::NoReply;
-    }
-
-    // Every byte, always. A reply in an unexpected shape is the only thing that can move this
-    // forward, and a decoded verdict without the bytes cannot be re-examined later.
-    dump("modbus raw", buf, n);
-
-    if (n < kModbusReplyBytes) {
-        return BatteryResult::ShortFrame;
-    }
-    if (buf[0] != kModbusSlave || buf[1] != kModbusReadHold ||
-        buf[2] != (uint8_t)(kModbusRegCount * 2)) {
-        return BatteryResult::BadFrame;
-    }
-
-    const uint16_t want = modbus_crc16(buf, kModbusReplyBytes - 2);
-    if (buf[kModbusReplyBytes - 2] != (uint8_t)(want & 0xFF) ||
-        buf[kModbusReplyBytes - 1] != (uint8_t)(want >> 8)) {
-        return BatteryResult::BadChecksum;
-    }
-
-    // Register i occupies data bytes [3 + 2i, 3 + 2i + 1], big-endian.
-    auto reg = [&](size_t i) -> uint16_t {
-        const size_t at = 3 + i * 2;
-        return (uint16_t)(((uint16_t)buf[at] << 8) | buf[at + 1]);
-    };
-
-    const uint16_t v = reg(kModbusIdxVolt);
-    const int16_t  i = (int16_t)reg(kModbusIdxCurr);
-    const uint16_t s = reg(kModbusIdxSoc);
-    const int16_t  t = (int16_t)reg(kModbusIdxTemp);
-
-    if (v == 0 && i == 0 && s == 0 && t == 0) {
-        return BatteryResult::Unsampled;
-    }
-
-    out.voltage.set(v);
-    out.current.set(i);
-    out.soc.set(s);
-    out.temperature.set(t);
-
-    // The sign is recorded exactly as the register reads it and is NOT normalised here. §5d
-    // states negative = charging; the live TTN decoder asserts the opposite. That contradiction
-    // is ADR-0002 and is the user's decision, not this driver's — so the raw sign is carried
-    // through and flagged rather than quietly corrected in either direction.
-    // CITE(sibling): [CIT-RAK45WIRE] @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 §5d — register
-    //   6001 is INT16_BE x0.01 A, documented "negative = charging".
-    // CITE(spec): docs/decisions/ADR-0002-payload-contract-conflicts.md — the battery current
-    //   sign is contradictory between the spec and the live decoder and blocks the payload
-    //   freeze. Do not resolve it from a single reading.
-    LOGF("   battery : modbus regs 6000=%u 6001=%d 6002=%u 6009=%d (current sign RAW — "
-         "ADR-0002 unresolved)\n",
-         v, i, s, t);
-    return BatteryResult::Ok;
-}
-#endif // FEATURE_BATTERY_MODBUS
-
 // Hex-dump a buffer under a label. Every failure path in this driver ends in "the next bench
 // run has to be able to answer this", and a decoded verdict without the bytes behind it
 // cannot be re-examined once the console has scrolled.
@@ -1184,8 +1004,8 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
     uint8_t        answers    = 0;
 
     while ((millis() - started_ms) < kProvWindowMs) {
-        // This loop can hold the CPU for the full 45 s window, which is over a third of the
-        // 120 s watchdog. Add the join backoff and a slow RK900 read on the same wake and the
+        // This loop can hold the CPU for the full kProvWindowMs window (5 s in a field image),
+        // and it stacks: add the join backoff and a slow RK900 read on the same wake and the
         // total crosses it — so the watchdog would reset a node that is working exactly as
         // designed, and the reset would look like a hang rather than a budget overrun. Feeding
         // here is not weakening the watchdog: this loop makes forward progress on a bounded
@@ -1580,12 +1400,13 @@ BatteryReading Battery::read()
 
     // Phase 0: ask the provisioned pack directly, before spending anything on provisioning.
     //
-    // Once the pack has been provisioned through WisToolBox (docs/DEPLOY.md) it holds a real
-    // probe id and stops announcing itself as unprovisioned. Phase 1 below is built entirely
-    // around hearing that announcement — so on a provisioned pack it hears nothing, and burns
-    // the full kProvWindowMs (45 s) doing it, on every single wake, forever. That is the
-    // difference between a sub-second cycle and a 45-second one, and at an hourly interval it
-    // is the difference between a power budget that works and one that does not.
+    // Once phase 1 has latched an id — which this firmware does itself, over this same wire —
+    // the pack holds it across resets and stops announcing itself as unprovisioned. Phase 1
+    // below is built entirely around hearing that announcement, so on an already-latched pack
+    // it hears nothing and burns the full kProvWindowMs (5 s) doing it, on every single wake,
+    // forever. Probing the latched id first is what turns that into a sub-second cycle, and at
+    // an hourly interval it is the difference between a power budget that works and one that
+    // does not.
     //
     // One SENDAT to kProbeId costs at most kFirstByteTimeoutUs (500 ms) when the pack is not
     // there, which is the price an unprovisioned pack pays once per cycle to keep the
@@ -1603,13 +1424,10 @@ BatteryReading Battery::read()
     // carries a measurement, the other the record template, and both are SENDAT frames that
     // came back from the destination we addressed. Only the address is being established here.
     //
-    // CITE(bench): docs/EVIDENCE.md 2026-08-04 — sixteen consecutive byte-correct provisioning
-    //   responses left provId at 0xFF, establishing that provisioning does not complete over
-    //   this link and that the announcement phase has nothing to accomplish on a pack RAK's own
-    //   tooling has already configured.
-    // CITE(datasheet): [CIT-WISTOOLBOX-AT] — probe configuration is a north-bound ATC+
-    //   operation over NFC/BLE, so a provisioned pack's id arrives from outside this firmware
-    //   and can only be discovered by asking.
+    // CITE(bench): docs/EVIDENCE.md 2026-08-05 — on 1a203d3 cycle 1 answered one announcement
+    //   and the pack latched pid 0x01; cycles 2-7 hit this probe instead and logged "pack
+    //   answered at 0x01 — skipping provisioning". The id is assigned by this firmware over
+    //   one-wire, not configured out of band, and it survives a reset.
     // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
     //   after ADD_PID the reference polls SENDAT against the known id and never re-runs
     //   provisioning. Steady state is a bare query.
@@ -1617,32 +1435,6 @@ BatteryReading Battery::read()
     // data we already hold would waste a second round trip on the common path.
     size_t n = 0;
     m_last   = BatteryResult::NoReply;
-
-#if FEATURE_BATTERY_MODBUS
-    // Phase -1: the register read, tried before anything else because it has no handshake to
-    // get stuck in. Costs one 8-byte request and at most 1 s of silence when nothing bridges
-    // Modbus, and short-circuits the whole cycle when something does. Falls through on every
-    // outcome except Ok, so the SensorHub path below is untouched by it.
-    {
-        size_t              got = 0;
-        BatteryReading      candidate;
-        const BatteryResult r = modbus_read(rx, sizeof(rx), candidate, got);
-        if (r == BatteryResult::Ok) {
-            LOGLN(F("   battery : answered raw Modbus at slave 0x6E — skipping SensorHub"));
-            out    = candidate;
-            m_last = r;
-            n      = got;
-            link.end();
-            pinMode(m_pin, INPUT);
-            LOGF("   battery : %u.%02u V  %u%%\n", out.voltage.value / 100,
-                 out.voltage.value % 100, out.soc.value);
-            return out;
-        }
-        LOGF("   battery : modbus 0x6E -> %s (%u bytes) — falling through to SensorHub\n",
-             battery_result_name(r), (unsigned)got);
-        link.flush();
-    }
-#endif
 
     bool answered_direct = false;
     {
@@ -1682,9 +1474,10 @@ BatteryReading Battery::read()
     //
     // It was left compiled-in behind FEATURE_BATTERY_PARAM_PASS for a while on the argument
     // that "the pack ignores this" is a claim about one pack. It has now been deleted, because
-    // the real blocker turned out to be elsewhere entirely -- the pack will not accept an id
-    // assigned over this link at all, and is provisioned out-of-band through WisToolBox
-    // (docs/DEPLOY.md). A switched-off pass aimed at a falsified hypothesis is not a spare
+    // the real blocker turned out to be elsewhere entirely -- reply turnaround timing, fixed by
+    // the guard gap in kTurnaroundMs and the restored wake-byte run in kWakeCount. Once the
+    // reply arrived late enough to be heard, the pack latched the id and sampled with no
+    // parameter write at all. A switched-off pass aimed at a falsified hypothesis is not a spare
     // tool; it is 210 lines every future reader has to understand before ruling out.
     //
     // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp --
@@ -1816,11 +1609,17 @@ BatteryReading Battery::read()
     if (m_last == BatteryResult::BadFrame || m_last == BatteryResult::BadChecksum ||
         m_last == BatteryResult::Unsampled || m_last == BatteryResult::Truncated ||
         m_last == BatteryResult::ProvisionOnly) {
-        LOG(F("   battery : raw"));
-        for (size_t i = 0; i < n; i++) {
-            LOGF(" %02X", rx[i]);
-        }
-        LOGLN("");
+        dump("raw", rx, n);
+    }
+
+    // The success path dumps too, and it did not before. Every failure path in this driver has
+    // always printed its bytes while the one path that produces a number printed only the
+    // number — so the first real reading arrived with no frame behind it, and re-deriving which
+    // record carried which value meant re-flashing. A decoded value whose frame was never
+    // recorded is not evidence (docs/EVIDENCE.md), and this is the same label and format the
+    // other paths use so captures stay comparable.
+    if (m_last == BatteryResult::Ok) {
+        dump("sendat", rx, n);
     }
 
     // Release the GPIOTE channel and the edge interrupt, then leave the pin as a plain
@@ -1874,6 +1673,19 @@ BatteryReading Battery::read()
              (unsigned long)(mag % 10));
     }
     LOGLN("");
+
+    // The unscaled integers, because the temperature scale is inferred rather than confirmed.
+    // src/payload.cpp hands this value to Cayenne type 103 unscaled and the TTN decoder divides
+    // by 10, which is only right if the pack reports tenths of a degree. A bench "23.0 C" is
+    // consistent with both raw 230 (tenths, correct) and raw 23 (whole degrees, in which case
+    // every temperature we ship is 10x low). Printing the raw integer is what settles it from a
+    // capture instead of from an assumption, and it costs one line per cycle.
+    // CITE(spec): [CIT-CAYENNE-LPP] Cayenne LPP — type 103 temperature is signed 16-bit in
+    //   0.1 degC units, so the decoder's /10 is correct only for a tenths-scaled source.
+    LOGF("   battery : raw v=%d i=%d soc=%d t=%d (t scale UNCONFIRMED — 230 means tenths, 23 "
+         "means whole degrees)\n",
+         (int)out.voltage.value, (int)out.current.value, (int)out.soc.value,
+         (int)out.temperature.value);
 
     return out;
 }

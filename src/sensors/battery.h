@@ -28,6 +28,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// How many 0xFF wake bytes lead every frame sent on the one-wire link.
+//
+// Exposed here, rather than kept private to battery.cpp, because src/diagnostics/owscan.cpp
+// must send the same run: the pack has only ever replied to frames led by four, so a scan that
+// sends one reports "no reply" for a working pack and sends the next reader after a fault that
+// does not exist. That already happened. Everything else in owscan.cpp is deliberately
+// duplicated so the scan can probe frames the driver never sends — this value is the exception,
+// because it is not a protocol field, it is a physical-layer property of this pack, and there is
+// no version of "correct" that differs between the two.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t carries
+//   a single `U8 wakeup`, so four is a deliberate deviation from the reference struct.
+// CITE(bench): docs/EVIDENCE.md — every SENDAT reply this pack has ever produced followed four
+//   wake bytes; the revisions that sent one drew silence.
+constexpr uint8_t kBatteryWakeCount = 4;
+
 enum class BatteryResult : uint8_t {
     Ok = 0,
     NoReply,     // silent line — unplugged, or the pack's BMS is asleep
@@ -114,15 +130,6 @@ class Battery {
 
     // One "send SENDAT to `dest`, collect whatever comes back" round trip.
     size_t query(uint8_t dest, uint8_t *buf, size_t cap);
-
-#if FEATURE_BATTERY_MODBUS
-    // Read the pack's holding registers as a plain Modbus RTU master over the same one-wire
-    // line, before any SensorHub handshake. Fills `out` and returns Ok only on a CRC-valid
-    // reply carrying at least one non-zero register; an all-zero block returns Unsampled so it
-    // can never become a fabricated 0.00 V. `n` reports how many bytes arrived either way, so
-    // the caller can dump them. Leaves `out` untouched on every non-Ok outcome.
-    BatteryResult modbus_read(uint8_t *buf, size_t cap, BatteryReading &out, size_t &n);
-#endif
 
     // Completes the provisioning handshake. The pack announces itself unbidden with a
     // PROVISION request carrying provId = 0xFF; the master's job is to answer that
