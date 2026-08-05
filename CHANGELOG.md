@@ -10,6 +10,90 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 Firmware version is now `0.3.0` — a new capability, backward compatible with the decoder.
 
+### Fixed
+
+- **The battery console log inverted every current between −0.99 A and −0.01 A.** The
+  formatter took its sign from the integer part: for −0.50 A, `value / 100` truncates toward
+  zero to `0`, `%+d` renders that as `+0`, and the magnitude was supplied separately — so a
+  discharging pack printed as `+0.50 A`. Temperatures from −0.9 to −0.1 °C had the same
+  defect.
+
+  That band is where a pack sits on an overcast day under a light load, which is exactly the
+  condition an operator watches while settling the current sign convention — and this log is
+  what they read to settle it. A wrong sign here would have made the wrong convention look
+  confirmed, and that convention goes into `payload/schema.yaml` and the TTN decoder, where
+  unwinding it costs a coordinated two-repo change. Sign and magnitude are now separated
+  before the division. Blocks [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md).
+
+- **A provisioned pack no longer spends 45 s per wake listening for an announcement that
+  will never come.** `Battery::read()` called `acquire_pid()` unconditionally. That phase
+  exists to hear an *unprovisioned* pack announce itself, so on a pack WisToolBox has already
+  provisioned it hears nothing and burns the entire window doing it — and with the 20 s
+  push-listen behind it, a wake that should take under a second took over a minute, every
+  hour, forever.
+
+  `read()` now asks probe id `0x01` for data first and skips the announcement phase when it
+  answers. Deliberately a probe rather than a persisted "pack is provisioned" flag: a stored
+  flag has to be invalidated by hand the first time the hardware changes, and a stale one
+  fails as silence that reads exactly like a dead sensor. Asking is self-healing — a
+  replacement pack that was never provisioned still falls through to the old path.
+
+- **A truncated record no longer reports as an unknown one.** A recognized IPSO type whose
+  payload ran past the end of the frame logged as `unknown record type 185`, which would send
+  the next reader to write a decoder for a type that is already decoded. The real fault is in
+  the transport, and the two now say different things.
+
+- **The watchdog is fed inside `acquire_pid()` and `receive()`.** Both can hold the CPU for
+  tens of seconds — 45 s and 20 s respectively — against a 120 s window (`FIRMWARE_SPEC.md`
+  §7 H1), and they stack with a join backoff and a slow RK900 read on the same wake. Neither
+  fed. A node working exactly as designed could reset itself, and the reset would look like a
+  hang rather than a budget overrun. Both loops are bounded by their own deadlines, so a
+  genuinely stuck line still returns.
+
+### Removed
+
+Roughly 700 lines, none of which a field image ever executed. Each was kept at the time
+because "it might be needed for the next pack"; together they had become the thing every
+reader has to rule out before touching the battery driver.
+
+- **The PARAMGET/PARAMSET pass (~210 lines) and `FEATURE_BATTERY_PARAM_PASS`.** Built on the
+  hypothesis that the pack's sensors sit at `RULE_DISABLE` until armed. Falsified three ways:
+  the pack's own announcement descriptors already report rule `0x0008` (periodic), the
+  working reference reader never sends a parameter write at all, and on this pack PARAMGET
+  drew no reply while the "PARAMSET ack" turned out to be an announcement arriving on its own
+  schedule. It had been switched off rather than deleted on the argument that the conclusion
+  was about one pack — but the real blocker turned out to be elsewhere entirely, so the pass
+  was aimed at a question that is no longer being asked.
+
+- **`FEATURE_ONEWIRE_SPLIT` (~90 lines).** Tested whether bridging the pack's TXD and RXD
+  onto one wire caused TX contention. The bench settled it the other way: the pack answers
+  SENDAT with checksum-valid frames on the bridged harness. A second wiring mode no evidence
+  supports is a thing every future reader has to eliminate.
+
+- **`FEATURE_ONEWIRE_RAIL_CYCLE`.** Its own comment recorded it as a no-op on this harness —
+  the pack's pin 4 is on the always-on VDD pad, not the switched 3V3_S rail `WB_IO2` gates.
+
+- **Four write-only members** (`m_assigned_pid`, `m_sids`, `m_sid_count`,
+  `m_enable_attempts`) and the four constants left with no reader. The parameter pass held
+  their only consumers. The field image's RAM fell by exactly the 12 bytes they occupied.
+
+- **`src/owprobe.h`** — untracked, referenced a feature flag and a build environment that
+  never existed, and tested a topology question that is now closed.
+
+### Changed
+
+- **The two bench scanners moved out of `main.cpp` into `src/diagnostics/`.** `bus_scan()`
+  (150 lines) and `onewire_scan()` (371 lines) were 521 of the file's 808 lines — roughly two
+  thirds of it — and reading the actual wake cycle meant scrolling past all of it. `main.cpp`
+  is now 282 lines. Both scanner environments still build, and `nm` confirms the field images
+  contain no `diagnostics::` symbol at all.
+
+  The one-wire scanner sent **four** wake bytes where the production driver sends **one**, so
+  every "the pack answers" result it ever produced was obtained with framing the driver never
+  transmits. The pack tolerates both, so nothing was wrong — but nothing was proven about
+  production either. The count now matches the driver, and the pin is passed in rather than
+  redeclared, so neither can drift again.
+
 ### Added
 
 - **A bench-only 60 s reading cadence, `FEATURE_BENCH_INTERVAL`.** Bring-up needed a reading

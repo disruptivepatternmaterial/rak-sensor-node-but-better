@@ -57,6 +57,69 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-04 — Debt removal and H1–H8 audit: what the build proves, and what it cannot
+
+**Host:** Heliotrope Ridge (`ntableman@192.168.10.223`). **Commits:** `05847bd` … `98486f0`
+and the diagnostics extraction that follows it.
+
+**This entry records build-verified and source-verified facts only.** No board was on USB
+for any of it — `ioreg -p IOUSB` on the build host listed two Apple hubs and a SuperDrive and
+nothing else. Nothing below is a hardware measurement, and none of it closes a release gate.
+
+#### Build-verified
+
+| Environment | Result | Flash |
+|---|---|---|
+| `rak4631` (field) | BUILD OK | 200 288 B (24.6 %) |
+| `stage1` | BUILD OK | 99 464 B (12.2 %) |
+| `stage2` | BUILD OK | 107 516 B (13.2 %) |
+| `stage3` | BUILD OK | 199 840 B (24.5 %) |
+| `busscan` | BUILD OK | 109 604 B (13.4 %) |
+| `owscan` | BUILD OK | 113 604 B (13.9 %) |
+
+Two measurements worth keeping:
+
+- **Field-image RAM fell by exactly 12 bytes** (24 980 → 24 968) after four write-only
+  members were deleted — `m_assigned_pid` (1), `m_sids[8]` (8), `m_sid_count` (1),
+  `m_enable_attempts` (1), plus one byte of padding. The removal is confirmed to have taken
+  effect and to have touched nothing else's layout.
+- **`nm -C` finds zero `diagnostics::` symbols in `rak4631` and `stage3`**, and finds them in
+  `owscan`. The extracted scanners are genuinely absent from the field images rather than
+  merely unreferenced.
+
+This is deliberately *not* claimed as a byte-identical refactor. The three removed feature
+flags defaulted OFF and were compiled out, so those carry no behavior change by construction
+— but the four members were live stores, so the binary legitimately differs. What holds is
+narrower and checkable: nothing reads them.
+
+#### H1–H8 audit — source-verified only
+
+| Gate | Source state | Still needs hardware |
+|---|---|---|
+| H1 watchdog 120 s | `watchdog_begin(120)`; feeds now inside `acquire_pid()` and `receive()`, which previously ran unfed for up to 45 s and 20 s | Measured worst-case awake time across a real cycle |
+| H2 sleep | `SPI_LORA.end()`, `Serial.end()`, `NRF_USBD->ENABLE = 0` all present on the sleep path | **Sleep current with a meter** (issue #8) — the number the power budget rests on |
+| H3 brownout | `power::Brownout` instantiated and wired: `update()` from the pack voltage, `transmit_allowed()` gates TX, `flash_write_allowed()` gates the flash write. Thresholds 9.60 V stop / 10.20 V resume | Behavior through a real low-voltage excursion |
+| H4 backoff | `radio.backoff_seconds()` replaces the normal interval after any join or send failure | — implemented |
+| H5 session persist | `session.cpp` writes through `Adafruit_LittleFS` to `InternalFS` | **Real join → reset → rejoin** (issue #12) |
+| H6/H7 no livelock | Sensors read sequentially and independently; neither read gates the other; watchdog fed between them | **Physically unplug each sensor mid-cycle** — [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) requires the bench test, and a code audit is explicitly not sufficient |
+| H8 soak | — | 24 h bench, then 7 d field shadow |
+
+**Verdict: no gate closes here.** H4 is implemented and H1's known feeding gap is fixed in
+source; everything else is a code reading, which is the weakest form of evidence this repo
+accepts and is not what `FIRMWARE_SPEC.md` §7 asks for.
+
+#### Blocked, and on what
+
+1. **No RAK4631 on USB at the build host.** Blocks every measurement above.
+2. **The RAK9154 pack is not provisioned.** Provisioning is a WisToolBox NFC/BLE session on a
+   phone — see [`DEPLOY.md`](DEPLOY.md) — and firmware cannot perform it. Until it happens,
+   the direct-`0x01` path added in `05847bd` cannot be exercised: an unprovisioned pack
+   answers only `0xFF`, which is the fallback, not the path under test.
+
+Until both close, the `acquire_pid()` removal stays held. Deleting the only working
+provisioning path before its replacement has answered a real pack once is how a node reaches
+the woods with no battery telemetry and no way back.
+
 ### 2026-08-04 — RAK9154 one-wire PROVEN ALIVE: pack drives the line, identifies as "RAK2560-io", answers SENDAT at dest 0xFF
 
 The one-wire scanner (`owscan`) settled the question the driver could not: **the pack talks.**
