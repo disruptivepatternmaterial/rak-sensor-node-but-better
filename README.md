@@ -4,14 +4,15 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 ## Status
 
-🚧 **Not deployed.** The firmware is written and compiles for all four build stages on the build host, but it has never run on hardware — nothing here has been measured, and no reading has ever been taken. Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) has entries to back it.
+🚧 **Not deployed.** Stages 0–2 have run on hardware: the board boots and prints, the RK900 answers a full five-register read, and an OTAA join plus a real-sensor uplink have reached TTN. Stage 3 (battery telemetry) is blocked on a one-time WisToolBox provisioning of the RAK9154 pack — see [`docs/DEPLOY.md`](docs/DEPLOY.md). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records the H1–H8 gates and the soak.
 
-Next step when the hardware is in hand: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md).
+Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 | Doc | Path |
 |---|---|
 | Firmware contract | [`docs/FIRMWARE_SPEC.md`](docs/FIRMWARE_SPEC.md) |
 | First flash / bring-up | [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md) |
+| Deployment procedure | [`docs/DEPLOY.md`](docs/DEPLOY.md) |
 | Hardware / wiring | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
 | Libraries & examples | [`docs/LIBRARIES.md`](docs/LIBRARIES.md) |
 | Build plan | [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md) |
@@ -63,7 +64,9 @@ Rules live in [`.cursor/rules/`](.cursor/rules/) and are indexed in [`AGENTS.md`
 
 ## Known blockers
 
+- **RAK9154 provisioning** — the pack must be provisioned once through RAK's WisToolBox mobile app over NFC/BLE. Firmware cannot do it: the `ATC+` configuration commands live on the north-bound channel, not the south-bound one-wire link this node speaks. Procedure in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 - [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — the battery current sign convention contradicts between our spec and the live decoder. Blocks the payload freeze.
+- **Buck converter** not yet selected, and it must be chosen on no-load quiescent current — a part drawing milliamps at idle exceeds the node's entire average draw.
 - Open decisions for the first firmware PR: [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
 
 ## Sibling context
