@@ -2,18 +2,19 @@
 """Enforce the heartbeat contract in .cursor/rules/00-agent-liveness.mdc.
 
 The rule asks for a progress line every 2-4 minutes. Nothing measured that, so it
-was advisory and got skipped. This hook measures it.
+stayed advisory and got skipped on exactly the long tasks it was written for. This
+hook measures it and injects a reminder when the agent goes quiet.
 
-  afterAgentResponse -> the agent spoke; reset the clock
-  postToolUse        -> if the agent has been silent past the threshold, attach
-                        additional_context telling it to emit a status line now
+Runs on postToolUse only. `afterAgentResponse` was the obvious reset signal and it
+is useless here: measured 2026-08-04, it fires zero times while a turn is still in
+flight, which is the entire window we care about. So the reset signal is the
+transcript itself -- Cursor hands us `transcript_path`, the jsonl grows live, and a
+rising count of assistant text blocks means the agent spoke.
 
-Silence is measured from the last agent message, not from the last tool call, so a
-long chain of tool calls with no user-visible text is exactly what trips it.
+The transcript carries no timestamps, hence the two-part state: the count answers
+"did it speak", the wall clock answers "how long ago".
 
-State lives in TMPDIR keyed by conversation id so parallel chats do not share a
-clock. Every failure path exits 0 with no output: a broken heartbeat must never
-block real work.
+Every failure path exits 0 with no output. A broken heartbeat must never block work.
 """
 
 import hashlib
@@ -27,88 +28,104 @@ import time
 SILENCE_LIMIT_S = float(os.environ.get("CURSOR_LIVENESS_SILENCE_S", "180"))
 RENUDGE_S = float(os.environ.get("CURSOR_LIVENESS_RENUDGE_S", "120"))
 
-# Field name varies across hook events; take the first that carries a value.
-CONVERSATION_KEYS = ("conversation_id", "conversationId", "chat_id", "chatId",
-                     "thread_id", "threadId", "session_id", "sessionId")
-
 NUDGE = (
-    "LIVENESS: {elapsed:.0f}s since your last user-visible message, over the "
-    "{limit:.0f}s limit in .cursor/rules/00-agent-liveness.mdc. Before your next "
-    "tool call, emit one line of plain text: what just finished, what is running "
-    "now. One concrete fact - a count, a filename, a SHA. Not 'still working'."
+    "LIVENESS: {elapsed:.0f}s since your last user-visible message, past the "
+    "{limit:.0f}s limit in .cursor/rules/00-agent-liveness.mdc. Emit one line of "
+    "plain text before your next tool call: what just finished, what is running "
+    "now. One concrete fact -- a count, a filename, a SHA. Not 'still working'."
 )
 
 
 def state_path(payload):
-    ident = ""
-    for key in CONVERSATION_KEYS:
-        value = payload.get(key)
-        if isinstance(value, str) and value:
-            ident = value
-            break
-    if not ident:
-        ident = os.environ.get("PWD", "global")
-    digest = hashlib.sha1(ident.encode("utf-8")).hexdigest()[:16]
+    ident = payload.get("conversation_id") or payload.get("session_id") or "global"
+    digest = hashlib.sha1(str(ident).encode("utf-8")).hexdigest()[:16]
     return pathlib.Path(tempfile.gettempdir()) / f"cursor-liveness-{digest}.json"
 
 
 def read_state(path):
     try:
-        return json.loads(path.read_text())
+        state = json.loads(path.read_text())
+        return state if isinstance(state, dict) else {}
     except Exception:
         return {}
 
 
 def write_state(path, state):
-    # Atomic so a postToolUse racing an afterAgentResponse cannot read a half file.
-    tmp = path.with_suffix(".tmp")
+    # Atomic: concurrent tool calls in one conversation must not read a half file.
+    tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(state))
     os.replace(tmp, path)
 
 
-def main():
-    event = sys.argv[1] if len(sys.argv) > 1 else ""
+def count_agent_messages(transcript):
+    """Assistant content blocks of type 'text' in the transcript so far."""
+    total = 0
+    with open(transcript, "r", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or '"assistant"' not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if row.get("role") != "assistant":
+                continue
+            message = row.get("message")
+            if not isinstance(message, dict):
+                continue
+            for block in message.get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    total += 1
+    return total
 
+
+def main():
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except Exception:
-        payload = {}
+        return
     if not isinstance(payload, dict):
-        payload = {}
+        return
 
-    if os.environ.get("CURSOR_LIVENESS_DEBUG"):
-        try:
-            debug = pathlib.Path(tempfile.gettempdir()) / "cursor-liveness-debug.jsonl"
-            with debug.open("a") as fh:
-                fh.write(json.dumps({"event": event, "keys": sorted(payload)}) + "\n")
-        except Exception:
-            pass
+    transcript = payload.get("transcript_path")
+    if not transcript or not os.path.isfile(transcript):
+        return
 
     path = state_path(payload)
-    now = time.time()
     state = read_state(path)
+    now = time.time()
 
-    if event == "afterAgentResponse":
-        state["last_spoke"] = now
-        state.pop("last_nudge", None)
-        write_state(path, state)
-        return
+    # Size is a cheap change detector: the jsonl is append-only, so an unchanged
+    # size means no new rows and therefore no new agent text. Skips the parse on
+    # the common case of a tool-call chain with no speech in it.
+    size = os.path.getsize(transcript)
+    if size == state.get("size"):
+        count = state.get("count", 0)
+    else:
+        count = count_agent_messages(transcript)
 
-    if event != "postToolUse":
-        return
-
+    last_count = state.get("count")
     last_spoke = state.get("last_spoke")
-    if not isinstance(last_spoke, (int, float)):
-        state["last_spoke"] = now
-        write_state(path, state)
+
+    first_run = not isinstance(last_count, int) or not isinstance(
+        last_spoke, (int, float)
+    )
+    spoke_since_last_call = not first_run and count > last_count
+
+    if first_run or spoke_since_last_call:
+        write_state(path, {"count": count, "size": size, "last_spoke": now})
         return
 
     elapsed = now - last_spoke
-    if elapsed < SILENCE_LIMIT_S:
-        return
+    state.update({"count": count, "size": size})
 
     last_nudge = state.get("last_nudge")
-    if isinstance(last_nudge, (int, float)) and now - last_nudge < RENUDGE_S:
+    throttled = (
+        isinstance(last_nudge, (int, float)) and now - last_nudge < RENUDGE_S
+    )
+    if elapsed < SILENCE_LIMIT_S or throttled:
+        write_state(path, state)
         return
 
     state["last_nudge"] = now
