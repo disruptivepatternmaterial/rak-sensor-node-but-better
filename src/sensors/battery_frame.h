@@ -181,9 +181,20 @@ enum class BatteryMatchMode : uint8_t {
 };
 
 struct BatteryQueryMatch {
-    BatteryMatchMode mode     = BatteryMatchMode::Any;
-    uint8_t          addr     = 0; // the address the query went to; a reply's source must equal it
-    uint8_t          sequence = 0; // the sequence that query carried
+    BatteryMatchMode mode;
+    uint8_t          addr;     // the address the query went to; a reply's source must equal it
+    uint8_t          sequence; // the sequence that query carried
+
+    // An explicit constructor rather than default member initialisers, because the two builds
+    // do not agree about them. The device build compiles as gnu++11, where a class carrying
+    // NSDMIs is not an aggregate and `BatteryQueryMatch{mode, addr, seq}` stops compiling
+    // altogether; env:native compiles as gnu++17, where it is fine. The host tests therefore
+    // cannot catch this class of break, which is worth stating out loud next to the fix: a
+    // green `pio test -e native` is not evidence that the firmware compiles.
+    BatteryQueryMatch(BatteryMatchMode m = BatteryMatchMode::Any, uint8_t a = 0, uint8_t s = 0)
+        : mode(m), addr(a), sequence(s)
+    {
+    }
 };
 
 // Does this frame answer the outstanding request described by `match`?
