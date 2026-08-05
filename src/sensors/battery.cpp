@@ -338,6 +338,124 @@ SoftwareHalfSerial &bus(uint8_t pin)
     return instance;
 }
 
+#if FEATURE_ONEWIRE_SPLIT
+
+// The pin the pack's TXD (socket pin 3) lands on when the bridge is cut.
+//
+// Chosen from what the RAK19007 actually breaks out, which is narrower than the variant
+// header suggests: WB_IO3..WB_IO6 exist on the nRF52840 and on the module slots, but they do
+// not appear on any solder pad, so they are unreachable on this hardware. The three 2.54 mm
+// headers carry only BOOT, VDD, GND, AIN0/AIN1, IO1, IO2, and the I2C and UART1 pairs.
+//
+// Of those, AIN1 is the only free general-purpose pin left:
+//
+//   IO1        already the one-wire line, and becomes TX in this mode
+//   IO2        gates 3V3_S, and rk900.cpp owns it — see FEATURE_ONEWIRE_RAIL_CYCLE
+//   TX1/RX1    Serial1, which the RAK5802 RS-485 module uses for the RK900
+//   SDA/SCL    I2C1, shared with the sensor slot
+//   BOOT0      bootloader strap; driving it is how a board stops booting
+//   AIN0       kept free as the base board's one analog input
+//
+// AIN1 is P0.31 on the nRF52840, with no second function beyond the ADC, and this design
+// uses no ADC channel at all — the pack reports its own voltage over this very link, which is
+// the whole point of the RAK9154 path. It is also physically adjacent to IO1 on J11 (pin 1
+// next to pin 2), so the split harness is two neighbouring solder joints rather than a wire
+// across the board. GPIOTE, which the library's RX depends on, is available on every P0/P1
+// pin, so nothing about the edge-detect changes.
+//
+// CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet, "J11 Header Pinout" —
+//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/WisBlock/RAK19007/Datasheet/README.md
+//   `1 | AIN1 | ADC input signal`, `2 | IO1 | General purpose IO`, `3 | IO2 | General purpose
+//   IO`. The same document's WisBlock connector table gives pin 22 AIN1 "Analog input for
+//   ADC", pin 29 IO1 "General purpose IO", and pin 30 IO2 "Used for 3V3_S enable" — so AIN1
+//   carries no control function to collide with.
+// CITE(datasheet): [CIT-RAK19007] same document, revision history — "J11 header Analog input
+//   changed from AIN0 to AIN1". The pad is AIN1 on current boards; an older RAK19007 would
+//   expose AIN0 here instead, which is why this is a named constant rather than a literal.
+// CITE(datasheet): [CIT-RAK4631] rakwireless/variants/rak4630/variant.h @ this repo —
+//   `static const uint8_t WB_A1 = 31; // IO_SLOT`, i.e. Arduino pin 31 -> P0.31. Distinct
+//   from WB_IO1 (17 / P0.17) and WB_IO2 (34 / P1.02), and from every WB_SPI_* pin.
+constexpr uint8_t kSplitRxPin = WB_A1;
+
+// The second instance, bound to the RX pin. Two instances of a class whose receive buffer is
+// static is safe here for one specific reason: only ever one of them listens. `listen()` is
+// reached from `begin()` and from `beginRx()`, and `beginRx()` is only called off the read
+// path — so the TX instance, which is only ever written to, never becomes `active_object` and
+// never has a claim on the shared buffer.
+//
+// This is preferred over the alternatives after reading the installed library rather than
+// assuming:
+//
+//   - The two-pin constructor does not exist. `SoftwareHalfSerial(uint8_t receivePin,
+//     uint8_t transmitPin, bool inverse_logic)` is present in the header but commented out;
+//     the only live constructor is `SoftwareHalfSerial(uint8_t halfPin, bool inverse_logic)`,
+//     and `setTX()`/`setRX()` are both driven from the single `_halfPin` member. There is no
+//     supported way to give one instance two pins.
+//   - A hardware UART is not available. The nRF52840 has two UARTE peripherals; Serial1 is
+//     the RAK5802's RS-485 link, and a second one would still need its pins on the header,
+//     where the only free candidate is the pin used here anyway. Bit-banging a pin the
+//     library already knows how to bit-bang is the smaller change.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] beegee-tokyo/RAK-OneWireSerial
+//   src/SoftwareHalfSerial.h, read on the build host — the two-pin constructor is present
+//   only as a comment; `uint8_t _halfPin;` is the sole pin member and `_receive_buffer`,
+//   `_receive_buffer_head/_tail`, and `active_object` are all class statics.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] same library src/SoftwareHalfSerial.cpp —
+//   `listen()` is called from `begin()` and `beginRx()`; `beginTx()` calls `stopListening()`,
+//   which is guarded by `if (active_object == this)` and is therefore a no-op on an instance
+//   that has never listened. Writing to the TX instance cannot detach the RX instance's
+//   interrupt.
+SoftwareHalfSerial &split_rx_bus()
+{
+    static SoftwareHalfSerial instance(kSplitRxPin);
+    return instance;
+}
+
+#endif // FEATURE_ONEWIRE_SPLIT
+
+// Where bytes are read from, and where they are written to. In the default shared-pin build
+// both resolve to the same instance, so every call site below behaves exactly as it did
+// before this flag existed.
+SoftwareHalfSerial &rx_link(uint8_t pin)
+{
+#if FEATURE_ONEWIRE_SPLIT
+    (void)pin;
+    return split_rx_bus();
+#else
+    return bus(pin);
+#endif
+}
+
+SoftwareHalfSerial &tx_link(uint8_t pin) { return bus(pin); }
+
+// Raise the probe's 3V3 rail and wait for it to settle, or do nothing in the default build.
+//
+// Returns with the rail up. Deliberately does not claim to have powered anything: whether
+// WB_IO2 reaches the pack is a property of the harness, not of this code, and on the wiring
+// in docs/HARDWARE.md it does not — see FEATURE_ONEWIRE_RAIL_CYCLE in build_features.h.
+void probe_rail_up()
+{
+#if FEATURE_ONEWIRE_RAIL_CYCLE
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] examples/RAK4631-OneWireSerial/src/main.cpp
+    //   lines 89-90 — `digitalWrite(WB_IO2, HIGH); delay(1000);` per exchange. The one-second
+    //   settle is the reference's, not a guess; the pack's own boot is what it pays for.
+    pinMode(WB_IO2, OUTPUT);
+    digitalWrite(WB_IO2, HIGH);
+    LOGLN(F("   battery : probe rail up (WB_IO2 HIGH) — no-op unless pin 4 is on 3V3_S"));
+    delay(1000);
+#endif
+}
+
+void probe_rail_down()
+{
+#if FEATURE_ONEWIRE_RAIL_CYCLE
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] same file, line 125 — `digitalWrite(WB_IO2,
+    //   LOW)` closes each cycle. Dropping it also matches what rk900.cpp already leaves
+    //   behind, so the sleep state is unchanged either way.
+    digitalWrite(WB_IO2, LOW);
+#endif
+}
+
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 
@@ -615,7 +733,7 @@ const char *battery_result_name(BatteryResult r)
 //   SNHUBAPI_EVT_QSEND takes when it hands a whole frame to mySerial.write(msg, len).
 void Battery::tx_byte(uint8_t b)
 {
-    bus(m_pin).write(b);
+    tx_link(m_pin).write(b);
 }
 
 // Compose and transmit one request. `payload` is the SensorHub payload that follows the
@@ -704,7 +822,7 @@ void Battery::send_boot()
 //   snhub_snsrdat_command() with SNHUB_TYPE_SENDAT + PLD_SDATA_TPYE_SENDAT.
 size_t Battery::query(uint8_t dest, uint8_t *buf, size_t cap)
 {
-    bus(m_pin).flush(); // anything still queued predates this request
+    rx_link(m_pin).flush(); // anything still queued predates this request
     send_frame(dest, kHubTypeSendData, kPayloadSendData);
     delay(2); // let the probe turn the line around
     return receive(buf, cap);
@@ -939,7 +1057,7 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 //   does not need prompting; it needs answering.
 bool Battery::acquire_pid(uint8_t *buf, size_t cap)
 {
-    bus(m_pin).flush(); // anything queued predates this window
+    rx_link(m_pin).flush(); // anything queued predates this window
     send_boot();
     delay(2); // let the probe turn the line around
 
@@ -1042,7 +1160,7 @@ bool Battery::param_get(uint8_t dest, uint8_t sid, uint32_t &intv, uint16_t &rul
 {
     const uint8_t payload[1] = {sid};
 
-    bus(m_pin).flush();
+    rx_link(m_pin).flush();
     send_frame(dest, kHubTypeParamGet, kPldParamSnsrUpdate, payload, sizeof(payload));
     delay(2);
 
@@ -1132,7 +1250,7 @@ bool Battery::param_set(uint8_t dest, uint8_t sid, uint32_t intv, uint8_t *buf, 
              dest, sid, (unsigned)kRulePeriodic, (unsigned long)intv, attempt,
              (unsigned)kParamAttempts);
 
-        bus(m_pin).flush();
+        rx_link(m_pin).flush();
         send_frame(dest, kHubTypeParamSet, kPldParamSnsrUpdate, payload, sizeof(payload));
         delay(2);
 
@@ -1247,7 +1365,7 @@ bool Battery::enable_sampling(uint8_t *buf, size_t cap)
 size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision,
                         uint32_t first_byte_timeout_us)
 {
-    SoftwareHalfSerial &link = bus(m_pin);
+    SoftwareHalfSerial &link = rx_link(m_pin);
 
     // The first byte gets the long window: the probe may still be waking. Callers waiting on
     // an unsolicited push override it, because that wait is bounded by the pack's sampling
@@ -1462,10 +1580,28 @@ BatteryReading Battery::read()
 {
     BatteryReading out;
 
+    // Raise the probe rail first, if this build cycles it: the library's begin() is what arms
+    // the edge interrupt, and arming it while the rail is still rising just buffers the
+    // pack's power-on garbage.
+    probe_rail_up();
+
     // begin() caches the port registers, arms the GPIOTE falling-edge interrupt, and leaves
     // the pin as input-with-pull-up so the idle line reads high. Everything after this point
     // is timing-critical only inside the library.
-    SoftwareHalfSerial &link = bus(m_pin);
+    //
+    // In split mode the TX instance is begun first and the RX instance second, and the order
+    // is load-bearing. begin() ends in listen(), which makes the caller `active_object` and
+    // detaches whoever held it — so beginning TX last would leave the edge interrupt sitting
+    // on the pin we transmit from, and the pack's reply would arrive at a pin nothing is
+    // watching. Beginning RX last leaves the interrupt where the pack actually talks.
+    //
+    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 src/SoftwareHalfSerial.cpp — begin()
+    //   ends with `listen()`, and listen() starts `if (active_object) active_object->
+    //   stopListening();`. Only the most recent begin() keeps the interrupt.
+    SoftwareHalfSerial &link = rx_link(m_pin);
+#if FEATURE_ONEWIRE_SPLIT
+    tx_link(m_pin).begin(kBaud);
+#endif
     link.begin(kBaud);
     link.flush();
 
@@ -1697,6 +1833,14 @@ BatteryReading Battery::read()
     //   actually removes it.
     link.end();
     pinMode(m_pin, INPUT);
+#if FEATURE_ONEWIRE_SPLIT
+    // `link` is the RX instance here, so the pinMode above released the TX pin — which the
+    // library leaves driven high, a path into the pack's receiver for the whole sleep
+    // interval. The RX pin still idles with the library's pull-up on and needs the same
+    // treatment for the same reason.
+    pinMode(kSplitRxPin, INPUT);
+#endif
+    probe_rail_down();
 
     if (m_last != BatteryResult::Ok) {
         LOGF("   battery : no data (%s, %u bytes)\n", battery_result_name(m_last),

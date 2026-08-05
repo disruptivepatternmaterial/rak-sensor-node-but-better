@@ -45,8 +45,16 @@ const char *battery_result_name(BatteryResult r);
 
 class Battery {
   public:
-    // `pin` is the single bridged data line. Held as configuration rather than a compile
-    // time constant so the wiring can move without touching the protocol code.
+    // `pin` is the data line. In the default build that is the single half-duplex wire, with
+    // the pack's TXD and RXD bridged onto it. Under FEATURE_ONEWIRE_SPLIT it becomes the TX
+    // line only — our output to the pack's RXD (socket pin 5) — and the pack's TXD (socket
+    // pin 3) is read on a second pin fixed in battery.cpp, because that pin is a property of
+    // the base board's solder pads rather than of the wiring harness. See
+    // src/build_features.h for why both topologies exist and which physical change each one
+    // expects.
+    //
+    // Held as configuration rather than a compile time constant so the wiring can move
+    // without touching the protocol code.
     explicit Battery(uint8_t pin) : m_pin(pin) {}
 
     BatteryReading read();

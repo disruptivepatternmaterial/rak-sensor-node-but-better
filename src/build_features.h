@@ -113,6 +113,69 @@
 #define FEATURE_BATTERY_PARAM_PASS 0
 #endif
 
+// Split the one-wire battery link across two pins instead of one. OFF by default, and the
+// default build is byte-identical to the revision before this flag existed.
+//
+// The bench has the pack's pin 3 (TXD) and pin 5 (RXD) bridged onto WB_IO1. RAK's own
+// documents say a genuine Sensor Hub does not do that: the hub drives pin 5 and leaves pin 3
+// unconnected, so bridging puts the pack's driven TXD onto a line the master also drives.
+// That contention is the leading explanation for a pack that answers short frames but never
+// latches a probe id — the longer provisioning frame is the one with the most bytes to
+// corrupt.
+//
+// Which topology the pack actually honours is not yet known, so both are buildable:
+//
+//   OFF (default)  pin 5 alone to WB_IO1, pin 3 floating. Half-duplex, exactly what a hub
+//                  does. Needs no firmware change — this is the existing image.
+//   ON             pin 3 (pack TX) to the split RX pin, pin 5 (pack RX) to WB_IO1. Only
+//                  needed if the pack genuinely transmits on pin 3 and the single wire is
+//                  silent.
+//
+// CITE(datasheet): [CIT-RAK9154] RAK9154 Datasheet, "Panel Connector Definition" —
+//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/Solar-Battery/RAK9154/Datasheet/README.md
+//   the 5-pin Sensor Hub Load socket is Pin1 P+, Pin2 P-, Pin3 TXD, Pin4 3V3_In, Pin5 RXD.
+//   TXD and RXD are two distinct signals on the pack; joining them is our choice, not the
+//   connector's.
+// CITE(datasheet): [CIT-RAK2560] RAK2560 Sensor Hub Datasheet, "Pin Definition" —
+//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/Sensor-Hub/RAK2560/Datasheet/README.md
+//   on the hub side of the same socket pin 3 is Reserved / Not defined, pin 4 is Vcc_Probe,
+//   and pin 5 is the One-wire UART. A real master therefore drives pin 5 only.
+#ifndef FEATURE_ONEWIRE_SPLIT
+#define FEATURE_ONEWIRE_SPLIT 0
+#endif
+
+// Power-cycle the probe's 3V3 rail around each exchange instead of holding it up. OFF by
+// default, and independent of FEATURE_ONEWIRE_SPLIT so the two hypotheses can be tested one
+// at a time.
+//
+// The reference example does not hold the rail: it raises WB_IO2, waits a second, runs the
+// exchange, and drops it again. If the pack only accepts a provisioning assignment in the
+// window just after its rail rises, a master that holds 3V3 permanently — which is what this
+// firmware does — never opens that window and the pack stays at provId 0xFF forever. That
+// matches the symptom exactly.
+//
+// IMPORTANT: on the harness described in docs/HARDWARE.md this flag changes nothing. WB_IO2
+// gates the module slots' 3V3_S rail, but the pack's pin 4 is deliberately wired to the
+// always-on VDD pad instead — precisely so that rk900.cpp dropping WB_IO2 after the weather
+// read cannot kill the pack's reference mid-cycle. Enabling this flag without also moving
+// pin 4 onto a 3V3_S source toggles a rail the pack is not connected to. It is a no-op, not
+// a fix, and the firmware says so at runtime rather than implying otherwise.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] beegee-tokyo/RAK-OneWireSerial
+//   examples/RAK4631-OneWireSerial/src/main.cpp, read on the build host — `pinMode(WB_IO2,
+//   OUTPUT); digitalWrite(WB_IO2, HIGH);` at lines 48-49 before `mySerial.begin(9600)`,
+//   `digitalWrite(WB_IO2, LOW)` at line 80, and per-cycle `digitalWrite(WB_IO2, HIGH);
+//   delay(1000);` at lines 89-90 with LOW again at line 125. The rail is cycled per
+//   exchange, and the settle wait is one second.
+// CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet, WisBlock connector pin 30 / J11 pin 3 —
+//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/WisBlock/RAK19007/Datasheet/README.md
+//   `IO2 | I/O | Used for 3V3_S enable`, and "IO2 controls the power switch of 3V3_S". So
+//   WB_IO2 does gate a switched 3.3 V rail on this base board — the module slots' 3V3_S,
+//   which is a different net from the VDD pad our pin 4 is on.
+#ifndef FEATURE_ONEWIRE_RAIL_CYCLE
+#define FEATURE_ONEWIRE_RAIL_CYCLE 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)
