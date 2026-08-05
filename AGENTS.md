@@ -56,9 +56,10 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   `forest-weather-machines`. A drifted encoder does not lose one field; the decoder throws
   and discards the entire uplink. `scripts/check_decoder_parity.py` runs on every build.
 - **Status is `🚧 NOT YET DEPLOYED`** and stays that way until [`docs/EVIDENCE.md`](docs/EVIDENCE.md)
-  says otherwise. Stages 0-2 have run on hardware (join + uplink 2026-07-31, RK900 reply
-  2026-08-03); Stage 3 (battery) has not. Deployment stays blocked until the H1-H8 gates and
-  the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close — not merely on "it booted once."
+  says otherwise. Stages 0-3 have all now run on hardware (join + uplink 2026-07-31, RK900 reply
+  2026-08-03, battery 12.23 V 2026-08-05). **That does not change the status.** Deployment stays
+  blocked until the H1-H8 gates and the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close —
+  not merely on "every subsystem answered once."
 - **The RAK4631 board definition is vendored** in [`rakwireless/`](rakwireless/) because it
   does not exist in the PlatformIO registry. Do not edit it, and do not "fix" the build by
   copying files into `~/.platformio` — see [`rakwireless/README.md`](rakwireless/README.md).
@@ -72,7 +73,7 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 0 | LED + USB serial | run on hardware 2026-07-31 (`8d4a41c`) — firmware boots and prints over USB CDC ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | 1 | RK900 Modbus over RAK5802 @ 9600 | proven at wire level 2026-08-03 (`998dc26`, `busscan`) — full 5-register frame read at **9600** (not 4800): 25.1 °C, 50.4 %RH, 1007.0 hPa, calm; register map confirmed ([ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md), [`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Remaining: same read through the production `stage1` path |
 | 2 | OTAA join + first uplink | done 2026-07-31 — join + accepted uplink, `puma-concolor-001`, session restore across reset ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| 3 | RAK9154 battery telemetry over one-wire | not started; unblocked by ADR-0004 |
+| 3 | RAK9154 battery telemetry over one-wire | **working on hardware 2026-08-05 (`1a203d3`, re-verified `b6bbf31`)** — pack latches pid `0x01` and reports `12.23 V, +0.00 A, 98%, 23.0 °C` across seven consecutive cycles ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Root cause of the long stall was reply turnaround timing, not framing: answer no sooner than 2 ms after the pack's last byte (`kTurnaroundMs`) and lead every frame with four wake bytes. Expect ~2 null cycles after boot while the pack samples. Open: [#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36), [#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) |
 
 ## Open blockers
 

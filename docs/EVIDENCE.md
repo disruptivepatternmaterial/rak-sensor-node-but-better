@@ -57,6 +57,115 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-05 — Stage 3: the RAK9154 reads. 12.23 V over one-wire, seven consecutive cycles
+
+The pack reports live telemetry. This is the first non-null battery reading this project has
+ever taken, and it closes the Step 1 hold point that the entry below left open: `SENDAT Ok`
+from dest `0x01` carrying a non-zero voltage.
+
+- **Host:** Heliotrope Ridge (`ntableman@192.168.10.223`) · RAK4631 `239A:8029`, port
+  `/dev/cu.usbmodem1101`.
+- **Commit:** `1a203d3`. **Image:** `battdiag` — battery only, no RK900, no radio, no sleep;
+  a 10 s cycle in place of `stage2`'s 110.5 s.
+- **Wiring:** unchanged from the entry below. Pin 1 `P+` (12 V) still deliberately unconnected.
+
+**The reading, stable across seven consecutive cycles:**
+
+```
+12.23 V, +0.00 A, 98%, 23.0 °C
+```
+
+**Cycle-2 frame**, a genuine reply rather than a truncated announcement:
+
+```
+FF 7E 00 15 02 01 00 01 04 03 10 02 15 BA 00 00 16 B9 00 00 17 B8 00 18 67 00 00 27
+```
+
+RUI3 length `0x15` = 21, type `02` SENSORHUB, flag `01` RSP, dest `00`, **source `0x01` — not
+`0xFF`**, hub_type `0x03` SENDAT, four records at sids `0x15`–`0x18`.
+
+**The pack latched its provisioning id.** Cycle 1 answered one announcement at 3031 ms; from
+cycle 2 onward the log reads `pack answered at 0x01 — skipping provisioning`. The id survives
+the cycle boundary, so the phase-0 direct probe is now the path that runs in the steady state
+and `acquire_pid()` is not entered at all.
+
+#### Root cause: reply turnaround timing, not frame construction
+
+Our reply bytes always matched the RAK reference field for field — that was independently
+confirmed before this run and is not what changed. What changed is *when* they went out. Our
+early-exit drain transmitted under one bit time after the pack's stop bit; the reference cannot
+reply sooner than about 2 ms, because its drain loop is
+`while (available()) { read(); delay(2); }` and the last iteration always pays that delay. On an
+open-drain line the pack has just finished driving, answering that early appears to beat its
+receiver re-arming.
+
+Two changes landed together and their individual contributions are **not** separated:
+
+- a **2 ms guard gap** before the first response byte (`kTurnaroundMs`), and
+- **`kWakeCount` restored from 1 to 4.**
+
+5 ms and 10 ms turnarounds were swept but never needed.
+
+#### Sampling lags the latch by about two cycles
+
+Cycles 1–2 returned the all-zero record template and the `Unsampled` guard reported **no data**
+rather than a fabricated 0.00 V. That is expected startup behaviour, not a fault: the id latches
+before the pack has sampled, and the guard is doing exactly what the null policy requires in the
+window between. Anyone reading a fresh boot log should expect two null cycles before the first
+number.
+
+#### Negative result: raw Modbus does not bridge
+
+A raw Modbus RTU read at slave `0x6E` on the same one-wire line — request
+`6E 03 60 00 00 15 93 5A`, the register map the deployed sibling node uses over its own RS-485
+harness — returned **0 bytes on every cycle**. The one-wire peer is a Generic Probe IO adapter
+that speaks SensorHub northbound and Modbus southbound to the BMS; it does not forward a Modbus
+frame arriving from the north. Settled, and the path is deleted rather than carried. Do not
+re-attempt it.
+
+#### What this does not prove
+
+**No H1–H8 gate closes here, and the project status stays `🚧 NOT YET DEPLOYED`.** One good
+frame is not a soak: H8 still requires ≥24 h on the bench and ≥7 d of field shadow, and H7
+(BMS silent → no livelock) has not been exercised. **ADR-0002 stays open** — `+0.00 A` at rest
+settles no sign convention, and a resting pack is precisely the reading that cannot.
+
+Two High findings are open against this path and are deliberately not fixed in this entry's
+commits:
+[#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36) (the
+SENDAT response is not matched to the query — flag, dest, source and sequence go unverified) and
+[#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) (a
+partial record set can return `Ok` carrying stale values from a previous read).
+
+#### Re-verified after the cleanup — `b6bbf31`, same host, same day
+
+The commit that deleted the raw-Modbus path, corrected the provisioning comments and added the
+success-path hex dump was reflashed and recaptured. **No regression:** five consecutive cycles,
+`pack answered at 0x01 — skipping provisioning` on every one, and the reading unchanged at
+`12.23 V, +0.00 A, 98%, 23.0 °C`. The frame is now on record from the driver itself rather than
+reconstructed:
+
+```
+battery : sendat FF 7E 00 15 02 01 00 01 04 03 10 02 15 BA C7 04 16 B9 00 00 17 B8 62 18 67 E6 00 35
+```
+
+**The temperature scale is confirmed, and it was the risky one.** The raw-integer log added in
+this commit reads:
+
+```
+battery : raw v=1223 i=0 soc=98 t=230
+```
+
+`t=230` at a decoded 23.0 °C means the pack reports **tenths of a degree**, so passing the value
+unscaled to Cayenne type 103 and letting the decoder divide by 10 is correct. Had it read `23`,
+every temperature this node has ever shipped would have been 10× low. That was inferred before
+this capture and is measured now. Voltage is likewise hundredths (`1223` → 12.23 V) and charge is
+whole percent.
+
+**Verdict: PASS on battery telemetry over one-wire. PASS on the temperature scale (tenths).
+Inconclusive on the current sign. Fail-safe behaviour (null, not zero) confirmed on the
+unsampled cycles.**
+
 ### 2026-08-05 — Phase-0 direct probe exonerated on hardware; `acquire_pid()` measured at 45.4 s of a 50.5 s wake
 
 First capture of the production battery path on a board that is actually on USB since the
@@ -130,6 +239,14 @@ twenty-two times and it never latches, so every record stays the unsampled templ
 suspects are our reply frame and our handshake sequence. **The root cause is not diagnosed** —
 this entry deliberately does not name one. Tracked in
 [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+
+> **Diagnosed 2026-08-05 on `1a203d3` — see the entry at the top of this log.** The defect was
+> not in the reply frame or the handshake sequence, both of which were correct. It was **reply
+> turnaround timing**: we answered under one bit time after the pack's stop bit, where the
+> reference cannot answer sooner than ~2 ms. The paragraph above is left standing because "not
+> diagnosed" was the honest verdict at the time and the suspect list it named is what a later
+> reader needs in order to see why the timing hypothesis took so long to surface — the bytes
+> were right, so nobody was looking at the clock.
 
 #### Retraction — a fabricated external blocker
 

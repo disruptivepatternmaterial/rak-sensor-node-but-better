@@ -4,7 +4,7 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 ## Status
 
-🚧 **Not deployed.** Stages 0–2 have run on hardware: the board boots and prints, the RK900 answers a full five-register read, and an OTAA join plus a real-sensor uplink have reached TTN. Stage 3 (battery telemetry) is blocked on a host-side one-wire defect: the RAK9154 pack never latches the probe id our firmware assigns it, so every record comes back unsampled — see [`docs/DEPLOY.md`](docs/DEPLOY.md). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records the H1–H8 gates and the soak.
+🚧 **Not deployed.** All four bring-up stages have now run on hardware: the board boots and prints, the RK900 answers a full five-register read, an OTAA join plus a real-sensor uplink have reached TTN, and as of 2026-08-05 the RAK9154 pack reports `12.23 V, +0.00 A, 98%, 23.0 °C` over one-wire across seven consecutive cycles. **Every subsystem answering once is not a deployment.** None of the H1–H8 hardening gates has closed, the ≥24 h bench soak and ≥7 d field shadow have not run, and the battery-current sign convention is still unresolved ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md)). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records those gates.
 
 Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
