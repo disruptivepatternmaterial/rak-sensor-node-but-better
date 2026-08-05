@@ -270,14 +270,23 @@ class Soak:
                     time.sleep(1)
                     continue
                 try:
-                    port = serial.Serial(found, a.baud, timeout=1)
-                    port.dtr = True
-                    port.rts = True
+                    candidate = serial.Serial(found, a.baud, timeout=1)
                 except (OSError, serial.SerialException) as exc:
                     # Losing the race against re-enumeration is routine, not an anomaly.
                     self.event("port", f"{found} not openable yet: {exc}")
                     time.sleep(1)
                     continue
+                try:
+                    # Asserted for the same reason _serial_capture.py asserts them: the
+                    # CDC console stays quiet otherwise. Kept separate from the open so a
+                    # port without modem control lines -- a pty, which is what the
+                    # selftest fixture hands over -- still gets read instead of being
+                    # dropped mid-configuration and silently read by nobody.
+                    candidate.dtr = True
+                    candidate.rts = True
+                except (OSError, serial.SerialException) as exc:
+                    self.event("port", f"{found} has no modem control lines: {exc}")
+                port = candidate
                 port_name = found
                 self.reattaches += 1
                 self.event("port", f"attached {found} (attach #{self.reattaches})")
