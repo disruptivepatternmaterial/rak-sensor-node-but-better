@@ -132,14 +132,17 @@
 //                  silent.
 //
 // CITE(datasheet): [CIT-RAK9154] RAK9154 Datasheet, "Panel Connector Definition" —
-//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/Solar-Battery/RAK9154/Datasheet/README.md
-//   the 5-pin Sensor Hub Load socket is Pin1 P+, Pin2 P-, Pin3 TXD, Pin4 3V3_In, Pin5 RXD.
-//   TXD and RXD are two distinct signals on the pack; joining them is our choice, not the
-//   connector's.
-// CITE(datasheet): [CIT-RAK2560] RAK2560 Sensor Hub Datasheet, "Pin Definition" —
-//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/Sensor-Hub/RAK2560/Datasheet/README.md
-//   on the hub side of the same socket pin 3 is Reserved / Not defined, pin 4 is Vcc_Probe,
-//   and pin 5 is the One-wire UART. A real master therefore drives pin 5 only.
+//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/Accessories/RAK9154/Datasheet/README.md
+//   the Sensor Hub Load row reads `SP1110/P5 | SP1110/P5-N | Pin1: P+; Pin2: P-; Pin3: TXD;
+//   Pin4: 3V3_In; Pin5: RXD`. TXD and RXD are two distinct signals on the pack; joining them
+//   is our choice, not the connector's.
+// CITE(datasheet): [CIT-RAK2560] RAK2560 Hub Datasheet, "Pin Definition" —
+//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/WisNode/RAK2560/Hub-Datasheet/README.md
+//   on the hub side of the same socket, pin 3 is `Reserved | IO | Not defined | Reserved for
+//   future use`, pin 4 is `Vcc_Probe | PO | Power supply for the probe`, and pin 5 is
+//   `One-wire UART | IO | Communication with probe`. A real master drives pin 5 only, and
+//   the RAK2560 Probe-IO datasheet repeats the identical table. So the bench's pin-3 leg has
+//   no counterpart on any shipping master.
 #ifndef FEATURE_ONEWIRE_SPLIT
 #define FEATURE_ONEWIRE_SPLIT 0
 #endif
