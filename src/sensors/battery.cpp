@@ -206,8 +206,13 @@ constexpr uint32_t kEnablePassBudgetMs = 30000;
 // fall through to `return RET_ERROR`, so a driver that expects to be answered in one of
 // those shapes will wait forever.
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
-//   PLD_PROVI_TYPE_E { VER1=0, VER2=1, BOOT=2, VER3=3 }; onewire_master_protocol.c
-//   snhub_provision_req_program() switches on payload_type and bypasses only VER3.
+//   PLD_PROVI_TYPE_E { VER1=0, VER2=1, BOOT=2, VER3=3 }; onewire_master_protocol.c:407-417
+//   snhub_provision_req_program() switches on payload_type: `case PLD_PROVI_TYPE_VER3: /* do
+//   nothing, just bypass */ break;` then VER1/VER2/BOOT/default `/* not support */ return
+//   RET_ERROR`. The source's own word "bypass" means bypass the *rejection* — VER3 breaks out
+//   of the switch and falls through into the record-and-echo body at :419-473, which is the
+//   only path that ever reaches QSEND, ADD_PID or ADD_SID. Read as "VER3 is skipped" it says
+//   the opposite of what it does, so state it the long way: VER3 is the one type answered.
 // CITE(bench): docs/EVIDENCE.md — passive listen at 9600 on commit 3d3425d, no bytes
 //   transmitted: `FF 7E 00 55 02 00 | 00 FF 00 01 50 03 | ...`. hub_type 0x01 PROVISION,
 //   payload_type 0x03 = VER3, dest 0x00 master, source 0xFF unprovisioned.
