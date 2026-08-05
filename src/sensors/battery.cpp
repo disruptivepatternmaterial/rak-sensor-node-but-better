@@ -127,20 +127,79 @@ constexpr size_t kParamIntv  = 1;
 constexpr size_t kParamRule  = 5;
 constexpr size_t kParamBytes = 43;
 
-// The interval the rule runs at. Deliberately taken from the pack itself rather than
-// invented: the reference documents `intv` only as "rule to be applied" and never states a
-// unit, so a number chosen here would be an unsourced constant of exactly the kind that
-// bricks an unreachable node. The sequence is therefore PARAMGET the sensor, keep whatever
-// interval it reports, and PARAMSET the same interval back with only the rule changed.
+// The interval the rule runs at, and its unit — which is no longer a guess.
 //
-// kParamIntvFallback is used only when the PARAMGET draws no reply, so the enable can still
-// be attempted rather than abandoned. 60 is the smallest round value that cannot be a
-// runaway sampler under any plausible unit — 60 seconds is sensible, 60 minutes is
-// sensible, 60 ms is not something a battery gauge would honour.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_api.h — the API is
+// The reference library documents `intv` only as "rule to be applied" and never states a
+// unit, so every previous revision refused to choose one and echoed back whatever the pack
+// reported. That was the right call while the unit was unknown, but it left the enable path
+// unable to act when PARAMGET drew no reply — which is every cycle, because the pack refuses
+// PARAMGET while it still considers itself unprovisioned.
+//
+// RAK's own WisToolBox command catalogue settles it. The UI field bound to `ATC+SNSR_INTV`
+// is titled "Sensor interval, s" and validates `{min: 60, max: 86400}` — seconds, with a
+// vendor-declared floor of 60 s and a ceiling of one day. `ATC+PRB_INTV` and `ATC+SNSR_CONF`
+// carry the identical validation block. So 60 is not "the smallest round number that cannot
+// be a runaway sampler under any plausible unit" any more; it is the vendor's own minimum,
+// in the vendor's own unit.
+//
+// The floor is chosen rather than something larger because the pack's sampling cadence and
+// this node's wake cadence are independent: the node wakes on its own interval and reads
+// whatever the pack last sampled, so a fast pack cadence costs the pack a little energy and
+// costs the node nothing, while a slow one risks every read returning the same stale sample.
+//
+// CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 368291 —
+//   field `sensor_interval_sensorInterval` for `ATC+SNSR_INTV`, `"title":"Sensor interval,
+//   s"` with `"validation":{"regexp":"^[0-9]+$","min":60,"max":86400,...}`. The unit is
+//   seconds and the valid range is 60..86400; anything below 60 is outside RAK's own range.
+// CITE(datasheet): [CIT-WISTOOLBOX-AT] same file @ byte 389344 — the `ATC+SNSR_CONF`
+//   accordion repeats `"title":"Sensor interval, s"` with the identical 60..86400
+//   validation, so the probe-config write and the per-sensor write share one unit.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_api.h — the binary API is
 //   `void (*param)(U8 pid, U8 sid, U8 enable, U32 intv)` with the doxygen comment
-//   "@param intv rule to be applied"; no unit is stated anywhere in the library.
-constexpr uint32_t kParamIntvFallback = 60;
+//   "@param intv rule to be applied"; no unit is stated anywhere in the library, which is
+//   why the vendor catalogue rather than prior art is the source for this constant.
+constexpr uint32_t kParamIntvSeconds = 60;
+constexpr uint32_t kParamIntvMax     = 86400;
+
+// How long to wait for the pack to acknowledge a parameter write, and how many times to
+// repeat it.
+//
+// The previous revision fired PARAMSET once and drained for about 5 ms, on the reasoning
+// that the reference library leaves `protocol_list[SNHUB_TYPE_PARAMSET]` with both `.req`
+// and `.rsp` NULL and therefore expects no response at all. That reasoning is now known to
+// be incomplete: RAK's own tooling treats a probe-configuration write as a request that must
+// be *acknowledged*, budgeting 3000 ms for the acknowledgement and retrying up to 3 times.
+// A 5 ms drain cannot observe a 3000 ms acknowledgement, so the firmware has never been in a
+// position to know whether the pack answered — the write was not merely unacknowledged, it
+// was unobservable.
+//
+// Matching RAK's budget is what makes the next capture diagnostic instead of ambiguous.
+//
+// CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 389344 —
+//   the `ATC+SNSR_CONF` command's config block is
+//   `"config":{"retries":3,"success":"+EVT:UPD_CONF","timeout":3000}`. RAK allows three
+//   attempts and three seconds per attempt for a probe-configuration write to be confirmed.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c —
+//   `protocol_list[SNHUB_TYPE_PARAMSET]` has `.req` and `.rsp` both NULL, so the reference
+//   master discards any PARAMSET response rather than requiring one. Waiting for it is
+//   therefore strictly additional evidence: a silent pack still falls through unharmed.
+constexpr uint32_t kParamAckTimeoutUs = 3000000; // 3 s, RAK's own per-attempt budget
+constexpr uint8_t  kParamAttempts     = 3;       // RAK's own retry count
+
+// Ceiling on the whole enable pass, independent of the per-write budget above.
+//
+// Three attempts at three seconds across six announced sensors is 54 s of worst-case silence,
+// and Battery::read() runs between two watchdog feeds in src/main.cpp — there is no feed
+// inside it. Added to the 20 s push listen that is 74 s inside a 120 s window, before the
+// weather read is counted. That is too close to a reset for a path whose whole purpose is
+// diagnostics, and a watchdog reset would destroy the very capture this change exists to
+// produce. The pass therefore checks a wall-clock deadline between sensors and stops early,
+// logging that it did, rather than risking the reset.
+//
+// CITE(datasheet): [CIT-NRF-WDT] nRF52840 PS, WDT — the timeout is fixed at TASKS_START and
+//   the watchdog cannot be stopped, so an awake path that overruns its window resets the
+//   chip. src/main.cpp starts it at 120 s and feeds it around, not inside, the sensor reads.
+constexpr uint32_t kEnablePassBudgetMs = 30000;
 
 // The pack's self-announcement is a PROVISION request of payload type VER3 — and VER3 is
 // the *only* provision payload type the reference master accepts. VER1, VER2 and BOOT all
@@ -205,6 +264,28 @@ constexpr uint8_t kIpsoTemperature = 103; // 3303 - 3200
 constexpr uint8_t kIpsoCapacity    = 184; // 3384 - 3200
 constexpr uint8_t kIpsoDcCurrent   = 185; // 3385 - 3200
 constexpr uint8_t kIpsoDcVoltage   = 186; // 3386 - 3200
+
+// Not a measurement. Type 243 is a 16-bit status bitfield, and this pack announces two
+// sensors carrying it (sid 0x19 and 0x1A). It matters twice over.
+//
+// First, the record walker has to know its width or it stops dead at the first one and
+// discards every record behind it — and on this pack the two 243 sensors are announced last,
+// so anything appended after them would be lost. "Bit Values (16bits)" is two bytes.
+//
+// Second, and more important, it must never count toward the all-zero template test below.
+// A status word is a legitimate zero *and* a legitimate non-zero regardless of whether the
+// pack has sampled anything: a non-zero one would let an untouched record template pass as a
+// live measurement, and a zero one must not veto a frame whose physical sensors did report.
+// So it is decoded for its width and deliberately contributes nothing to the verdict.
+//
+// CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 347583 —
+//   the sensor-type table lists `{"displayValue":"Bit Values (16bits)","sendValue":"243"}`
+//   alongside `{"displayValue":"Bit Values (32bits)","sendValue":"244"}` and the physical
+//   types `Temperature 103` / `DC Voltage 186`. 243 is a 16-bit bitfield, not a quantity.
+// CITE(bench): docs/EVIDENCE.md — the pack's own announcement descriptor tail on afefec3
+//   reads `19 F3 08 00 1A F3 08 00`: sid 0x19 and sid 0x1A both carry ipso 0xF3 = 243 with
+//   rule 0x0008. Two of this pack's six sensors are status words.
+constexpr uint8_t kIpsoBitValues16 = 243;
 
 // 8N1 on a single open-drain wire shared between both directions — a hardware UART would
 // need external direction control that is not there, so the bit timing is done in software.
@@ -758,7 +839,15 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
         // frame gap. This is the second half of the latency fix — see provision_ready().
         const size_t n = receive(buf, cap, /*stop_on_provision=*/true);
         if (n > 0 && provision(buf, n)) {
-            m_pid = kProbeId;
+            // Two separate facts, recorded separately. `m_assigned_pid` is the id this
+            // master just handed the probe and is the only correct destination for a
+            // parameter write; `m_pid` is merely the address a SENDAT happens to be
+            // answered on, and the data path is allowed to fall back to 0xFF when the
+            // assigned id stays silent. Collapsing the two — which is what the previous
+            // revision did — meant that fallback re-latched m_pid to 0xFF and the enable
+            // pass then refused to run, on exactly the cycles it was needed.
+            m_assigned_pid = kProbeId;
+            m_pid          = kProbeId;
             delay(50); // the reference's tick interval — the only timing guidance available
             return true;
         }
@@ -783,12 +872,13 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
 //   snhub_paramget_rsp_program, which casts the response payload to SNHub_Api_Param_Snsr_t
 //   and reads paramset->sid, paramset->intv and paramset->rule, deriving
 //   `enable = (paramset->rule == RULE_PERIODIC)`.
-bool Battery::param_get(uint8_t sid, uint32_t &intv, uint16_t &rule, uint8_t *buf, size_t cap)
+bool Battery::param_get(uint8_t dest, uint8_t sid, uint32_t &intv, uint16_t &rule,
+                        uint8_t *buf, size_t cap)
 {
     const uint8_t payload[1] = {sid};
 
     bus(m_pin).flush();
-    send_frame(m_pid, kHubTypeParamGet, kPldParamSnsrUpdate, payload, sizeof(payload));
+    send_frame(dest, kHubTypeParamGet, kPldParamSnsrUpdate, payload, sizeof(payload));
     delay(2);
 
     const size_t n = receive(buf, cap);
@@ -847,8 +937,16 @@ bool Battery::param_get(uint8_t sid, uint32_t &intv, uint16_t &rule, uint8_t *bu
 //   api_set_snsr_param() maps enable != 0 to RULE_PERIODIC (0x08); protocol_list
 //   [SNHUB_TYPE_PARAMSET] has both .req and .rsp NULL, so the reference discards whatever
 //   comes back — which is why success here is judged by a subsequent read, not by the reply.
-bool Battery::param_set(uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap)
+bool Battery::param_set(uint8_t dest, uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap)
 {
+    // Clamp into the vendor's declared range rather than transmitting whatever arrived.
+    // The interval may come from the pack's own PARAMGET, and a pack that reports 0 (or
+    // something absurd) would otherwise have that value written straight back — a rule with
+    // a zero period never fires, which is indistinguishable from the bug being fixed here.
+    if (intv < kParamIntvSeconds || intv > kParamIntvMax) {
+        intv = kParamIntvSeconds;
+    }
+
     uint8_t payload[kParamBytes] = {0};
 
     payload[kParamSid]      = sid;
@@ -859,23 +957,37 @@ bool Battery::param_set(uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap)
     payload[kParamRule + 0] = (uint8_t)(kRulePeriodic & 0xFF);
     payload[kParamRule + 1] = (uint8_t)(kRulePeriodic >> 8);
 
-    LOGF("   battery : paramset sid 0x%02X rule 0x%04X intv %lu\n", sid,
-         (unsigned)kRulePeriodic, (unsigned long)intv);
+    // Repeat until acknowledged, on RAK's own budget. Retrying a parameter write is safe in
+    // a way that retrying most commands is not: the write is idempotent — the same sid, the
+    // same rule, the same interval — so a pack that silently accepted the first attempt is
+    // simply told the same thing again.
+    for (uint8_t attempt = 1; attempt <= kParamAttempts; attempt++) {
+        LOGF("   battery : paramset dest 0x%02X sid 0x%02X rule 0x%04X intv %lu s "
+             "(attempt %u/%u)\n",
+             dest, sid, (unsigned)kRulePeriodic, (unsigned long)intv, attempt,
+             (unsigned)kParamAttempts);
 
-    bus(m_pin).flush();
-    send_frame(m_pid, kHubTypeParamSet, kPldParamSnsrUpdate, payload, sizeof(payload));
-    delay(2);
+        bus(m_pin).flush();
+        send_frame(dest, kHubTypeParamSet, kPldParamSnsrUpdate, payload, sizeof(payload));
+        delay(2);
 
-    const size_t n = receive(buf, cap);
-    if (n == 0) {
-        // Not necessarily a failure. The reference does not process a PARAMSET response at
-        // all, so silence may be the protocol working as designed — which is precisely why
-        // this function's return value is never allowed to gate the read path.
-        LOGF("   battery : paramset sid 0x%02X — no reply (reference expects none)\n", sid);
-        return false;
+        const size_t n = receive(buf, cap, /*stop_on_provision=*/false, kParamAckTimeoutUs);
+        if (n > 0) {
+            // Dumped raw and unconditionally. Whatever comes back — a PARAMSET response, a
+            // bare announcement, or something this parser has no case for — is the first
+            // direct evidence of how the pack reacts to a configuration write, and a decoded
+            // verdict without the bytes behind it cannot be re-examined later.
+            dump("paramset ack", buf, n);
+            return true;
+        }
     }
-    dump("paramset ack", buf, n);
-    return true;
+
+    // Silence is not proof of failure — the reference master expects no response — but after
+    // three attempts across nine seconds it is worth stating plainly, because it is the
+    // difference between "the pack refused" and "the pack was never asked".
+    LOGF("   battery : paramset sid 0x%02X — silent after %u attempts\n", sid,
+         (unsigned)kParamAttempts);
+    return false;
 }
 
 // Try to get every sensor sampling. Best effort by construction.
@@ -893,13 +1005,28 @@ bool Battery::param_set(uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap)
 //   announcement was captured in the same cycle.
 bool Battery::enable_sampling(uint8_t *buf, size_t cap)
 {
-    // Addressing matters: the reference refuses to set parameters on PID_MASTER, and a probe
-    // that has not been assigned an id has no parameter record to write to. Enabling is only
-    // attempted once provisioning has actually completed.
+    // Addressed to the id this master *assigned*, not to whichever address last answered a
+    // SENDAT. That distinction is the bug this revision exists to fix.
+    //
+    // The data path deliberately falls back to the broadcast address when the assigned id
+    // stays silent, because a reading from 0xFF is still a reading. But the previous
+    // revision stored both facts in one variable, so that fallback re-latched `m_pid` to
+    // 0xFF — and this guard, which correctly refuses to write parameters to an
+    // unprovisioned address, then skipped the write on precisely the cycles that needed it.
+    // The log said "not provisioned — skipping sampling enable" on a cycle whose own
+    // preceding line said "provisioned probe 0xFF as pid 0x01". Both were true of different
+    // variables that had been made one.
+    //
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
-    //   api_set_snsr_param(): `if (pid == PID_MASTER) { return; }`.
-    if (m_pid == kBroadcastId || m_pid == kMasterId) {
-        LOGLN(F("   battery : not provisioned — skipping sampling enable"));
+    //   api_set_snsr_param(): `if (pid == PID_MASTER) { return; }` — the reference refuses
+    //   to set parameters on the master's own address, and a probe with no assigned id has
+    //   no parameter record to write into.
+    // CITE(bench): docs/EVIDENCE.md — stage3 on afefec3 logged `provisioned probe 0xFF as
+    //   pid 0x01` and, in the same cycle, `not provisioned — skipping sampling enable`. The
+    //   handshake completed and the write was skipped anyway.
+    const uint8_t dest = m_assigned_pid;
+    if (dest == kBroadcastId || dest == kMasterId) {
+        LOGLN(F("   battery : no assigned pid — skipping sampling enable"));
         return false;
     }
 
@@ -910,21 +1037,34 @@ bool Battery::enable_sampling(uint8_t *buf, size_t cap)
     const uint8_t *sids  = m_sid_count > 0 ? m_sids : kFallbackSids;
     const size_t   count = m_sid_count > 0 ? m_sid_count : sizeof(kFallbackSids);
 
-    bool any = false;
+    LOGF("   battery : enabling sampling on pid 0x%02X for %u sensor(s)\n", dest,
+         (unsigned)count);
+
+    const uint32_t started_ms = millis();
+    bool           any        = false;
+
     for (size_t i = 0; i < count; i++) {
-        uint32_t intv = kParamIntvFallback;
+        // Wall-clock ceiling on the whole pass — see kEnablePassBudgetMs. Checked between
+        // sensors rather than mid-write so a write is never truncated halfway.
+        if ((millis() - started_ms) > kEnablePassBudgetMs) {
+            LOGF("   battery : enable pass budget spent after %u of %u sensor(s)\n",
+                 (unsigned)i, (unsigned)count);
+            break;
+        }
+
+        uint32_t intv = kParamIntvSeconds;
         uint16_t rule = kRuleDisable;
 
-        if (param_get(sids[i], intv, rule, buf, cap) && rule == kRulePeriodic) {
+        if (param_get(dest, sids[i], intv, rule, buf, cap) && rule == kRulePeriodic) {
             // Already armed. Leave it alone — rewriting a working rule is a chance to break
             // one for no gain.
             any = true;
             continue;
         }
-        if (intv == 0) {
-            intv = kParamIntvFallback; // a zero interval would be a rule that never fires
-        }
-        if (param_set(sids[i], intv, buf, cap)) {
+        // Whatever PARAMGET reported is clamped into RAK's declared 60..86400 s range inside
+        // param_set(), so an absent or nonsensical interval becomes the vendor minimum
+        // rather than being written back unchanged.
+        if (param_set(dest, sids[i], intv, buf, cap)) {
             any = true;
         }
     }
@@ -1048,10 +1188,17 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     //   17 B8 00 | 18 67 00 00` then checksum 0x2F. Sensor ids 0x15-0x18 lead each record,
     //   the IPSO type follows, and the strides land on the checksum byte with nothing left
     //   over — the walker below is verified against real bytes, not inferred.
-    // Whether any record in this frame carried a non-zero value. This is the template
-    // detector, and it has to be accumulated during the walk rather than reconstructed from
-    // `out` afterwards, because `out` cannot distinguish "the pack reported 0" from "no
-    // record of that type was present".
+    // Whether any *physical* record in this frame carried a non-zero value. This is the
+    // template detector, and it has to be accumulated during the walk rather than
+    // reconstructed from `out` afterwards, because `out` cannot distinguish "the pack
+    // reported 0" from "no record of that type was present".
+    //
+    // "Physical" is load-bearing. Only voltage, current, capacity and temperature count
+    // toward it. The 16-bit status bitfields this pack also carries are excluded in both
+    // directions: a non-zero status word must not license an otherwise untouched record
+    // template to be reported as a live measurement, and a zero status word must not veto a
+    // frame whose voltage and current did report. A bitfield says nothing about whether the
+    // pack has sampled.
     bool any_nonzero = false;
 
     size_t i = records;
@@ -1077,6 +1224,15 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
             // against a non-zero reading.
             out.temperature.set((int16_t)val16(i + 2));
             any_nonzero |= (val16(i + 2) != 0);
+            i += 4;
+        } else if (type == kIpsoBitValues16 && (i + 3) < records_end) {
+            // Stepped over, not stored and not counted. Decoding its width is what keeps the
+            // walker aligned so any record behind it is still readable; everything else about
+            // it is deliberately ignored. Logged so the next capture shows what the pack puts
+            // in these two words, which is currently unknown — it is the only field on this
+            // pack whose meaning is still open. See kIpsoBitValues16.
+            LOGF("   battery : status word sid 0x%02X = 0x%04X (not a measurement)\n",
+                 buf[i], val16(i + 2));
             i += 4;
         } else {
             // Worth logging: it means the pack sends something this build does not know
@@ -1179,6 +1335,46 @@ BatteryReading Battery::read()
         LOGLN(F("   battery : no announcement — proceeding unprovisioned"));
     }
     link.flush(); // anything still queued from phase 1 is not part of the data reply
+
+    // Phase 1b: configure the pack to sample, immediately after provisioning succeeds.
+    //
+    // This used to run at the end of the cycle, after the data poll had already failed. That
+    // ordering could not work: the poll's address fallback ran first and reset the only
+    // variable the enable guard consulted, so the write was skipped every time. Separating
+    // the assigned id from the answering address (see enable_sampling) fixes the guard, and
+    // moving the write ahead of the poll fixes the ordering — configure, then read, which is
+    // also the order RAK's own tooling uses.
+    //
+    // Gated so a working pack never pays for it. It runs only while the pack has never been
+    // seen to report a real value, and only for a bounded number of wake cycles, so a pack
+    // that ignores the write cannot turn every future cycle into a futile nine-second
+    // exchange for the rest of the node's deployment.
+    //
+    // The write is a best-effort improvement and its result never gates the read: if the pack
+    // refuses, ignores, or simply does not answer, the poll below runs exactly as it would
+    // have and a pack that still will not sample still yields nulls. Nothing here can invent
+    // a value.
+    //
+    // CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 388175
+    //   — RAK's own probe-configuration write is
+    //   `"writeCommand":"ATC+SNSR_CONF={sensor_interval_probeID}:8:{sensor_interval_probe_io}:0"`,
+    //   i.e. rule 8 and the interval set together in one addressed operation. Our PARAMSET
+    //   carries the same two fields; this is the binary south-bound equivalent of that write.
+    // CITE(datasheet): [CIT-WISTOOLBOX-AT] same file @ byte 364506 — the rule bitmask enum
+    //   is `[{"Alert":"0"},{"Below":"2"},{"Above":"4"},{"Periodic":"8"},{"Between":"16"},
+    //   {"Trigger":"512"}]`, confirming the literal 8 in that command is RULE_PERIODIC and
+    //   matching the 0x0008 this pack already reports in its announcement descriptors.
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+    //   the reference reader never calls `set.param` at all. This is therefore something the
+    //   working prior art does not do, and it is justified from RAK's own command catalogue
+    //   rather than from prior art, which cannot establish that the write is unnecessary —
+    //   only that one particular consumer got away without it on a pack somebody else had
+    //   already configured.
+    if (provisioned && !m_ever_sampled && m_enable_attempts < kEnableAttempts) {
+        m_enable_attempts++;
+        enable_sampling(rx, sizeof(rx));
+        link.flush(); // the write's own traffic is not part of the data reply
+    }
 
     // Phase 2: request the latest sensor data from the address the pack answers on.
     //
@@ -1287,54 +1483,11 @@ BatteryReading Battery::read()
         }
     }
 
-    // Phase 3: a verified frame full of placeholders is the one failure this cycle can still
-    // act on. Ask the pack what rule each sensor is running, set the ones that are disabled
-    // to periodic, and read once more.
-    //
-    // Gated three ways on purpose. It runs only when the reply decoded cleanly and every
-    // value was zero, so a working pack is never touched. It runs only once per wake, so a
-    // pack that refuses cannot turn a cycle into an unbounded retry loop. And its outcome is
-    // discarded entirely if the re-read does not improve — `out` is rebuilt from scratch and
-    // re-tested, so a pack that still will not sample yields Unsampled and therefore nulls,
-    // exactly as before this phase existed.
-    //
-    // The honest caveat, recorded here because it changes how the next capture should be read:
-    // the working reference gets real values with no PARAMSET at all. Meshtastic never calls
-    // set.param — it provisions, requests once, and reads what arrives. So the first thing to
-    // check in the next capture is the `sid ... rule ...` lines from the announcement. If they
-    // already say `periodic`, the rule was never the problem and phase 1 (provisioning
-    // reliability) is the fix that mattered.
-    //
-    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-    //   handles SNHUBAPI_EVT_GET_INTV and SNHUBAPI_EVT_GET_ENABLE as empty cases and never
-    //   invokes RakSNHub_Protocl_API.set.param or .get.param. A working reader on this same
-    //   pack therefore does not need PARAMSET, which is why this is a fallback and not the
-    //   primary path.
-    // CITE(bench): docs/EVIDENCE.md — stage2 on 7f65384 decoded a checksum-valid SENDAT reply
-    //   to voltage 0, current 0, capacity 0, temperature 0 from a pack that was demonstrably
-    //   powered by the cell it was reporting on.
-    if (m_last == BatteryResult::Unsampled && m_enable_attempts < kEnableAttempts) {
-        m_enable_attempts++;
-        dump("unsampled raw", rx, n);
-
-        if (enable_sampling(rx, sizeof(rx))) {
-            link.flush();
-            const size_t n2 = query(m_pid, rx, sizeof(rx));
-            if (n2 >= 8) {
-                BatteryReading        retry;
-                const BatteryResult   r2 = parse(rx, n2, retry);
-                if (r2 == BatteryResult::Ok) {
-                    LOGLN(F("   battery : sampling enabled — pack now reporting"));
-                    out    = retry;
-                    m_last = r2;
-                    n      = n2;
-                } else {
-                    LOGF("   battery : still %s after enabling sampling\n",
-                         battery_result_name(r2));
-                    n = n2;
-                }
-            }
-        }
+    // A pack that has once produced a real measurement never needs configuring again, and
+    // saying so here is what stops the enable pass from running on every future wake.
+    if (m_last == BatteryResult::Ok && !m_ever_sampled) {
+        m_ever_sampled = true;
+        LOGLN(F("   battery : sampling confirmed — pack is reporting live values"));
     }
 
     // A frame that arrived but did not yield a reading is the case worth dumping in full. It
