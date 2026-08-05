@@ -339,123 +339,24 @@ SoftwareHalfSerial &bus(uint8_t pin)
     return instance;
 }
 
-#if FEATURE_ONEWIRE_SPLIT
-
-// The pin the pack's TXD (socket pin 3) lands on when the bridge is cut.
+// Where bytes are read from, and where they are written to.
 //
-// Chosen from what the RAK19007 actually breaks out, which is narrower than the variant
-// header suggests: WB_IO3..WB_IO6 exist on the nRF52840 and on the module slots, but they do
-// not appear on any solder pad, so they are unreachable on this hardware. The three 2.54 mm
-// headers carry only BOOT, VDD, GND, AIN0/AIN1, IO1, IO2, and the I2C and UART1 pairs.
+// One instance, one pin. An earlier revision could split the link across two pins
+// (FEATURE_ONEWIRE_SPLIT) on the theory that bridging the pack's TXD and RXD onto one wire
+// caused TX contention that corrupted the long provisioning frame. The bench settled it the
+// other way: the pack talks perfectly well on the bridged harness -- it answers SENDAT with
+// checksum-valid frames and identifies itself -- and what actually blocks provisioning is
+// that the pack will not accept an id assigned over this link at all, from any topology.
+// The split path was therefore removed rather than left switched off, because a second
+// wiring mode that no evidence supports is a thing every future reader has to rule out.
 //
-// Of those, AIN1 is the only free general-purpose pin left:
-//
-//   IO1        already the one-wire line, and becomes TX in this mode
-//   IO2        gates 3V3_S, and rk900.cpp owns it — see FEATURE_ONEWIRE_RAIL_CYCLE
-//   TX1/RX1    Serial1, which the RAK5802 RS-485 module uses for the RK900
-//   SDA/SCL    I2C1, shared with the sensor slot
-//   BOOT0      bootloader strap; driving it is how a board stops booting
-//   AIN0       kept free as the base board's one analog input
-//
-// AIN1 is P0.31 on the nRF52840, with no second function beyond the ADC, and this design
-// uses no ADC channel at all — the pack reports its own voltage over this very link, which is
-// the whole point of the RAK9154 path. It is also physically adjacent to IO1 on J11 (pin 1
-// next to pin 2), so the split harness is two neighbouring solder joints rather than a wire
-// across the board. GPIOTE, which the library's RX depends on, is available on every P0/P1
-// pin, so nothing about the edge-detect changes.
-//
-// CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet, "J11 Header Pinout" —
-//   https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/WisBlock/RAK19007/Datasheet/README.md
-//   `1 | AIN1 | ADC input signal`, `2 | IO1 | General purpose IO`, `3 | IO2 | General purpose
-//   IO`. The same document's WisBlock connector table gives pin 22 AIN1 "Analog input for
-//   ADC", pin 29 IO1 "General purpose IO", and pin 30 IO2 "Used for 3V3_S enable" — so AIN1
-//   carries no control function to collide with.
-// CITE(datasheet): [CIT-RAK19007] same document, revision history — "J11 header Analog input
-//   changed from AIN0 to AIN1". The pad is AIN1 on current boards; an older RAK19007 would
-//   expose AIN0 here instead, which is why this is a named constant rather than a literal.
-// CITE(datasheet): [CIT-RAK4631] rakwireless/variants/rak4630/variant.h @ this repo —
-//   `static const uint8_t WB_A1 = 31; // IO_SLOT`, i.e. Arduino pin 31 -> P0.31. Distinct
-//   from WB_IO1 (17 / P0.17) and WB_IO2 (34 / P1.02), and from every WB_SPI_* pin.
-constexpr uint8_t kSplitRxPin = WB_A1;
-
-// The second instance, bound to the RX pin. Two instances of a class whose receive buffer is
-// static is safe here for one specific reason: only ever one of them listens. `listen()` is
-// reached from `begin()` and from `beginRx()`, and `beginRx()` is only called off the read
-// path — so the TX instance, which is only ever written to, never becomes `active_object` and
-// never has a claim on the shared buffer.
-//
-// This is preferred over the alternatives after reading the installed library rather than
-// assuming:
-//
-//   - The two-pin constructor does not exist. `SoftwareHalfSerial(uint8_t receivePin,
-//     uint8_t transmitPin, bool inverse_logic)` is present in the header but commented out;
-//     the only live constructor is `SoftwareHalfSerial(uint8_t halfPin, bool inverse_logic)`,
-//     and `setTX()`/`setRX()` are both driven from the single `_halfPin` member. There is no
-//     supported way to give one instance two pins.
-//   - A hardware UART is not available. The nRF52840 has two UARTE peripherals; Serial1 is
-//     the RAK5802's RS-485 link, and a second one would still need its pins on the header,
-//     where the only free candidate is the pin used here anyway. Bit-banging a pin the
-//     library already knows how to bit-bang is the smaller change.
-//
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] beegee-tokyo/RAK-OneWireSerial
-//   src/SoftwareHalfSerial.h, read on the build host — the two-pin constructor is present
-//   only as a comment; `uint8_t _halfPin;` is the sole pin member and `_receive_buffer`,
-//   `_receive_buffer_head/_tail`, and `active_object` are all class statics.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] same library src/SoftwareHalfSerial.cpp —
-//   `listen()` is called from `begin()` and `beginRx()`; `beginTx()` calls `stopListening()`,
-//   which is guarded by `if (active_object == this)` and is therefore a no-op on an instance
-//   that has never listened. Writing to the TX instance cannot detach the RX instance's
-//   interrupt.
-SoftwareHalfSerial &split_rx_bus()
-{
-    static SoftwareHalfSerial instance(kSplitRxPin);
-    return instance;
-}
-
-#endif // FEATURE_ONEWIRE_SPLIT
-
-// Where bytes are read from, and where they are written to. In the default shared-pin build
-// both resolve to the same instance, so every call site below behaves exactly as it did
-// before this flag existed.
-SoftwareHalfSerial &rx_link(uint8_t pin)
-{
-#if FEATURE_ONEWIRE_SPLIT
-    (void)pin;
-    return split_rx_bus();
-#else
-    return bus(pin);
-#endif
-}
-
-SoftwareHalfSerial &tx_link(uint8_t pin) { return bus(pin); }
-
-// Raise the probe's 3V3 rail and wait for it to settle, or do nothing in the default build.
-//
-// Returns with the rail up. Deliberately does not claim to have powered anything: whether
-// WB_IO2 reaches the pack is a property of the harness, not of this code, and on the wiring
-// in docs/HARDWARE.md it does not — see FEATURE_ONEWIRE_RAIL_CYCLE in build_features.h.
-void probe_rail_up()
-{
-#if FEATURE_ONEWIRE_RAIL_CYCLE
-    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] examples/RAK4631-OneWireSerial/src/main.cpp
-    //   lines 89-90 — `digitalWrite(WB_IO2, HIGH); delay(1000);` per exchange. The one-second
-    //   settle is the reference's, not a guess; the pack's own boot is what it pays for.
-    pinMode(WB_IO2, OUTPUT);
-    digitalWrite(WB_IO2, HIGH);
-    LOGLN(F("   battery : probe rail up (WB_IO2 HIGH) — no-op unless pin 4 is on 3V3_S"));
-    delay(1000);
-#endif
-}
-
-void probe_rail_down()
-{
-#if FEATURE_ONEWIRE_RAIL_CYCLE
-    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] same file, line 125 — `digitalWrite(WB_IO2,
-    //   LOW)` closes each cycle. Dropping it also matches what rk900.cpp already leaves
-    //   behind, so the sleep state is unchanged either way.
-    digitalWrite(WB_IO2, LOW);
-#endif
-}
+// CITE(bench): docs/EVIDENCE.md 2026-08-04 -- on the bridged single-wire harness the pack
+//   returns a 28-byte checksum-valid SENDAT reply and a 92-byte announcement, so contention
+//   on the shared line is not preventing the pack from being heard.
+// CITE(datasheet): [CIT-RAK2560] RAK2560 Hub Datasheet, "Pin Definition" -- a genuine master
+//   drives pin 5 (one-wire UART) only and leaves pin 3 reserved, which is what a single
+//   shared line reproduces.
+SoftwareHalfSerial &link_for(uint8_t pin) { return bus(pin); }
 
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
@@ -546,28 +447,12 @@ constexpr size_t kRxCapacity = 0x100;
 //   handed. That is the observation this window exists to change or to rule out.
 // CITE(datasheet): [CIT-NRF-WDT] nRF52840 PS, WDT — the watchdog cannot be stopped once
 //   started, so this window is sized against the 120 s timeout src/main.cpp arms rather than
-//   against patience. Worst case for the whole of Battery::read() is now roughly 68 s: this
-//   45 s window, two ~0.5 s poll attempts, and the 20 s push listen, with the 30 s parameter
-//   pass switched off (FEATURE_BATTERY_PARAM_PASS) to pay for it. main.cpp feeds the watchdog
-//   on either side of the battery read and never inside it, so 68 s is the number that has to
-//   fit, and it fits with about 50 s to spare.
+//   against patience. Worst case for the whole of Battery::read() is roughly 66 s: a ~0.5 s
+//   direct probe, this 45 s window, two ~0.5 s poll attempts, and the 20 s push listen. That
+//   no longer has to fit between two feeds -- acquire_pid() and receive() now feed the
+//   watchdog themselves -- but it is still the awake time the power budget pays for, and it
+//   is why the direct probe runs first: a provisioned pack never enters this window at all.
 constexpr uint32_t kProvWindowMs = 45000;
-
-// Whether the parameter pass below runs at all, bridged from the build flag so the call site
-// reads as a condition rather than a preprocessor seam. Off by default — see
-// FEATURE_BATTERY_PARAM_PASS in src/build_features.h for why, and how to put it back.
-//
-// Deliberately a constant rather than an #if: the pass has to keep compiling either way, or
-// switching it back on for the next pack would be the first time anyone finds out it no longer
-// builds.
-constexpr bool kParamPassEnabled = (FEATURE_BATTERY_PARAM_PASS != 0);
-
-// How many wake cycles may spend time trying to enable sampling before the driver stops
-// asking. A pack that ignores two full enable passes is not going to answer the third, and a
-// node that runs for months cannot afford to pay for that discovery every cycle — the reads
-// still happen, they just stop being preceded by a futile parameter exchange. Two rather than
-// one so a single unlucky cycle does not permanently give up.
-constexpr uint8_t kEnableAttempts = 2;
 
 // SensorHub frame header (inside the RUI3 payload) before the first record: dest, source,
 // sequence, hub-type, payload-length, payload-type.
@@ -734,7 +619,7 @@ const char *battery_result_name(BatteryResult r)
 //   SNHUBAPI_EVT_QSEND takes when it hands a whole frame to mySerial.write(msg, len).
 void Battery::tx_byte(uint8_t b)
 {
-    tx_link(m_pin).write(b);
+    link_for(m_pin).write(b);
 }
 
 // Compose and transmit one request. `payload` is the SensorHub payload that follows the
@@ -823,7 +708,7 @@ void Battery::send_boot()
 //   snhub_snsrdat_command() with SNHUB_TYPE_SENDAT + PLD_SDATA_TPYE_SENDAT.
 size_t Battery::query(uint8_t dest, uint8_t *buf, size_t cap)
 {
-    rx_link(m_pin).flush(); // anything still queued predates this request
+    link_for(m_pin).flush(); // anything still queued predates this request
     send_frame(dest, kHubTypeSendData, kPayloadSendData);
     delay(2); // let the probe turn the line around
     return receive(buf, cap);
@@ -966,7 +851,6 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
         // is what tells the next capture whether the zeros were ever a sampling problem: rule
         // 0x00 (RULE_DISABLE) means provisioned-but-idle, rule 0x08 (RULE_PERIODIC) means the
         // sensors are armed and the zeros came from somewhere else.
-        m_sid_count = 0;
         if (prov + kProvSnsrNumOffset < f.cksum) {
             const uint8_t announced = buf[prov + kProvSnsrNumOffset];
             LOGF("   battery : probe 0x%02X announces %u sensor(s)\n", f.source, announced);
@@ -986,9 +870,6 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
                      rule == kRulePeriodic  ? "periodic"
                      : rule == kRuleDisable ? "DISABLED"
                                             : "?");
-                if (m_sid_count < kMaxSensors) {
-                    m_sids[m_sid_count++] = buf[at + 0];
-                }
             }
         }
         return true;
@@ -1058,7 +939,7 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 //   does not need prompting; it needs answering.
 bool Battery::acquire_pid(uint8_t *buf, size_t cap)
 {
-    rx_link(m_pin).flush(); // anything queued predates this window
+    link_for(m_pin).flush(); // anything queued predates this window
     send_boot();
     delay(2); // let the probe turn the line around
 
@@ -1104,13 +985,6 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
         // rather than a latch. The observed value is logged either way, so a latch onto some
         // third id shows up as itself instead of being flattened into "worked".
         //
-        // Two separate facts, still recorded separately. `m_assigned_pid` is the id the probe
-        // is believed to hold and is the only correct destination for a parameter write;
-        // `m_pid` is merely the address a SENDAT happens to be answered on, and the data path
-        // is allowed to fall back to 0xFF when the assigned id stays silent. Collapsing the
-        // two meant that fallback re-latched m_pid to 0xFF and the enable pass then refused to
-        // run on exactly the cycles it was needed.
-        //
         // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
         //   PID_UNKNOW = 0xFF is the id an unprovisioned probe carries and PID_MASTER = 0x00
         //   is the master's own address; onewire_master_protocol.c api_set_snsr_param()
@@ -1122,7 +996,6 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
         const bool latched = (announced != kBroadcastId && announced != kMasterId);
         if (latched) {
             m_pack_latched = true;
-            m_assigned_pid = announced;
             m_pid          = announced;
             // The line that settles the question. One grep for "pack latched" tells the next
             // bench run whether sustained answering is what the pack was waiting for.
@@ -1131,8 +1004,7 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
             break;
         }
 
-        m_assigned_pid = kProbeId;
-        m_pid          = kProbeId;
+        m_pid = kProbeId;
     }
 
     if (!answered) {
@@ -1153,217 +1025,6 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
     return true;
 }
 
-// Read one sensor's sampling parameters.
-//
-// Read-only, and therefore the safest possible way to test the hypothesis behind this whole
-// change: it reports the rule the pack is actually running without altering anything. It also
-// supplies the interval to echo back on the way in, so the enable never has to invent one.
-//
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
-//   snhub_paramget_command() with SNHUB_GS_GET sets hub_api->type = SNHUB_TYPE_PARAMGET,
-//   payload_length = 1 and payload[0] = sid; protocol_list[SNHUB_TYPE_PARAMGET].rsp =
-//   snhub_paramget_rsp_program, which casts the response payload to SNHub_Api_Param_Snsr_t
-//   and reads paramset->sid, paramset->intv and paramset->rule, deriving
-//   `enable = (paramset->rule == RULE_PERIODIC)`.
-bool Battery::param_get(uint8_t dest, uint8_t sid, uint32_t &intv, uint16_t &rule,
-                        uint8_t *buf, size_t cap)
-{
-    const uint8_t payload[1] = {sid};
-
-    rx_link(m_pin).flush();
-    send_frame(dest, kHubTypeParamGet, kPldParamSnsrUpdate, payload, sizeof(payload));
-    delay(2);
-
-    const size_t n = receive(buf, cap);
-    if (n == 0) {
-        LOGF("   battery : paramget sid 0x%02X — no reply\n", sid);
-        return false;
-    }
-
-    SnHubFrame f;
-    bool       bad_cksum = false;
-    size_t     from      = 0;
-    while (next_frame(buf, n, from, f, bad_cksum)) {
-        from = f.delim + 1;
-        if (f.hub_type != kHubTypeParamGet) {
-            continue;
-        }
-        const size_t p = f.payload + kHubHeaderBytes;
-        if (p + kParamRule + 2 > f.cksum) {
-            continue; // not a full parameter block
-        }
-        // Little-endian, matching the packed struct on the pack's own core. The raw bytes go
-        // out with it so the order is checkable from the capture rather than trusted.
-        intv = (uint32_t)buf[p + kParamIntv] | ((uint32_t)buf[p + kParamIntv + 1] << 8) |
-               ((uint32_t)buf[p + kParamIntv + 2] << 16) |
-               ((uint32_t)buf[p + kParamIntv + 3] << 24);
-        rule = (uint16_t)(buf[p + kParamRule] | ((uint16_t)buf[p + kParamRule + 1] << 8));
-
-        LOGF("   battery : paramget sid 0x%02X -> rule 0x%04X %s, intv %lu\n",
-             buf[p + kParamSid], rule,
-             rule == kRulePeriodic  ? "(periodic)"
-             : rule == kRuleDisable ? "(DISABLED)"
-                                    : "(?)",
-             (unsigned long)intv);
-        return true;
-    }
-
-    LOGF("   battery : paramget sid 0x%02X — no PARAMGET frame%s\n", sid,
-         bad_cksum ? " (bad checksum)" : "");
-    dump("paramget raw", buf, n);
-    return false;
-}
-
-// Switch one sensor to periodic sampling.
-//
-// Only the rule changes. The interval is whatever the pack just reported for that sensor, and
-// the thresholds and tag fields stay zero exactly as the reference leaves them — its command
-// memsets the whole packet and then writes nothing but sid, intv and rule, so a zeroed
-// threshold block is the documented shape of this request rather than an omission.
-//
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
-//   snhub_paramget_command(): f_memset(pktBuff, 0, BUFF_SIZE) precedes everything, then
-//   SNHUB_GS_SET sets hub_api->type = SNHUB_TYPE_PARAMSET with payload_length =
-//   sizeof(SNHub_Api_Param_Snsr_t), payload[0] = sid, paramset->intv = menu.intv and
-//   paramset->rule = menu.rule. thr_above, thr_below and tag are left at zero.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
-//   api_set_snsr_param() maps enable != 0 to RULE_PERIODIC (0x08); protocol_list
-//   [SNHUB_TYPE_PARAMSET] has both .req and .rsp NULL, so the reference discards whatever
-//   comes back — which is why success here is judged by a subsequent read, not by the reply.
-bool Battery::param_set(uint8_t dest, uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap)
-{
-    // Clamp into the vendor's declared range rather than transmitting whatever arrived.
-    // The interval may come from the pack's own PARAMGET, and a pack that reports 0 (or
-    // something absurd) would otherwise have that value written straight back — a rule with
-    // a zero period never fires, which is indistinguishable from the bug being fixed here.
-    if (intv < kParamIntvSeconds || intv > kParamIntvMax) {
-        intv = kParamIntvSeconds;
-    }
-
-    uint8_t payload[kParamBytes] = {0};
-
-    payload[kParamSid]      = sid;
-    payload[kParamIntv + 0] = (uint8_t)(intv & 0xFF);
-    payload[kParamIntv + 1] = (uint8_t)((intv >> 8) & 0xFF);
-    payload[kParamIntv + 2] = (uint8_t)((intv >> 16) & 0xFF);
-    payload[kParamIntv + 3] = (uint8_t)((intv >> 24) & 0xFF);
-    payload[kParamRule + 0] = (uint8_t)(kRulePeriodic & 0xFF);
-    payload[kParamRule + 1] = (uint8_t)(kRulePeriodic >> 8);
-
-    // Repeat until acknowledged, on RAK's own budget. Retrying a parameter write is safe in
-    // a way that retrying most commands is not: the write is idempotent — the same sid, the
-    // same rule, the same interval — so a pack that silently accepted the first attempt is
-    // simply told the same thing again.
-    for (uint8_t attempt = 1; attempt <= kParamAttempts; attempt++) {
-        LOGF("   battery : paramset dest 0x%02X sid 0x%02X rule 0x%04X intv %lu s "
-             "(attempt %u/%u)\n",
-             dest, sid, (unsigned)kRulePeriodic, (unsigned long)intv, attempt,
-             (unsigned)kParamAttempts);
-
-        rx_link(m_pin).flush();
-        send_frame(dest, kHubTypeParamSet, kPldParamSnsrUpdate, payload, sizeof(payload));
-        delay(2);
-
-        const size_t n = receive(buf, cap, /*stop_on_provision=*/false, kParamAckTimeoutUs);
-        if (n > 0) {
-            // Dumped raw and unconditionally. Whatever comes back — a PARAMSET response, a
-            // bare announcement, or something this parser has no case for — is the first
-            // direct evidence of how the pack reacts to a configuration write, and a decoded
-            // verdict without the bytes behind it cannot be re-examined later.
-            dump("paramset ack", buf, n);
-            return true;
-        }
-    }
-
-    // Silence is not proof of failure — the reference master expects no response — but after
-    // three attempts across nine seconds it is worth stating plainly, because it is the
-    // difference between "the pack refused" and "the pack was never asked".
-    LOGF("   battery : paramset sid 0x%02X — silent after %u attempts\n", sid,
-         (unsigned)kParamAttempts);
-    return false;
-}
-
-// Try to get every sensor sampling. Best effort by construction.
-//
-// Nothing here can make the reading worse: a refused or ignored PARAMSET leaves the pack
-// exactly as it was, and the caller re-reads afterwards and applies the same all-zero test it
-// always did. If the pack still will not sample, the result is still a null — never a
-// fabricated zero, which is the one outcome this repo does not permit.
-//
-// The sid list comes from the announcement when one was parsed, and falls back to the four
-// ids the pack's own SENDAT records carry when it was not. That fallback is bench-observed,
-// not assumed.
-// CITE(bench): docs/EVIDENCE.md — SENDAT reply on 3d3425d/7f65384 leads its four records with
-//   sensor ids 0x15, 0x16, 0x17 and 0x18, so those ids exist on this pack whether or not an
-//   announcement was captured in the same cycle.
-bool Battery::enable_sampling(uint8_t *buf, size_t cap)
-{
-    // Addressed to the id this master *assigned*, not to whichever address last answered a
-    // SENDAT. That distinction is the bug this revision exists to fix.
-    //
-    // The data path deliberately falls back to the broadcast address when the assigned id
-    // stays silent, because a reading from 0xFF is still a reading. But the previous
-    // revision stored both facts in one variable, so that fallback re-latched `m_pid` to
-    // 0xFF — and this guard, which correctly refuses to write parameters to an
-    // unprovisioned address, then skipped the write on precisely the cycles that needed it.
-    // The log said "not provisioned — skipping sampling enable" on a cycle whose own
-    // preceding line said "provisioned probe 0xFF as pid 0x01". Both were true of different
-    // variables that had been made one.
-    //
-    // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
-    //   api_set_snsr_param(): `if (pid == PID_MASTER) { return; }` — the reference refuses
-    //   to set parameters on the master's own address, and a probe with no assigned id has
-    //   no parameter record to write into.
-    // CITE(bench): docs/EVIDENCE.md — stage3 on afefec3 logged `provisioned probe 0xFF as
-    //   pid 0x01` and, in the same cycle, `not provisioned — skipping sampling enable`. The
-    //   handshake completed and the write was skipped anyway.
-    const uint8_t dest = m_assigned_pid;
-    if (dest == kBroadcastId || dest == kMasterId) {
-        LOGLN(F("   battery : no assigned pid — skipping sampling enable"));
-        return false;
-    }
-
-    static_assert(kMaxSensors <= sizeof(m_sids), "sid work list must fit the member array");
-
-    static constexpr uint8_t kFallbackSids[] = {0x15, 0x16, 0x17, 0x18};
-
-    const uint8_t *sids  = m_sid_count > 0 ? m_sids : kFallbackSids;
-    const size_t   count = m_sid_count > 0 ? m_sid_count : sizeof(kFallbackSids);
-
-    LOGF("   battery : enabling sampling on pid 0x%02X for %u sensor(s)\n", dest,
-         (unsigned)count);
-
-    const uint32_t started_ms = millis();
-    bool           any        = false;
-
-    for (size_t i = 0; i < count; i++) {
-        // Wall-clock ceiling on the whole pass — see kEnablePassBudgetMs. Checked between
-        // sensors rather than mid-write so a write is never truncated halfway.
-        if ((millis() - started_ms) > kEnablePassBudgetMs) {
-            LOGF("   battery : enable pass budget spent after %u of %u sensor(s)\n",
-                 (unsigned)i, (unsigned)count);
-            break;
-        }
-
-        uint32_t intv = kParamIntvSeconds;
-        uint16_t rule = kRuleDisable;
-
-        if (param_get(dest, sids[i], intv, rule, buf, cap) && rule == kRulePeriodic) {
-            // Already armed. Leave it alone — rewriting a working rule is a chance to break
-            // one for no gain.
-            any = true;
-            continue;
-        }
-        // Whatever PARAMGET reported is clamped into RAK's declared 60..86400 s range inside
-        // param_set(), so an absent or nonsensical interval becomes the vendor minimum
-        // rather than being written back unchanged.
-        if (param_set(dest, sids[i], intv, buf, cap)) {
-            any = true;
-        }
-    }
-    return any;
-}
-
 // Drain whatever the GPIOTE receiver has buffered. Bytes are assembled in the interrupt
 // handler and queued, so this no longer has to be sitting on the pin when the start bit
 // arrives — the previous polling loop could miss a reply simply by being one bit late.
@@ -1375,7 +1036,7 @@ bool Battery::enable_sampling(uint8_t *buf, size_t cap)
 size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision,
                         uint32_t first_byte_timeout_us)
 {
-    SoftwareHalfSerial &link = rx_link(m_pin);
+    SoftwareHalfSerial &link = link_for(m_pin);
 
     // The first byte gets the long window: the probe may still be waking. Callers waiting on
     // an unsolicited push override it, because that wait is bounded by the pack's sampling
@@ -1613,28 +1274,22 @@ BatteryReading Battery::read()
 {
     BatteryReading out;
 
-    // Raise the probe rail first, if this build cycles it: the library's begin() is what arms
-    // the edge interrupt, and arming it while the rail is still rising just buffers the
-    // pack's power-on garbage.
-    probe_rail_up();
+    // The pack's 3V3 reference is wired to the always-on VDD pad, not to the switched 3V3_S
+    // rail WB_IO2 gates, so there is deliberately no rail to raise here. That is a wiring
+    // decision: rk900.cpp drops WB_IO2 after the weather read, and routing the pack through
+    // the same rail would kill its reference mid-cycle.
+    // CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet — "IO2 controls the power switch of
+    //   3V3_S", which is a different net from the VDD pad the pack's pin 4 sits on.
 
     // begin() caches the port registers, arms the GPIOTE falling-edge interrupt, and leaves
     // the pin as input-with-pull-up so the idle line reads high. Everything after this point
     // is timing-critical only inside the library.
     //
-    // In split mode the TX instance is begun first and the RX instance second, and the order
-    // is load-bearing. begin() ends in listen(), which makes the caller `active_object` and
-    // detaches whoever held it — so beginning TX last would leave the edge interrupt sitting
-    // on the pin we transmit from, and the pack's reply would arrive at a pin nothing is
-    // watching. Beginning RX last leaves the interrupt where the pack actually talks.
-    //
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 src/SoftwareHalfSerial.cpp — begin()
     //   ends with `listen()`, and listen() starts `if (active_object) active_object->
-    //   stopListening();`. Only the most recent begin() keeps the interrupt.
-    SoftwareHalfSerial &link = rx_link(m_pin);
-#if FEATURE_ONEWIRE_SPLIT
-    tx_link(m_pin).begin(kBaud);
-#endif
+    //   stopListening();`. Only the most recent begin() keeps the interrupt, which is why
+    //   one instance on one pin is the whole story here.
+    SoftwareHalfSerial &link = link_for(m_pin);
     link.begin(kBaud);
     link.flush();
 
@@ -1731,64 +1386,27 @@ BatteryReading Battery::read()
         link.flush(); // anything still queued from phase 1 is not part of the data reply
     }
 
-    // Phase 1b: configure the pack to sample, immediately after provisioning succeeds.
+    // There is deliberately no parameter-write phase here.
     //
-    // This used to run at the end of the cycle, after the data poll had already failed. That
-    // ordering could not work: the poll's address fallback ran first and reset the only
-    // variable the enable guard consulted, so the write was skipped every time. Separating
-    // the assigned id from the answering address (see enable_sampling) fixes the guard, and
-    // moving the write ahead of the poll fixes the ordering — configure, then read, which is
-    // also the order RAK's own tooling uses.
+    // A PARAMGET/PARAMSET pass used to sit at this point, on the hypothesis that the pack's
+    // sensors sat at RULE_DISABLE and had to be armed before they would sample. That was
+    // falsified from three directions: the pack's own announcement descriptors already report
+    // rule 0x0008 (RULE_PERIODIC), the working reference reader never sends a parameter write
+    // at all, and on this pack PARAMGET drew no reply while the "PARAMSET ack" turned out to
+    // be an announcement arriving on its own schedule rather than a response to anything.
     //
-    // Gated so a working pack never pays for it. It runs only while the pack has never been
-    // seen to report a real value, and only for a bounded number of wake cycles, so a pack
-    // that ignores the write cannot turn every future cycle into a futile nine-second
-    // exchange for the rest of the node's deployment.
+    // It was left compiled-in behind FEATURE_BATTERY_PARAM_PASS for a while on the argument
+    // that "the pack ignores this" is a claim about one pack. It has now been deleted, because
+    // the real blocker turned out to be elsewhere entirely -- the pack will not accept an id
+    // assigned over this link at all, and is provisioned out-of-band through WisToolBox
+    // (docs/DEPLOY.md). A switched-off pass aimed at a falsified hypothesis is not a spare
+    // tool; it is 210 lines every future reader has to understand before ruling out.
     //
-    // The write is a best-effort improvement and its result never gates the read: if the pack
-    // refuses, ignores, or simply does not answer, the poll below runs exactly as it would
-    // have and a pack that still will not sample still yields nulls. Nothing here can invent
-    // a value.
-    //
-    // CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 388175
-    //   — RAK's own probe-configuration write is
-    //   `"writeCommand":"ATC+SNSR_CONF={sensor_interval_probeID}:8:{sensor_interval_probe_io}:0"`,
-    //   i.e. rule 8 and the interval set together in one addressed operation. Our PARAMSET
-    //   carries the same two fields; this is the binary south-bound equivalent of that write.
-    // CITE(datasheet): [CIT-WISTOOLBOX-AT] same file @ byte 364506 — the rule bitmask enum
-    //   is `[{"Alert":"0"},{"Below":"2"},{"Above":"4"},{"Periodic":"8"},{"Between":"16"},
-    //   {"Trigger":"512"}]`, confirming the literal 8 in that command is RULE_PERIODIC and
-    //   matching the 0x0008 this pack already reports in its announcement descriptors.
-    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-    //   the reference reader never calls `set.param` at all. This is therefore something the
-    //   working prior art does not do, and it is justified from RAK's own command catalogue
-    //   rather than from prior art, which cannot establish that the write is unnecessary —
-    //   only that one particular consumer got away without it on a pack somebody else had
-    //   already configured.
-    //
-    // AND IT IS NOW OFF BY DEFAULT. The hypothesis it was built on — that the pack's sensors
-    // sit at RULE_DISABLE until armed — has been falsified from three directions: the pack's
-    // own announcement descriptors already report rule 0x0008 (periodic), the reference reader
-    // never sends a parameter write at all, and on this pack PARAMGET draws no reply while the
-    // "ack" we captured for PARAMSET turned out to be an announcement arriving on its own
-    // schedule. So the pass changes nothing and costs up to 30 s of awake time per cycle, which
-    // is precisely the budget the provisioning window above now needs. Switched off rather than
-    // deleted, because that conclusion is about one pack — see FEATURE_BATTERY_PARAM_PASS in
-    // src/build_features.h for how to put it back.
-    //
-    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-    //   the working reference never calls `set.param` or `get.param`. After ADD_PID it does
-    //   nothing but poll SENDAT, so a parameter write cannot be a precondition for sampling on
-    //   a pack this consumer reads successfully.
-    // CITE(bench): docs/EVIDENCE.md — the pack's announcement descriptor tail reads rule
-    //   0x0008 on every sensor, i.e. the sensors report themselves as already periodic, and the
-    //   PARAMGET sent to arm them drew no reply at all.
-    if (kParamPassEnabled && provisioned && !m_ever_sampled &&
-        m_enable_attempts < kEnableAttempts) {
-        m_enable_attempts++;
-        enable_sampling(rx, sizeof(rx));
-        link.flush(); // the write's own traffic is not part of the data reply
-    }
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp --
+    //   the working reference never calls set.param or get.param. After ADD_PID it does
+    //   nothing but poll SENDAT, so a parameter write is not a precondition for sampling.
+    // CITE(bench): docs/EVIDENCE.md -- the announcement descriptor tail reads rule 0x0008 on
+    //   every sensor, and the PARAMGET sent to arm them drew no reply at all.
 
     // Phase 2: request the latest sensor data from the address the pack answers on.
     //
@@ -1928,14 +1546,6 @@ BatteryReading Battery::read()
     //   actually removes it.
     link.end();
     pinMode(m_pin, INPUT);
-#if FEATURE_ONEWIRE_SPLIT
-    // `link` is the RX instance here, so the pinMode above released the TX pin — which the
-    // library leaves driven high, a path into the pack's receiver for the whole sleep
-    // interval. The RX pin still idles with the library's pull-up on and needs the same
-    // treatment for the same reason.
-    pinMode(kSplitRxPin, INPUT);
-#endif
-    probe_rail_down();
 
     if (m_last != BatteryResult::Ok) {
         LOGF("   battery : no data (%s, %u bytes)\n", battery_result_name(m_last),
