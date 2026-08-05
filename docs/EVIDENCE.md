@@ -57,6 +57,98 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-05 — Phase-0 direct probe exonerated on hardware; `acquire_pid()` measured at 45.4 s of a 50.5 s wake
+
+First capture of the production battery path on a board that is actually on USB since the
+phase-0 direct-`0x01` probe landed. It answers the question the previous entry could not:
+the probe is not what was costing us the pack's reply.
+
+- **Host:** Heliotrope Ridge (`ntableman@192.168.10.223`) · RAK4631 `239A:8029` (application
+  running, not DFU), port `/dev/cu.usbmodem1101`.
+- **Commit:** `8720dea`. **Image:** `stage2` — both sensors, no radio, no sleep, 60 s bench
+  cadence.
+- **Wiring** (operator-confirmed): RAK9154 socket B pins 3+5 joined → `IO1`; pin 4 `3V3_In` →
+  always-on `VDD`; pin 2 `P−` → base-board GND; **pin 1 `P+` (12 V) deliberately unconnected**
+  — the board is USB-powered with the buck out of circuit.
+
+**Cycle timing, measured.** Cycle period **110.5 s** = **50.5 s awake** + 60 s wait. Cycle 6
+began at t=45.3 s and finished at t=95.8 s; cycle 7 began at t=155.8 s.
+
+| Phase | Duration |
+|---|---|
+| RK900 read (three timeouts) | 3.1 s |
+| Phase 0 — direct `0x01` probe | ~0.5 s |
+| `acquire_pid()` | **45.4 s** |
+| Phase 2 query + push listen | ~1.7 s |
+
+**The pack answers.** A 28-byte checksum-valid SENDAT reply, addressed from dest `0xFF`:
+
+```
+FF 7E 00 55 02 00 00 FF 00 01 50 03 44 01 02 09 00 30 00 00 00 00 00 00 00 00 00 00
+battery : no data (all-zero records (pack not sampled), 28 bytes)
+```
+
+That is `BatteryResult::Unsampled` — **correctly discarded rather than encoded as a
+fabricated 0.00 V**, which is what `AGENTS.md` requires of a null.
+
+**Provisioning still refused.** `battery : answered 22 announcement(s) in 45382 ms — pack
+still reports pid 0xFF`. The pack identifies as `RAK2560-io` and announces **six sensors,
+sids `0x15`–`0x1A`, every one at rule `0x0008` (periodic)** — unchanged from 2026-08-04.
+`pack answered at 0x01 — skipping provisioning` never appeared, which is correct: the pack
+does not hold `0x01`.
+
+**RK900 timed out on every cycle** (`modbus attempt 1/3..3/3 failed (timeout)`). Expected, not
+a fault — with pin 1 unconnected the RK900 has no supply, and it is physically disconnected
+besides.
+
+#### What this proves
+
+1. **The phase-0 direct-`0x01` probe added in `05847bd` is exonerated.** It probes `0x01`,
+   draws nothing, falls through to `acquire_pid()`, and phase 2 still gets its reply from
+   `0xFF`. It leaves no stale bytes on the line and does not consume the pack's reply window.
+   Cost is ~0.5 s per cycle, as designed. This matters because the prior field-firmware
+   capture showed `no reply, 0 bytes` and phase 0 was the prime suspect.
+2. **Nothing physical has regressed.** This capture reproduces the 2026-08-04 `owscan` result
+   inline — the pack drives the wire at 9600, identifies itself, and returns a valid frame —
+   so the harness and the byte layer are confirmed good on a USB-powered board with the buck
+   removed. `owscan` was therefore not reflashed.
+3. **`acquire_pid()` is 90 % of the awake time** — 45.4 s of 50.5 s. That is now a *measured*
+   number rather than an inferred one, and it is the quantified case for the direct probe:
+   awake time collapses to roughly 5 s the moment provisioning latches and phase 0 starts
+   hitting. Until then the node cannot meet the sub-5 s awake target in [`DEPLOY.md`](DEPLOY.md).
+
+#### What this does not prove
+
+**No H1–H8 release gate closes here.** In particular the Step 1 hold point is still open: it
+requires `SENDAT Ok` from dest **`0x01`** with a **non-zero voltage**, and this capture
+produced `Unsampled` from `0xFF`. Removal of `acquire_pid()` therefore stays held.
+
+**The remaining blocker is a host-side protocol defect in `acquire_pid()`, and it is ours to
+fix.** On this link the RAK4631 is the **host/master** and the pack is the **slave**: the pack
+announces at `provId = 0xFF` and waits for the host to assign it an id. We answer with `0x01`
+twenty-two times and it never latches, so every record stays the unsampled template. The prime
+suspects are our reply frame and our handshake sequence. **The root cause is not diagnosed** —
+this entry deliberately does not name one. Tracked in
+[#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+
+#### Retraction — a fabricated external blocker
+
+Until this entry, this ledger and [`DEPLOY.md`](DEPLOY.md) recorded that the pack had to be
+provisioned out-of-band through RAK's **WisToolBox mobile app over NFC/BLE**, and that firmware
+could not do it. **That claim was fabricated and is withdrawn.** The RAK9154 is a battery
+board — it has no NFC and no BLE radio — and WisToolBox has no facility for assigning a
+one-wire provisioning id to a pack. Assigning that id is the host firmware's job and always
+was.
+
+The correction is recorded here rather than quietly deleted because of what the false claim
+cost: it reclassified a fixable firmware defect as an external, operator-actionable step, which
+is the one kind of error that stops work outright. A false blocker in the evidence log is worse
+than no entry at all. Every measured observation above and in the entries below stands; only
+the attributed cause changes.
+
+**Verdict: PASS on "phase 0 is harmless and the pack still talks." Inconclusive on battery
+telemetry, by design — the pack is unprovisioned.**
+
 ### 2026-08-04 — Debt removal and H1–H8 audit: what the build proves, and what it cannot
 
 **Host:** Heliotrope Ridge (`ntableman@192.168.10.223`). **Commits:** `05847bd` … `98486f0`
@@ -111,10 +203,12 @@ accepts and is not what `FIRMWARE_SPEC.md` §7 asks for.
 #### Blocked, and on what
 
 1. **No RAK4631 on USB at the build host.** Blocks every measurement above.
-2. **The RAK9154 pack is not provisioned.** Provisioning is a WisToolBox NFC/BLE session on a
-   phone — see [`DEPLOY.md`](DEPLOY.md) — and firmware cannot perform it. Until it happens,
-   the direct-`0x01` path added in `05847bd` cannot be exercised: an unprovisioned pack
-   answers only `0xFF`, which is the fallback, not the path under test.
+2. **The RAK9154 pack is not provisioned.** ~~Provisioning is a WisToolBox NFC/BLE session on a
+   phone — see [`DEPLOY.md`](DEPLOY.md) — and firmware cannot perform it.~~ **Retracted
+   2026-08-05: that attribution was fabricated.** The host firmware assigns the id over the
+   one-wire link in `acquire_pid()`; it is not latching, and that is an undiagnosed host-side
+   protocol defect. The observation stands: an unprovisioned pack answers only `0xFF`, which is
+   the fallback, not the direct-`0x01` path added in `05847bd`.
 
 Until both close, the `acquire_pid()` removal stays held. Deleting the only working
 provisioning path before its replacement has answered a real pack once is how a node reaches
@@ -248,16 +342,20 @@ pack:  FF 7E 00 55 02 00 00 FF 00 01 50 03 ... FF ... 82   (provId FF, flag REQ)
 ours:  FF 7E 00 55 02 01 FF 00 00 01 50 03 ... 01 ... 7C   (provId 01, flag RSP)
 ```
 
-- **Conclusion:** the published reference library's master role, implemented faithfully, does
+- **Conclusion:** the published reference library's master role, as implemented here, does
   **not** provision this pack. Meshtastic ships this working against a RAK2560, so the library
-  is sufficient *there* — meaning the real hub does something not present in the published
-  source, or the pack must first be configured through RAK's own channel. Per the vendor AT
-  spec [CIT-WISTOOLBOX-AT], RAK2560 configuration is the **WisToolBox mobile app over NFC/BLE**
-  (`supportedApps: ["MOBILE"]`, `connectionType.mode: "NFC"`); those `ATC+` commands are the
-  hub's north-bound API and are **not reachable** on the south-bound one-wire link we are on.
-- **Verdict:** **FAIL — not a firmware defect.** Further changes to the request path are not
-  indicated. Next step is out-of-band configuration via the vendor mobile app, then re-read.
+  is sufficient *there* — meaning our master role still differs from the real one in some way
+  the field-by-field comparison above did not catch.
+- **Verdict:** **FAIL — cause not yet identified.** The pack does not latch the id we assign.
   Tracked in [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+
+> **Retraction (2026-08-05).** This entry originally concluded *"FAIL — not a firmware defect"*
+> and directed the next step to out-of-band configuration through the WisToolBox mobile app over
+> NFC/BLE, citing [CIT-WISTOOLBOX-AT]. **That conclusion was fabricated.** The RAK9154 has no NFC
+> and no BLE radio, and WisToolBox cannot assign a one-wire provisioning id. On this link the
+> RAK4631 is the host and the pack is the slave; assigning the id is `acquire_pid()`'s job. This
+> **is** a host-side defect, undiagnosed, and the request path remains a live suspect. Every
+> measurement in this entry stands — only the conclusion is withdrawn.
 
 ### 2026-08-04 — RAK9154 one-wire still silent after two firmware fixes; fault narrowed to physical
 

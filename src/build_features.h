@@ -99,6 +99,24 @@
 #define FEATURE_ONEWIRE_SCAN 0
 #endif
 
+// Try a plain Modbus-RTU register read on the pack's one-wire line before spending anything
+// on the Sensor Hub announce/assign handshake. ON by default because it is cheap — one 8-byte
+// request and a bounded wait — and because a register read has no provisioning step to get
+// stuck in. The handshake path is left intact behind it and still runs when this draws
+// nothing.
+#ifndef FEATURE_BATTERY_MODBUS
+#define FEATURE_BATTERY_MODBUS 1
+#endif
+
+// Diagnostic cadence for the battery link, OFF everywhere except its own environment.
+// Collapses the provisioning window and the unsolicited-report listen from 45 s + 20 s to a
+// couple of seconds each, so one experiment costs seconds instead of two minutes. Never in a
+// field image: a short provisioning window is exactly the thing the long one exists to rule
+// out.
+#ifndef FEATURE_BATTERY_FAST
+#define FEATURE_BATTERY_FAST 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)

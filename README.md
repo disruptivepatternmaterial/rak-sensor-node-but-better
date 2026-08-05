@@ -4,7 +4,7 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 ## Status
 
-🚧 **Not deployed.** Stages 0–2 have run on hardware: the board boots and prints, the RK900 answers a full five-register read, and an OTAA join plus a real-sensor uplink have reached TTN. Stage 3 (battery telemetry) is blocked on a one-time WisToolBox provisioning of the RAK9154 pack — see [`docs/DEPLOY.md`](docs/DEPLOY.md). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records the H1–H8 gates and the soak.
+🚧 **Not deployed.** Stages 0–2 have run on hardware: the board boots and prints, the RK900 answers a full five-register read, and an OTAA join plus a real-sensor uplink have reached TTN. Stage 3 (battery telemetry) is blocked on a host-side one-wire defect: the RAK9154 pack never latches the probe id our firmware assigns it, so every record comes back unsampled — see [`docs/DEPLOY.md`](docs/DEPLOY.md). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records the H1–H8 gates and the soak.
 
 Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
@@ -64,7 +64,7 @@ Rules live in [`.cursor/rules/`](.cursor/rules/) and are indexed in [`AGENTS.md`
 
 ## Known blockers
 
-- **RAK9154 provisioning** — the pack must be provisioned once through RAK's WisToolBox mobile app over NFC/BLE. Firmware cannot do it: the `ATC+` configuration commands live on the north-bound channel, not the south-bound one-wire link this node speaks. Procedure in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+- **RAK9154 provisioning** — the pack announces itself as unprovisioned (`provId = 0xFF`) and waits for the host to assign it an id. That is our firmware's job, over the one-wire link, in `acquire_pid()` — and it is not latching: 22 correct-looking answers, still `0xFF` ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-05). An undiagnosed host-side protocol defect, not an operator step. Earlier revisions of this file claimed a WisToolBox NFC/BLE provisioning step was required; that claim was fabricated and is withdrawn.
 - [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — the battery current sign convention contradicts between our spec and the live decoder. Blocks the payload freeze.
 - **Buck converter** not yet selected, and it must be chosen on no-load quiescent current — a part drawing milliamps at idle exceeds the node's entire average draw.
 - Open decisions for the first firmware PR: [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).

@@ -27,8 +27,8 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
 
 - **A provisioned pack no longer spends 45 s per wake listening for an announcement that
   will never come.** `Battery::read()` called `acquire_pid()` unconditionally. That phase
-  exists to hear an *unprovisioned* pack announce itself, so on a pack WisToolBox has already
-  provisioned it hears nothing and burns the entire window doing it — and with the 20 s
+  exists to hear an *unprovisioned* pack announce itself, so on a pack that has already latched
+  an id it hears nothing and burns the entire window doing it — and with the 20 s
   push-listen behind it, a wake that should take under a second took over a minute, every
   hour, forever.
 
@@ -37,6 +37,11 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
   flag has to be invalidated by hand the first time the hardware changes, and a stale one
   fails as silence that reads exactly like a dead sensor. Asking is self-healing — a
   replacement pack that was never provisioned still falls through to the old path.
+
+  Bench-confirmed on hardware at `8720dea`: the probe costs ~0.5 s, draws nothing on an
+  unprovisioned pack, and leaves phase 2's `0xFF` reply intact — against the `acquire_pid()`
+  window it exists to skip, now measured at **45.4 s of a 50.5 s wake**
+  ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-05).
 
 - **A truncated record no longer reports as an unknown one.** A recognized IPSO type whose
   payload ran past the end of the frame logged as `unknown record type 185`, which would send
