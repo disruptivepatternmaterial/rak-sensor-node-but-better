@@ -434,6 +434,15 @@ constexpr size_t kRxCapacity = 0x100;
 //   fit, and it fits with about 50 s to spare.
 constexpr uint32_t kProvWindowMs = 45000;
 
+// Whether the parameter pass below runs at all, bridged from the build flag so the call site
+// reads as a condition rather than a preprocessor seam. Off by default — see
+// FEATURE_BATTERY_PARAM_PASS in src/build_features.h for why, and how to put it back.
+//
+// Deliberately a constant rather than an #if: the pass has to keep compiling either way, or
+// switching it back on for the next pack would be the first time anyone finds out it no longer
+// builds.
+constexpr bool kParamPassEnabled = (FEATURE_BATTERY_PARAM_PASS != 0);
+
 // How many wake cycles may spend time trying to enable sampling before the driver stops
 // asking. A pack that ignores two full enable passes is not going to answer the third, and a
 // node that runs for months cannot afford to pay for that discovery every cycle — the reads
