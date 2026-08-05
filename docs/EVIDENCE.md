@@ -57,6 +57,53 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-05 — USB CDC death root-caused in source; verification blocked, board off the bus
+
+**Host:** Heliotrope Ridge. **Commit built:** `7dfc26f`. **Commit previously on the board:** `406df01`.
+
+Not a measurement entry — a state entry, so the next session does not misread the board.
+
+**What was established, and how.** The dead-console fault behind [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
+was root-caused by reading the core source rather than by instrumenting hardware, and it turned
+out to be **two independent defects** in the pre-sleep path, either sufficient alone:
+
+1. `NRF_USBD->ENABLE = 0` with nothing to restore it. In
+   `Adafruit_TinyUSB_Arduino/src/portable/nordic/nrf5x/dcd_nrf5x.c`, `tusb_hal_nrf_power_event()`
+   is the only writer of `ENABLE = 1`, and only on `USB_EVT_DETECTED` — a VBUS transition. It
+   also runs the errata 171/187/166 workarounds, waits on `EVENTCAUSE.READY`, and starts HFCLK.
+   `Serial.begin()` reaches none of that.
+2. `Serial.end()` → `Adafruit_USBD_CDC::end()` → `TinyUSBDevice.clearConfiguration()`, which
+   discards the configuration descriptor. `Serial.begin()` rebuilds it, but with no detach in
+   between the host never re-enumerates and keeps addressing endpoints from a descriptor the
+   device threw away.
+
+Both guarded on `(bool)Serial`, which reports whether the host has the port *open* — so the
+destructive path ran only when no monitor was attached. That is the intermittency, and it fits
+the primary observation exactly: the application ran (TTN `f_cnt` 898 → 960) while serial
+delivered zero bytes across repeated 60 s reads. Nothing was hung; the console had been
+dismantled during the first sleep.
+
+Fixed in `7dfc26f` with `TinyUSBDevice.detach()` / `attach()`.
+
+**This is source-reading, not bench evidence.** Under the rules at the top of this file it does
+not close anything. #40 stays open.
+
+**Board state — read this before capturing anything.** `scripts/flash.sh --yes -e rak4631`
+compiled `7dfc26f` cleanly in 24 s, then the DFU upload failed with *"No data received on serial
+port. Not able to proceed."* The board is now absent from the build host's USB bus in **every**
+mode: no `239A:*` device in `system_profiler SPUSBDataType`, and `/dev/cu.usbmodem*` does not
+match. It has no valid application and is not in DFU either.
+
+Recovery needs physical access: **double-tap RESET on the RAK19007**, then re-run
+`scripts/flash.sh`. See [`docs/FIRST_FLASH.md`](FIRST_FLASH.md).
+
+Nothing is running on it, so there is no Fair Use exposure while it sits, and no
+sleep-disabled radio-on build was left on it.
+
+**Still unproven, all three blocked on the same hardware step:** two sleep cycles with the
+console still alive afterwards; the 900 s interval floor accepting `01 00 00 03 84` on port 10;
+and interval persistence across a reset. No `v0.4.0` tag — the release is not evidenced.
+
 ### 2026-08-05 — Stage 3: the RAK9154 reads. 12.23 V over one-wire, seven consecutive cycles
 
 The pack reports live telemetry. This is the first non-null battery reading this project has
