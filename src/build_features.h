@@ -117,6 +117,21 @@
 #define FEATURE_BATTERY_FAST 0
 #endif
 
+// Milliseconds to wait after the pack's last byte before transmitting the first byte of the
+// provisioning response.
+//
+// The reference master cannot reply faster than about 2 ms: its drain is
+// `while (available()) { read(); delay(2); }`, so the last iteration always pays one 2 ms delay
+// after the final byte. Our early-exit drain returns the instant the checksum byte lands and
+// transmits under one bit time later — so on an open-drain line the pack has just finished
+// driving, we may be answering before it has re-armed its receiver.
+//
+// Swept from the build rather than hard-coded because the value is the experiment: 2 ms matches
+// the reference, and 5/10 ms test whether more is needed. Defaults to the reference's 2.
+#ifndef FEATURE_BATTERY_TURNAROUND_MS
+#define FEATURE_BATTERY_TURNAROUND_MS 2
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)

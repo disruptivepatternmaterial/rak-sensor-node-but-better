@@ -96,7 +96,33 @@ constexpr uint8_t kDelimiter = 0x7E; // RUI3_Api_t.start
 // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the transport under
 //   that event is `case SNHUBAPI_EVT_QSEND: mySerial.write(msg, len);`, one write of the
 //   whole buffer with nothing prepended.
-constexpr uint8_t kWakeCount = 1;
+// RESTORED to 4, from 1. The reasoning that cut it to 1 was sound about the reference's struct
+// and wrong about which revision worked: `RUI3_Api_t.wakeup` is indeed a single byte, but the
+// only revision that has ever drawn a full SENDAT reply from this pack is the one that sent
+// four. Three milliseconds of dead air ahead of the frame was removed as "free" latency on
+// untested reasoning, and it was not free — a wake byte on an open-drain line is plausibly doing
+// exactly what its name says, holding the line long enough for the pack's receiver to lock.
+//
+// Kept as a named constant rather than folded into send_frame() so the next sweep can move it
+// without touching the frame logic.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t is
+//   ATT_PACKED { U8 wakeup; U8 start; RUI3API_LEN_T length; type; flag; U8 payload[]; }: the
+//   struct carries one wakeup byte. Sending four is a deliberate deviation from it, justified by
+//   the bench rather than by the header.
+// CITE(bench): docs/EVIDENCE.md — the SENDAT dest sweep that returned a full 28-byte
+//   checksum-valid reply ran with four wake bytes; every revision since has sent one and none
+//   has drawn a SENDAT reply.
+constexpr uint8_t kWakeCount = 4;
+
+// Guard gap before the first byte of a response, in milliseconds. See
+// FEATURE_BATTERY_TURNAROUND_MS in src/build_features.h for why this exists and why it is a
+// build-time sweep rather than a fixed number.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp
+//   onewireHandle(): `while (mySerial.available()) { buff[bufflen++] = mySerial.read();
+//   delay(2); }` — the final loop iteration reads the last byte and then delays 2 ms, so the
+//   reference's reply cannot leave sooner than that after the pack's stop bit.
+constexpr uint32_t kTurnaroundMs = FEATURE_BATTERY_TURNAROUND_MS;
 
 // Probe addressing. kProbeId is the id the master *assigns*, not an id the pack has before
 // being asked: `pid = aid + 1` for the first free record slot, so the first probe on the bus
@@ -886,12 +912,45 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
         buf[prov + kProvIdOffset] = kProbeId;     // the id we are assigning
         buf[f.cksum]              = frame_chksum(buf, f.delim, f.payload_len);
 
+        // The guard gap. Everything above is arithmetic on a buffer; this is the first thing
+        // that touches the wire, so the delay belongs here and nowhere earlier.
+        //
+        // The pack has just finished driving this open-drain line. The reference master pays
+        // about 2 ms before it can answer, purely as a side effect of its drain loop's per-byte
+        // delay(2), and it is the implementation this pack is known to accept. Our early-exit
+        // drain answers in under one bit time, which is the one timing difference left between
+        // the two once framing was ruled out.
+        //
+        // Measured either side so this stops being an argument by analogy: the elapsed
+        // microseconds from entering this function to the first transmitted byte, and the
+        // duration of the transmit itself, are both printed after the response is clear of the
+        // wire.
+        const uint32_t t_gap_start = micros();
+        delay(kTurnaroundMs);
+        const uint32_t t_tx_start = micros();
+
         for (uint8_t i = 0; i < kWakeCount; i++) {
             tx_byte(kWakeByte);
         }
         for (size_t i = f.delim; i <= f.cksum; i++) {
             tx_byte(buf[i]);
         }
+        const uint32_t t_tx_end = micros();
+
+        // Quantifies what SoftwareHalfSerial actually costs per byte, including its TX/RX
+        // turnaround, against the 1041.7 us that ten bit periods at 9600 take in theory. A
+        // per-byte figure well above that is the library's switch overhead and is exactly the
+        // number the turnaround argument needs.
+        // CITE(datasheet): [CIT-NRF-GPIO] nRF52840 PS, GPIO — the per-bit cost being measured is
+        //   the port-register write plus the pin reconfiguration SoftwareHalfSerial performs on
+        //   each write() to turn the half-duplex line around.
+        const size_t   tx_bytes = kWakeCount + (f.cksum - f.delim + 1);
+        const uint32_t tx_us    = t_tx_end - t_tx_start;
+        LOGF("   battery : turnaround %lu ms (gap %lu us), tx %u bytes in %lu us = %lu us/byte "
+             "(10 bits @ 9600 = 1042 us)\n",
+             (unsigned long)kTurnaroundMs, (unsigned long)(t_tx_start - t_gap_start),
+             (unsigned)tx_bytes, (unsigned long)tx_us,
+             (unsigned long)(tx_us / (tx_bytes ? tx_bytes : 1)));
 
         // Reworded from "provisioned probe ... as pid ...", which overstated what had
         // happened: it announced an assignment the pack had not been observed to accept. The
