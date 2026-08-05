@@ -69,6 +69,14 @@ power::Brownout  brownout;
 
 uint32_t cycle = 0;
 
+// Sink the brownout gate calls when its state changes, so the hold survives a reset.
+// Written as a free function rather than handing Config to power.h: the gate should not
+// need to know a filesystem exists, and this is the whole of the coupling.
+void persist_brownout_engaged(bool engaged)
+{
+    config.set_brownout_engaged(engaged);
+}
+
 // Consecutive cycles in which neither sensor produced a single field.
 uint32_t empty_cycles = 0;
 
@@ -138,6 +146,13 @@ void setup()
 
     print_banner();
     config.begin();
+
+#if FEATURE_BATTERY
+    // Restored from flash so a reset cannot clear the hold. Deliberately only on a build
+    // that actually reads the pack: without the battery driver update() is never called, so
+    // a restored hold could never be lifted and the node would be silent forever.
+    brownout.begin(config.brownout_engaged(), &persist_brownout_engaged);
+#endif
 
 #if FEATURE_RADIO
     radio.begin();

@@ -8,6 +8,30 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Brownout protection no longer fails open**
+  ([#38](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/38)).
+  The gate lived only in RAM and started at transmit-allowed, so any reset — watchdog,
+  panel flicker, the pack's own brownout reset — cleared the protection, and it only
+  self-corrected if the pack was still answering. It also held the previous decision
+  forever on an unreadable voltage, which from a cold boot means transmitting
+  unconditionally with no voltage evidence at all. The field case is the bad one: overcast
+  week, pack sags, the BMS stops answering at low voltage, and the node then transmits
+  every cycle at the largest current it ever draws until the pack hits protection cutoff.
+  Two changes: the engaged bit is now persisted in `config` and restored at boot, written
+  only on a state change — the transition into brownout happens while the pack is still
+  answering and still above the level where a write is unsafe, so it costs one write per
+  event; and `kInvalidReadsBeforeInhibit` consecutive unreadable voltages now engage the
+  gate instead of leaving it open. The stored-settings record is version 2; version 1
+  records are still read so an operator-set interval survives the update.
+
+  The consequence is deliberate and worth stating: a node whose one-wire link dies goes
+  quiet after four cycles even if the pack is healthy. That is the intended direction —
+  lost data costs one hike, a pack driven to cutoff may not restart on panel current at
+  all. No H1–H8 gate closes on this; the evidence needs a bench measurement that has not
+  been taken.
+
 ### Changed
 
 - **Minimum reporting interval lowered from 1800 s to 900 s**, so the operator can run

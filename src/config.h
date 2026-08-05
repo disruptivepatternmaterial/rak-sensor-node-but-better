@@ -103,11 +103,25 @@ class Config {
 
     uint32_t boot_count() const { return m_boots; }
 
+    // Whether the brownout gate was engaged when this node last wrote its settings.
+    //
+    // Persisted because the gate previously lived only in RAM, which made it fail open:
+    // every reset returned the node to transmit-allowed, and a pack that had stopped
+    // answering because it was low left no evidence to correct that. See power::Brownout.
+    bool brownout_engaged() const { return m_brownout_engaged; }
+
+    // Records a change in the gate. No write when the value is unchanged — flash cycles are
+    // a consumable, and this is called on every state change rather than only on the rare
+    // ones. Returns false if the write failed, which means the hold is active now but will
+    // not survive a reset.
+    bool set_brownout_engaged(bool engaged);
+
   private:
     bool load();
     bool save();
 
-    uint32_t m_interval = kIntervalDefaultSeconds;
-    uint32_t m_boots    = 0;
-    bool     m_mounted  = false;
+    uint32_t m_interval         = kIntervalDefaultSeconds;
+    uint32_t m_boots            = 0;
+    bool     m_mounted          = false;
+    bool     m_brownout_engaged = false;
 };

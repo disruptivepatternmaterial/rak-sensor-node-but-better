@@ -5,6 +5,8 @@
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
 
+#include <stddef.h>
+
 using namespace Adafruit_LittleFS_Namespace;
 
 namespace {
@@ -14,7 +16,13 @@ constexpr char kPath[] = "/config.bin";
 // A magic number and a version, so a file written by different firmware is recognized as
 // foreign and ignored rather than read as garbage settings.
 constexpr uint32_t kMagic   = 0x524B534E; // "RKSN"
-constexpr uint16_t kVersion = 1;
+
+// Version 2 appended the persisted brownout bit. Version 1 records are still read rather
+// than discarded: rejecting them would throw away a stored interval, and an operator who
+// had set a cadence by downlink would find the node quietly back on the default after the
+// next firmware update, with nothing to explain it.
+constexpr uint16_t kVersion       = 2;
+constexpr uint16_t kVersionLegacy = 1;
 
 // Boots between writes of the boot counter. Writing every boot is fine while the node is
 // healthy — a handful of writes a year — but the counter matters most in exactly the
@@ -31,7 +39,13 @@ struct Stored {
     uint16_t reserved;
     uint32_t interval;
     uint32_t boots;
+    uint8_t  brownout_engaged; // v2 and later
+    uint8_t  pad[3];
 };
+
+// The v1 layout, kept so a file written by earlier firmware can still be read. Everything
+// up to and including `boots` is byte-identical to the struct above.
+constexpr size_t kStoredSizeV1 = offsetof(Stored, brownout_engaged);
 
 } // namespace
 
@@ -83,7 +97,18 @@ bool Config::load()
     const int n = f.read((uint8_t *)&s, sizeof(s));
     f.close();
 
-    if (n != (int)sizeof(s) || s.magic != kMagic || s.version != kVersion) {
+    if (n < (int)kStoredSizeV1 || s.magic != kMagic) {
+        return false;
+    }
+
+    if (s.version == kVersionLegacy) {
+        // Written before the brownout bit existed. The interval and boot count are in the
+        // same place, so they are honored; the gate simply starts disengaged, which is the
+        // behavior that firmware had. It is not a hole — a genuinely low pack re-engages
+        // the gate on the first valid reading, and a silent one re-engages on the
+        // consecutive-invalid-read path.
+        s.brownout_engaged = 0;
+    } else if (s.version != kVersion || n != (int)sizeof(s)) {
         return false;
     }
 
@@ -95,8 +120,9 @@ bool Config::load()
         return false;
     }
 
-    m_interval = s.interval;
-    m_boots    = s.boots;
+    m_interval         = s.interval;
+    m_boots            = s.boots;
+    m_brownout_engaged = (s.brownout_engaged != 0);
     return true;
 }
 
@@ -107,10 +133,11 @@ bool Config::save()
     }
 
     Stored s = {};
-    s.magic    = kMagic;
-    s.version  = kVersion;
-    s.interval = m_interval;
-    s.boots    = m_boots;
+    s.magic            = kMagic;
+    s.version          = kVersion;
+    s.interval         = m_interval;
+    s.boots            = m_boots;
+    s.brownout_engaged = m_brownout_engaged ? 1 : 0;
 
     InternalFS.remove(kPath);
 
@@ -151,4 +178,27 @@ bool Config::set_interval_seconds(uint32_t seconds)
 
     LOGF("   config  : interval now %lu s\n", (unsigned long)m_interval);
     return true;
+}
+
+bool Config::set_brownout_engaged(bool engaged)
+{
+    if (engaged == m_brownout_engaged) {
+        return true; // no write — flash cycles are a consumable
+    }
+
+    m_brownout_engaged = engaged;
+
+#if FEATURE_BENCH_INTERVAL
+    // A bench build never writes settings back, for the same reason it never reads them:
+    // its 60 s interval is out of range for a field image and would be discarded, and the
+    // whole record would be rewritten to carry one bit. The gate still works in RAM for the
+    // run, which is all a bench build needs.
+    return true;
+#else
+    if (!save()) {
+        LOGLN(F("   config  : brownout state active but NOT saved — clears on reset"));
+        return false;
+    }
+    return true;
+#endif
 }

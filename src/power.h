@@ -63,6 +63,38 @@ void sleep_seconds(uint32_t seconds);
 constexpr uint16_t kTxInhibitCentivolts = 960;  // 3.2 V per cell — stop transmitting
 constexpr uint16_t kTxResumeCentivolts  = 1020; // 3.4 V per cell — and start again
 
+// Consecutive unreadable pack voltages after which the node stops transmitting anyway.
+//
+// This is the answer to "what does no evidence mean," and it has to be answered explicitly
+// because the two obvious readings point opposite ways. Holding the previous decision is
+// right once the gate is already engaged. It is wrong from a cold boot, where the previous
+// decision is the default — and defaulting to transmit-allowed is what made this gate fail
+// open: a reset returned the node to transmitting, and a pack that had gone silent because
+// it was low left no evidence to correct it.
+//
+// So: no evidence for this many cycles is treated as bad evidence, and the node goes quiet.
+// The trade is deliberate and asymmetric in the same direction as the thresholds above. A
+// node silenced by a dead one-wire link loses data, which costs a hike to fix but only
+// once. A node transmitting blind into a sagging pack reaches protection cutoff, which may
+// not restart on panel current at all.
+//
+// Four, not one or two, because the pack does not answer for roughly the first two cycles
+// after a boot while it takes its own samples — engaging on that would silence every
+// healthy node for one recovery cycle after every reset. Four clears the observed startup
+// silence with margin and still reacts inside four intervals.
+//
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — the RAK9154 returns nothing for about the
+//   first two cycles after boot before it latches and begins reporting, which is the
+//   measurement that sets the floor under this count.
+// CITE(policy): docs/POWER_BUDGET.md — never let the pack reach a state it cannot recover
+//   from by itself, which is the rule that decides which way this fails.
+constexpr uint8_t kInvalidReadsBeforeInhibit = 4;
+
+// Called on a change of the gate's state so it can be remembered across a reset. Passed in
+// rather than called directly, because persistence lives in Config and this file has no
+// business knowing about a filesystem.
+using BrownoutPersistFn = void (*)(bool engaged);
+
 // Decides whether the node may transmit or write to flash, given what the pack reports.
 //
 // Separate thresholds for stopping and resuming, because a pack sitting exactly at the
@@ -70,9 +102,16 @@ constexpr uint16_t kTxResumeCentivolts  = 1020; // 3.4 V per cell — and start 
 // remaining energy on the oscillation itself.
 class Brownout {
   public:
+    // Restores the gate from whatever the last run persisted, and registers the sink used
+    // to persist future changes. Call once, before the first update(). Without this the
+    // gate starts disengaged, which is only correct on a build that has no battery driver
+    // and therefore never calls update() at all.
+    void begin(bool persisted_engaged, BrownoutPersistFn persist);
+
     // Feeds in the latest pack voltage. When the pack does not answer, the previous
-    // decision stands: an unreadable battery is not evidence of a healthy one, and
-    // silently resuming transmission on missing data would defeat the whole gate.
+    // decision stands — an unreadable battery is not evidence of a healthy one — but only
+    // for kInvalidReadsBeforeInhibit cycles, after which the absence of evidence engages
+    // the gate rather than leaving it open.
     void update(bool voltage_valid, uint16_t centivolts);
 
     // False when the pack is too low to spend energy on a transmission.
@@ -86,7 +125,11 @@ class Brownout {
     bool engaged() const { return m_engaged; }
 
   private:
-    bool m_engaged = false;
+    void set_engaged(bool engaged, bool persist);
+
+    BrownoutPersistFn m_persist       = nullptr;
+    bool              m_engaged       = false;
+    uint8_t           m_invalid_reads = 0;
 };
 
 } // namespace power

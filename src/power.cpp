@@ -127,21 +127,73 @@ void sleep_seconds(uint32_t seconds)
 #endif
 }
 
+void Brownout::begin(bool persisted_engaged, BrownoutPersistFn persist)
+{
+    m_persist       = persist;
+    m_engaged       = persisted_engaged;
+    m_invalid_reads = 0;
+
+    if (m_engaged) {
+        // The whole point of persisting the bit. Before this, any reset — watchdog, panel
+        // flicker, the pack's own brownout reset — returned the node to transmit-allowed,
+        // and it only found its way back if the pack was still answering.
+        LOGLN(F("   power   : brownout hold restored from flash — transmissions held"));
+    }
+}
+
+void Brownout::set_engaged(bool engaged, bool persist)
+{
+    m_engaged = engaged;
+    if (persist && m_persist != nullptr) {
+        m_persist(engaged);
+    }
+}
+
 void Brownout::update(bool voltage_valid, uint16_t centivolts)
 {
     if (!voltage_valid) {
-        return; // no news is not good news; hold the previous decision
+        if (m_engaged) {
+            return; // already holding; no news is certainly not good news
+        }
+
+        if (m_invalid_reads < kInvalidReadsBeforeInhibit) {
+            ++m_invalid_reads;
+        }
+
+        if (m_invalid_reads >= kInvalidReadsBeforeInhibit) {
+            // Not persisted, unlike the voltage-driven transition below. Engaging here
+            // means the pack voltage is unknown, and an unknown voltage is exactly the
+            // condition under which a flash write is not worth risking — that is what
+            // flash_write_allowed() exists to say. The cost of not writing is that a reset
+            // clears this particular hold, and the node then re-engages within
+            // kInvalidReadsBeforeInhibit cycles for the same reason it did the first time.
+            // Bounded and self-correcting, which the old fail-open behavior was not.
+            set_engaged(true, false);
+            LOGF("   power   : pack silent for %u cycles — holding transmissions, no "
+                 "voltage evidence\n",
+                 (unsigned)kInvalidReadsBeforeInhibit);
+        }
+        return;
     }
 
+    m_invalid_reads = 0;
+
     if (!m_engaged && centivolts <= kTxInhibitCentivolts) {
-        m_engaged = true;
+        // Persisted, and this is the write the whole scheme is built around. It happens on
+        // the transition into brownout, which by definition happens while the pack is still
+        // answering and still above the threshold below which a write is unsafe — so it
+        // costs exactly one write per brownout event, at the one moment it is affordable.
+        set_engaged(true, true);
         LOGF("   power   : %u.%02u V — holding transmissions to protect the pack\n",
              centivolts / 100, centivolts % 100);
         return;
     }
 
     if (m_engaged && centivolts >= kTxResumeCentivolts) {
-        m_engaged = false;
+        // Clearing the bit matters as much as setting it. A stale hold left in flash would
+        // silence a recovered node across its next reset, turning a protective measure into
+        // the outage it exists to prevent.
+        set_engaged(false, true);
         LOGF("   power   : %u.%02u V — recovered, resuming\n", centivolts / 100,
              centivolts % 100);
     }
