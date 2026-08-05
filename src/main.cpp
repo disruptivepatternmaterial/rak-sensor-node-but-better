@@ -159,6 +159,14 @@ void setup()
     // that actually reads the pack: without the battery driver update() is never called, so
     // a restored hold could never be lifted and the node would be silent forever.
     brownout.begin(config.brownout_engaged(), &persist_brownout_engaged);
+
+    // Hand the battery driver the gate, before the first read() in loop(). Without this the
+    // driver's pointer stays null and the brownout half of issue #39 is compiled in but inert:
+    // a node correctly holding transmissions to save the pack would still spend ~28 s per cycle
+    // hunting for a pack that is not answering. The gate only suppresses the expensive fallback
+    // ladder — read() issues its direct SENDAT query before consulting it — so wiring this in
+    // cannot stop the battery being read, which is what detects the pack coming back.
+    battery_sensor.set_brownout(&brownout);
 #endif
 
 #if FEATURE_RADIO
