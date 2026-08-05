@@ -1,6 +1,7 @@
 #include "battery.h"
 
 #include "../build_features.h"
+#include "../power.h"
 
 #include <Arduino.h>
 #include <SoftwareHalfSerial.h>
@@ -1066,6 +1067,15 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
     uint8_t        answers    = 0;
 
     while ((millis() - started_ms) < kProvWindowMs) {
+        // This loop can hold the CPU for the full 45 s window, which is over a third of the
+        // 120 s watchdog. Add the join backoff and a slow RK900 read on the same wake and the
+        // total crosses it — so the watchdog would reset a node that is working exactly as
+        // designed, and the reset would look like a hang rather than a budget overrun. Feeding
+        // here is not weakening the watchdog: this loop makes forward progress on a bounded
+        // deadline, and the deadline is what stops it, not the reset.
+        // CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — 120 s hardware watchdog.
+        power::watchdog_feed();
+
         // Early-exit drain: answer the announcement as soon as it is complete, not after the
         // frame gap. This is the second half of the latency fix — see provision_ready().
         // A quiet slice returns 0 after the first-byte timeout, which is what paces this loop.
@@ -1631,11 +1641,72 @@ BatteryReading Battery::read()
     static uint8_t rx[kRxCapacity];
     static_assert(kProvCapacity <= kRxCapacity, "provisioning needs the whole buffer");
 
-    const bool provisioned = acquire_pid(rx, sizeof(rx));
-    if (!provisioned) {
-        LOGLN(F("   battery : no announcement — proceeding unprovisioned"));
+    // Phase 0: ask the provisioned pack directly, before spending anything on provisioning.
+    //
+    // Once the pack has been provisioned through WisToolBox (docs/DEPLOY.md) it holds a real
+    // probe id and stops announcing itself as unprovisioned. Phase 1 below is built entirely
+    // around hearing that announcement — so on a provisioned pack it hears nothing, and burns
+    // the full kProvWindowMs (45 s) doing it, on every single wake, forever. That is the
+    // difference between a sub-second cycle and a 45-second one, and at an hourly interval it
+    // is the difference between a power budget that works and one that does not.
+    //
+    // One SENDAT to kProbeId costs at most kFirstByteTimeoutUs (500 ms) when the pack is not
+    // there, which is the price an unprovisioned pack pays once per cycle to keep the
+    // provisioned case fast. That is the right way round: the provisioned pack is the field
+    // configuration, and the unprovisioned one is a bench state on its way out of existence.
+    //
+    // No persisted flag backs this. It is a probe, not a memory, so it is self-healing by
+    // construction: a replacement pack that has never been provisioned simply fails the probe
+    // and falls through to phase 1, and a pack provisioned later starts answering with no
+    // reset and nothing to clear. A stored "this pack is provisioned" bit would have to be
+    // invalidated by hand the first time the hardware changed, and the failure mode of a stale
+    // one is silence that looks like a dead sensor.
+    //
+    // Ok and Unsampled are both accepted as proof of address, exactly as phase 2 does: one
+    // carries a measurement, the other the record template, and both are SENDAT frames that
+    // came back from the destination we addressed. Only the address is being established here.
+    //
+    // CITE(bench): docs/EVIDENCE.md 2026-08-04 — sixteen consecutive byte-correct provisioning
+    //   responses left provId at 0xFF, establishing that provisioning does not complete over
+    //   this link and that the announcement phase has nothing to accomplish on a pack RAK's own
+    //   tooling has already configured.
+    // CITE(datasheet): [CIT-WISTOOLBOX-AT] — probe configuration is a north-bound ATC+
+    //   operation over NFC/BLE, so a provisioned pack's id arrives from outside this firmware
+    //   and can only be discovered by asking.
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+    //   after ADD_PID the reference polls SENDAT against the known id and never re-runs
+    //   provisioning. Steady state is a bare query.
+    // The reply is kept, not just the fact that one arrived. Re-asking the same address for
+    // data we already hold would waste a second round trip on the common path.
+    size_t n = 0;
+    m_last   = BatteryResult::NoReply;
+
+    bool answered_direct = false;
+    {
+        const size_t got = query(kProbeId, rx, sizeof(rx));
+        if (got >= 8) {
+            BatteryReading      candidate;
+            const BatteryResult r = parse(rx, got, candidate);
+            if (r == BatteryResult::Ok || r == BatteryResult::Unsampled) {
+                m_pid           = kProbeId;
+                answered_direct = true;
+                m_last          = r;
+                n               = got;
+                out             = candidate;
+                LOGLN(F("   battery : pack answered at 0x01 — skipping provisioning"));
+            }
+        }
     }
-    link.flush(); // anything still queued from phase 1 is not part of the data reply
+
+    // Phase 1 runs only when the direct ask failed, i.e. the pack does not hold kProbeId.
+    bool provisioned = answered_direct;
+    if (!answered_direct) {
+        provisioned = acquire_pid(rx, sizeof(rx));
+        if (!provisioned) {
+            LOGLN(F("   battery : no announcement — proceeding unprovisioned"));
+        }
+        link.flush(); // anything still queued from phase 1 is not part of the data reply
+    }
 
     // Phase 1b: configure the pack to sample, immediately after provisioning succeeds.
     //
@@ -1719,12 +1790,13 @@ BatteryReading Battery::read()
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process()
     //   dispatches on hub_api->type per frame, never on "something arrived"; verify_action()
     //   then routes SNHUB_TYPE_SENDAT to its own program. Frame type is the unit of meaning.
+    //
+    // Skipped entirely when phase 0 already got an answer from kProbeId: the address is
+    // settled and the reply is already in hand, so repeating the exchange would buy nothing
+    // but another round trip on the path that runs every hour for years.
     const uint8_t candidates[2] = {m_pid, (m_pid == kBroadcastId) ? kProbeId : kBroadcastId};
 
-    size_t n = 0;
-    m_last   = BatteryResult::NoReply;
-
-    for (uint8_t c = 0; c < 2; c++) {
+    for (uint8_t c = 0; c < 2 && !answered_direct; c++) {
         const size_t got = query(candidates[c], rx, sizeof(rx));
         if (got == 0) {
             continue;
