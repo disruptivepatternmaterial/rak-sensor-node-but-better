@@ -146,15 +146,17 @@ void test_live_sendat_decodes_with_little_endian_values()
         frame[i] = kSendat[i];
     }
 
-    // Records are { sid, ipso, value... }. Indices 12.. are `15 BA v v | 16 B9 i i | 17 B8 soc |
-    // 18 67 t t`.
+    // Records are { sid, ipso, value... } and they start at index 12: `15 BA v v` at 12-15,
+    // `16 B9 i i` at 16-19, `17 B8 soc` at 20-22, `18 67 t t` at 23-26. The value bytes are
+    // therefore two past the sid, not one — the capacity record is three bytes wide and shifts
+    // everything behind it.
     frame[14] = 0xC6; // voltage low  — 1222 = 0x04C6
     frame[15] = 0x04; // voltage high
     frame[18] = 0x00; // current low  — 0
     frame[19] = 0x00; // current high
     frame[22] = 98;   // capacity, one byte
-    frame[24] = 0xDC; // temperature low  — 220 = 0x00DC
-    frame[25] = 0x00; // temperature high
+    frame[25] = 0xDC; // temperature low  — 220 = 0x00DC
+    frame[26] = 0x00; // temperature high
     refresh_checksum(frame, 1);
 
     BatteryReading      out;
