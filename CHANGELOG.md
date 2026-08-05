@@ -12,6 +12,26 @@ Firmware version is now `0.3.0` — a new capability, backward compatible with t
 
 ### Added
 
+- **The RAK9154 reports real values.** `12.23 V`, `98 %`, `23.0 °C`, `+0.00 A`, stable across
+  seven consecutive cycles on commit `1a203d3`, build host Heliotrope Ridge, `battdiag`. The
+  frame is a genuine `hub_type` SENDAT (`0x03`) reply and the pack now announces itself as
+  `source = 0x01` — it accepted the assigned probe id.
+
+  What unblocked it was reply timing, not framing. Two changes landed together: a guard gap
+  before the first response byte (`FEATURE_BATTERY_TURNAROUND_MS`, default 2 ms, the figure the
+  reference master pays as a side effect of its `delay(2)`-per-byte drain) and `kWakeCount`
+  restored to 4. Before them the driver answered under one bit time after the pack's stop bit,
+  on a line the pack had just been driving.
+
+  Sampling lags the latch by about two cycles: cycles 1–2 still returned the all-zero record
+  template, cycles 3 onward carried values. The `Unsampled` guard correctly reported the first
+  two as no data rather than as a 0.00 V pack.
+
+  The current sign is **not** settled by this — `+0.00 A` at rest distinguishes nothing.
+  [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) stays open.
+
+  This closes no H1–H8 gate and does not change the `🚧 NOT YET DEPLOYED` status.
+
 - **The battery driver now tries a plain Modbus RTU register read before any SensorHub
   handshake.** Slave `0x6E`, FC `0x03`, 21 registers from `0x6000`, on the existing one-wire
   harness — the same address, framing and register map the deployed sibling node reads this pack
