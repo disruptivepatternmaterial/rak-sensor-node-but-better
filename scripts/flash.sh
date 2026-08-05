@@ -141,6 +141,57 @@ for (( waited = 0; waited < SETTLE_S; waited += POLL_S )); do
 done
 echo "${DIM}   USB 239A:${PID_SEEN:-????} -- $(pid_meaning "$PID_SEEN")${NC}"
 
+if [[ -n "$FAIL_REASON" && "$PID_SEEN" == "$PID_APP" ]]; then
+  # The DFU tool errored, but the board is running an application. Those two facts
+  # contradict each other and this script used to resolve the contradiction by trusting the
+  # tool, which is the wrong way round: the board resets and re-enumerates the moment the
+  # DFU write completes, so the serial link can disappear before nrfutil reads its final
+  # acknowledgement. The tool then reports a transport error with every page already
+  # written.
+  #
+  # A false FAILED is not harmless. It tells the next session the board is unprogrammed, so
+  # the obvious next move is another flash cycle and another operator double-tap against
+  # hardware that was already fine -- and it puts a wrong verdict next to a commit SHA in
+  # the flashing narrative that docs/EVIDENCE.md depends on being accurate.
+  #
+  # So this is neither verdict. The PID proves an application is running but cannot prove
+  # WHICH -- a previously resident image enumerates as 8029 too. Only a positive check of
+  # what is actually executing can settle it, and that check needs the port, which this
+  # script has just finished using and may be shared with another operator. It is therefore
+  # named as the required next step rather than guessed at here.
+  #
+  # CITE(bench): docs/EVIDENCE.md 2026-08-03, commit 998dc26 -- adafruit-nrfutil raised
+  #   PortNotOpenError / "Timed out waiting for acknowledgement", flash.sh printed FLASH
+  #   FAILED, and the board then came up at 239A:8029 running the newly built busscan image.
+  #   The capture showed a production-frame line that exists only in 2c13fac and later, so
+  #   the flash had in fact succeeded.
+  # CITE(prior-art): adafruit-nrfutil dfu_transport_serial.py [CIT-ADA-NRFUTIL] -- the ack
+  #   read that produces this error happens after the last page is sent, which is why a
+  #   transport error there says nothing about whether the write landed.
+  echo
+  echo "${YELLOW}=== FLASH INDETERMINATE ===${NC}"
+  echo "commit: ${SHA}"
+  echo "tool:   ${FAIL_REASON}"
+  echo "usb:    239A:${PID_SEEN} ($(pid_meaning "$PID_SEEN"))"
+  echo
+  echo "The DFU tool reported an error, but the board came back as a running"
+  echo "application. Both can be true: the board re-enumerates as soon as the write"
+  echo "completes, which can drop the link before the tool reads its final ack. Refs #33."
+  echo
+  echo "${YELLOW}Do not re-flash on the strength of the tool error alone${NC} -- that is a"
+  echo "wasted cycle and a wasted double-tap on hardware that is probably fine."
+  echo
+  echo "Resolve it positively before recording anything in docs/EVIDENCE.md. The PID"
+  echo "says an application is running; it cannot say which one, because a previously"
+  echo "resident image enumerates identically. Capture serial and match a string unique"
+  echo "to ${SHA}:"
+  echo "  ${DIM}scripts/remote.sh run \"pio device monitor -p ${PORT} --quiet\"${NC}"
+  echo "Then check the banner's ${DIM}built :${NC} line against this build, or a log line"
+  echo "that exists only in this commit. Until that matches, the verdict is unresolved --"
+  echo "not a success, and not a failure either."
+  exit 2
+fi
+
 if [[ -z "$FAIL_REASON" && "$PID_SEEN" == "$PID_APP" ]]; then
   echo
   echo "${GREEN}=== FLASH OK ===${NC}"
@@ -169,8 +220,6 @@ else
     echo
     echo "Recovery: ${GREEN}double-tap RESET on the RAK19007${NC} to re-enter DFU cleanly,"
     echo "then re-run this script. See docs/FIRST_FLASH.md."
-  else
-    echo "${DIM}The node may be in an indeterminate state. Verify before walking away.${NC}"
   fi
   exit 1
 fi

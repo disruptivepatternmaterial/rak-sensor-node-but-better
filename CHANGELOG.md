@@ -46,6 +46,19 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   the radio is compiled in, which restores what `stage3` already claimed in its own
   `platformio.ini` comment: it runs at the field floor.
 
+- **`scripts/flash.sh` no longer reports FLASH FAILED when the image landed**
+  ([#33](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/33)).
+  The board re-enumerates the moment the DFU write completes, which can drop the serial link
+  before `adafruit-nrfutil` reads its final acknowledgement — so the tool reports a transport
+  error with every page already written. The script trusted the tool over the board. There is
+  now a third verdict: when the tool errors but the post-flash USB PID is `8029`, it prints
+  `FLASH INDETERMINATE` and exits 2 rather than declaring failure. It does not claim success
+  either, because the PID proves an application is running but not *which* one — a previously
+  resident image enumerates identically — so the output names the positive check needed to
+  settle it. A false FAILED costs a wasted flash cycle and an operator double-tap on hardware
+  that was fine, and puts a wrong verdict next to a commit SHA in the narrative
+  `docs/EVIDENCE.md` depends on.
+
 ### Changed
 
 - **Minimum reporting interval lowered from 1800 s to 900 s**, so the operator can run
