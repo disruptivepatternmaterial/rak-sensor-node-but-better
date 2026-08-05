@@ -146,6 +146,56 @@ is therefore not evidence of a malformed BOOT frame.
   handshake are the remaining work. Tracked in
   [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
 
+### 2026-08-04 — RAK9154 refuses provisioning from a bare master: firmware avenue exhausted
+
+The pack talks, hears us, and answers polls — but will not accept an assigned probe id, and
+therefore never samples. This entry exists to stop the next session re-deriving it: the
+request frame is **not** the problem, and neither is how often we send it.
+
+- **Host:** Heliotrope Ridge · RAK4631 serial `4BC1FCC87D1343AB`, `239A:8029`.
+- **Images:** `stage3` across commits `246add8` → `afefec3` → `3f4766f` → `9ca98c7`.
+- **Wiring:** metered good (pack 11.6 V, pin 4 `3V3_In` 3.3 V, continuity pins 3+5 → `IO1`).
+
+**What is established as working.** The pack drives the line (334 falling edges under
+pull-up, 0 floating), talks at 9600, and **receives our frames** — its SENDAT reply echoes the
+sequence byte we sent. It announces itself every cycle as ASCII `RAK2560-io`, declaring six
+sensors: `0x15`/186 DC voltage, `0x16`/185 DC current, `0x17`/184 capacity, `0x18`/103
+temperature, `0x19` and `0x1A`/243 status bitfields — all with rule `0x0008` (periodic).
+
+**What every attempt returns.** A checksum-valid SENDAT record set of **all zeros** — the
+record template, not a measurement. Never once a real value.
+
+| Hypothesis | How it was tested | Result |
+|---|---|---|
+| Malformed request frame | Rebuilt to the reference's exact RUI3 framing, popcount `cal_chksum`, BOOT handshake (`375e99a`) | **Ruled out** |
+| Bit-timing skew from `digitalWrite`/`delayMicroseconds` | Byte layer replaced with the reference `SoftwareHalfSerial` (`16986d1`) | **Ruled out** |
+| Reply too slow (blocking USB CDC logging before TX) | Transmit before logging, early-exit drain, one wake byte (`246add8`) | Reply now prompt and byte-perfect; pack still ignores it |
+| Values arrive as an unsolicited push we stop listening for | Push window widened 500 ms → 20 s (`afefec3`) | **Ruled out** — 20 s catches only more announcements, never a data push |
+| Sensors sitting at `RULE_DISABLE`, need arming | PARAMSET rule `0x0008`, intv 60 s, 3 × 3000 ms (`3f4766f`) | **Ruled out** — PARAMGET draws no reply; the "PARAMSET ack" was the announcement on its own schedule. Vendor spec confirms the descriptors already read periodic |
+| Wrong provision payload variant (VER3 skipped by the reference) | Read `snhub_provision_req_program()` line by line | **Ruled out** — "bypass" means bypass the *rejection*; VER3 is the only type the master answers, and echoing is correct |
+| Master must keep answering, as the reference's steady state does | BOOT once then answer every announcement for a 45 s window (`9ca98c7`) | **Ruled out** — answered **16 consecutive announcements**; every one still reported `provId 0xFF` |
+
+**The response frame is provably correct.** Verified field by field against
+`onewire_master_protocol.c`, and independently by checksum arithmetic: the announcement's
+`0x82`, plus 1 for the flag `00`→`01`, minus 7 for the provId popcount `0xFF`→`0x01`, equals
+**`0x7C`** — exactly what the capture shows us transmitting.
+
+```
+pack:  FF 7E 00 55 02 00 00 FF 00 01 50 03 ... FF ... 82   (provId FF, flag REQ)
+ours:  FF 7E 00 55 02 01 FF 00 00 01 50 03 ... 01 ... 7C   (provId 01, flag RSP)
+```
+
+- **Conclusion:** the published reference library's master role, implemented faithfully, does
+  **not** provision this pack. Meshtastic ships this working against a RAK2560, so the library
+  is sufficient *there* — meaning the real hub does something not present in the published
+  source, or the pack must first be configured through RAK's own channel. Per the vendor AT
+  spec [CIT-WISTOOLBOX-AT], RAK2560 configuration is the **WisToolBox mobile app over NFC/BLE**
+  (`supportedApps: ["MOBILE"]`, `connectionType.mode: "NFC"`); those `ATC+` commands are the
+  hub's north-bound API and are **not reachable** on the south-bound one-wire link we are on.
+- **Verdict:** **FAIL — not a firmware defect.** Further changes to the request path are not
+  indicated. Next step is out-of-band configuration via the vendor mobile app, then re-read.
+  Tracked in [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+
 ### 2026-08-04 — RAK9154 one-wire still silent after two firmware fixes; fault narrowed to physical
 
 Two independent firmware defects were found by reading the reference readers, fixed, flashed,
