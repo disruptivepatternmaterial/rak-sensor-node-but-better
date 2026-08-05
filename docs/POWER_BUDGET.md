@@ -167,6 +167,8 @@ write charge/discharge logic until it is closed.
 1. Cite the manufacturer figure for the claim.
 2. Recalculate this page.
 3. Record a **measured** sleep current in [`EVIDENCE.md`](EVIDENCE.md) before calling it done.
-   The procedure — PPK2 on the battery JST, pack and buck out of circuit, USB cable
-   physically unplugged because `power.cpp` keeps the console alive when a host is
-   attached — is in [`SOAK.md`](SOAK.md).
+   The procedure — measured inline on the USB-C line between buck and board, or on the
+   buck's 12 V input for buck-plus-node, with **no computer attached** because
+   `power.cpp` keeps the console alive when a host has opened the CDC port — is in
+   [`SOAK.md`](SOAK.md). Not at the battery JST: this design feeds the board over USB-C
+   and never uses that connector (`FIRMWARE_SPEC.md` §2).

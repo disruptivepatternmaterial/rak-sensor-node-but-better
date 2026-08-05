@@ -174,10 +174,12 @@ terminal, so both are solder joints.
 | 12 V + | pack `P+` |
 | Negative | pack `P−` |
 
-1. `P+` feeds **two** loads, not one: the buck's VIN+ (→ WisBlock 5 V) and the RK900's 12 V
-   directly. The RK900 is a 12 V device and the RAK5802 cannot supply it — that module's `BAT`
-   and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the buck for the WisBlock
-   alone and select it on no-load quiescent draw; the RK900 does not pass through it.
+1. `P+` feeds **two** loads, not one: the buck's VIN+ (→ WisBlock 5 V, entering the board
+   through its **USB-C** port — the battery JST is not used, per `FIRMWARE_SPEC.md` §2) and
+   the RK900's 12 V directly. The RK900 is a 12 V device and the RAK5802 cannot supply it —
+   that module's `BAT` and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the
+   buck for the WisBlock alone and select it on no-load quiescent draw; the RK900 does not
+   pass through it.
 2. RAK5802 → RK900 **data only** (A/RX, B/TX, and GND for the reference), fixed **4800** 8N1,
    slave `0x01`. No baud switching. Power comes from step 1, not from this module.
 3. RAK9154 → **one-wire half-duplex** on the 5-pin socket, TXD/RXD bridged, via the SP11

@@ -41,35 +41,84 @@ Two things worth knowing before you read the output:
   counter gap is the most valuable single signal a soak produces.** Never read a TTN
   listing through `head` — a truncated listing produced a wrong conclusion once already.
 
-## Sleep current — the PPK2 procedure
+## Sleep current — measure the path the field node actually uses
 
 This is the one thing the harness cannot do. Software can prove the node *entered*
 sleep; only a meter can prove sleep is actually low-power rather than a busy loop with
 the lights off ([#12](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/12)).
 
-Method follows the one used in the RAKwireless report that measured 6 mA in the
-never-sleeps configuration: a Nordic PPK2 in **source-meter** mode on the base board's
-battery connector [CIT-RAK-SLEEP].
+### The power path, because it decides the measurement point
 
-### Wire it
+Pack (~12 V) → **12 V→5 V buck** → **USB-C** → the RAK4631's USB-C port.
+`docs/FIRMWARE_SPEC.md` §2 forbids feeding P+ to `BAT`, so the RAK19007 **battery JST is
+not used at all** in this design.
 
-1. **Take the pack out of circuit.** Disconnect the RAK9154 from the RAK19007 battery
-   JST. Two sources feeding one rail means you are measuring their difference, not the
-   node.
-2. **Take the buck out of circuit** as well, once one is chosen. Its no-load quiescent
-   draw is a parallel load that runs 24/7 and can exceed the node's own average — worth
-   knowing, but it is a separate number. Measure it on its own at 12 V in.
-3. **Feed the battery JST from the PPK2 at 3.7 V**, source-meter mode, PPK2 ground to
-   board ground. 3.7 V is the single-cell voltage the RAK19007 battery input expects.
-4. **Physically unplug USB.** Not "close the terminal" — unplug the cable.
+Two consequences that a bench setup gets wrong by default:
 
-### Why the USB cable has to come out
+- **Do not measure at the battery JST.** Injecting 3.7 V there profiles a rail the field
+  node never runs on, and the resulting sleep-current figure would not describe the
+  deployed hardware.
+- **VBUS is permanently present in the field** whenever the pack has charge. The board
+  always sees USB *power*; it never sees a USB *host*. Powering the board over USB-C
+  during the measurement is therefore correct, not a compromise.
 
-`src/power.cpp:85` branches on `(bool)Serial`. With a host attached the firmware keeps
-the console alive through the sleep, deliberately, so a technician diagnosing the node
-in the field is not disconnected at the first cycle. That is a **different code path**
-from the one that runs unattended. Measuring with USB plugged in gives a confident
-number for firmware that will never run in the woods.
+These are **two separate numbers**. Do not add them from one reading and do not quote one
+as the other.
+
+### Measurement 1 — buck no-load quiescent ([#2](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/2))
+
+The buck's own idle draw is a parallel load that runs 24/7 and can exceed the node's own
+average, which is why the part gets selected on this figure
+([`POWER_BUDGET.md`](POWER_BUDGET.md)).
+
+1. Bench supply at 12 V into the buck input.
+2. Buck output **unloaded** — nothing connected downstream.
+3. Read the **input** current.
+
+Partially done already: on a Rigol supply the readout was effectively zero. That rules out
+a mA-class part, and nothing more. Bench-supply readouts resolve at best around 1 mA, so
+that result cannot distinguish ~50 µA from ~900 µA — the difference between a buck that is
+irrelevant to the budget and one that dominates it. Getting the real figure needs a
+**µA-capable instrument in series** with the buck input.
+
+### Measurement 2 — node sleep current
+
+Two valid measurement points. Pick one deliberately and record which:
+
+| Point | What the number includes |
+|---|---|
+| Inline on the **USB-C line between buck and board** | The node alone, at 5 V. Comparable to per-subsystem budget figures. |
+| Inline on the **buck's 12 V input**, node connected | Buck quiescent **plus** node, at 12 V. This is what actually drains the pack, and is the more useful number for runtime. |
+
+The 12 V-input figure is the one to hold the deployment to; the USB-C figure is the one to
+hold the firmware to. Measuring both and differencing them is a second route to
+measurement 1.
+
+**Resolution is the constraint, and it is the whole difficulty.** The sleep floor being
+checked is tens of µA, so the instrument needs ~10 µA resolution or better. The USB inline
+power meters on hand sit in exactly the right place electrically for the USB-C point, but
+typical USB testers resolve around 10 mA and will simply read `0.00` across the entire
+sleep window — which looks like a pass and measures nothing. A **Nordic PPK2 in ampere-meter
+mode** is the reliable instrument here. If a PPK2 is not on hand, this measurement is
+blocked; do not substitute a reading from an instrument that cannot resolve the threshold.
+
+The 6 mA never-sleeps figure quoted below comes from the RAKwireless sleep-current report
+[CIT-RAK-SLEEP].
+
+### No computer attached during the measurement
+
+`src/power.cpp` (the `console_in_use` branch) tests `(bool)Serial`. That is true only when
+a **host has opened the CDC port** — not merely when VBUS is present. A dumb USB-C power
+source does not enumerate, so in the field the branch evaluates false and the firmware
+takes the USB-shutdown path, which is the intended unattended behaviour.
+
+So the instruction is **not** "unplug USB" — it is **do not have a computer attached**.
+Powering the board over USB-C from the buck (or from a PPK2 / dumb supply standing in for
+it) is exactly what the field node does. A laptop on the other end of the cable keeps the
+console alive through the sleep, deliberately, so a technician is not disconnected at the
+first cycle — and that is a **different code path** from the one that runs in the woods.
+Measure with a host attached and you get a confident number for firmware that will never
+run unattended.
 
 ### What to expect
 
@@ -106,8 +155,9 @@ An average hides exactly the defects worth finding.
   The soak log's `watchdog-reset` anomaly and the trace timestamp together tell you
   whether the reset happened while awake or while asleep — which the log alone cannot.
 
-Record the mean sleep current, the sleep-window duration it was taken over, and the
-awake-phase peak. A number without its window is not a measurement.
+Record the mean sleep current, the sleep-window duration it was taken over, the
+awake-phase peak, **which of the two measurement points it was taken at**, and the
+instrument. A number without its window and its measurement point is not a measurement.
 
 ## Pass / fail — 24 h bench soak
 
@@ -122,7 +172,7 @@ Derived from H8. All of these must hold; any one failing is a fail, not a caveat
 | B5 | `ttn_f_cnt_gaps: 0`, and `ttn_f_cnt_last − ttn_f_cnt_first` equals `uplinks_logged_on_serial` over the same span. | The network counted fewer frames than the console sent. |
 | B6 | `cycles_without_battery` is 0 after the first two cycles (the pack needs ~2 cycles to start answering). | A cycle with no pack voltage once the pack is up. |
 | B7 | `battery_v_min` above the brownout hold threshold, and `brownout_events: 0` on a charged pack. | Brownout engaged on a pack that should be fine. |
-| B8 | Sleep current ≤ 20 µA, measured per the PPK2 procedure above with USB physically out. | Hundreds of µA, or a ~1 kHz ripple on the floor. |
+| B8 | Sleep current ≤ 20 µA, measured per the procedure above — powered over USB-C, no computer attached, on an instrument that resolves ~10 µA. | Hundreds of µA, or a ~1 kHz ripple on the floor. |
 | B9 | If the node was starved of sensor data for 24 consecutive cycles, `keepalive_transmissions ≥ 1`. | 24+ quiet cycles and no transmission — the node went dark. |
 | B10 | `anomaly_count: 0`, or every anomaly explained in the EVIDENCE.md entry. | An unexplained anomaly. |
 
@@ -156,7 +206,7 @@ it with the serial capture finding nothing and read `ttn_f_cnt_*`.
 
 | Result the soak produces | Issue it settles |
 |---|---|
-| Measured mean sleep current with its window, USB physically detached | [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8) |
+| Measured mean sleep current with its window and its measurement point, no host attached | [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8) |
 | Trace shows a flat floor with no ~1 kHz tick ripple | [#12](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/12) |
 | Sleep floor after cycle 5 equals the floor after cycle 1; residual accounted for | [#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47) |
 | 24 h with zero watchdog resets, and no reset landing inside a sleep window | [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) |
