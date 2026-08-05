@@ -94,6 +94,25 @@
 #define FEATURE_ONEWIRE_SCAN 0
 #endif
 
+// The battery driver's PARAMGET/PARAMSET pass. OFF by default, which is a reversal.
+//
+// It was added on the hypothesis that the pack's sensors were sitting at RULE_DISABLE and
+// had to be armed before they would sample. The bench has since ruled that out from both
+// ends: the pack's own announcement descriptors already report rule 0x0008 (RULE_PERIODIC),
+// the working reference reader never sends a parameter write at all, and on this pack
+// PARAMGET draws no reply while the "PARAMSET ack" we captured turned out to be the
+// announcement arriving on its own schedule rather than a response to anything.
+//
+// So the pass buys no behaviour and costs up to 30 s of awake time per cycle — time the
+// provisioning window in src/sensors/battery.cpp now needs and can spend far better. Left
+// compiled-in behind a switch rather than deleted, because "the pack ignores this" is a
+// claim about one pack and re-enabling it is how the next one gets tested:
+//
+//   pio run -e stage2 -a "--project-option=build_flags=-D FEATURE_BATTERY_PARAM_PASS=1"
+#ifndef FEATURE_BATTERY_PARAM_PASS
+#define FEATURE_BATTERY_PARAM_PASS 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)

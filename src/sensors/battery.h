@@ -77,9 +77,11 @@ class Battery {
     // Hex-dump under a label, for the paths where the decoded verdict is not enough evidence.
     void dump(const char *what, const uint8_t *buf, size_t len);
 
-    // BOOT, listen, repeat — bounded. The pack announces on its own schedule, so a single
-    // listening window is a coin flip; this makes provisioning reliable without ever blocking
-    // indefinitely. Returns true when an announcement was answered this cycle.
+    // BOOT once, then keep answering every announcement until a wall-clock deadline — the
+    // reference master's steady state, approximated. Exits early the moment the pack proves it
+    // latched the assigned id. Returns true when at least one announcement was answered this
+    // cycle, which is a weaker claim than "the pack is provisioned": ask m_pack_latched for
+    // that.
     bool acquire_pid(uint8_t *buf, size_t cap);
 
     // Read one sensor's sampling rule and interval. Read-only: this is how the driver finds
@@ -110,7 +112,12 @@ class Battery {
     // announcement with the same frame turned around and provId filled in. Rewrites `buf`
     // in place — the response is the request with five bytes changed — and returns true
     // when an announcement was found and answered.
-    bool provision(uint8_t *buf, size_t len);
+    //
+    // `announced_provid` reports the id the *pack* claimed, read before the mutation
+    // overwrites it, and is set to 0xFF when no announcement was found. It is the only direct
+    // evidence of whether a previous answer stuck: 0xFF means still unprovisioned, anything
+    // else means the pack accepted an assignment.
+    bool provision(uint8_t *buf, size_t len, uint8_t &announced_provid);
 
     // Byte-level transport. The bit timing lives in beegee-tokyo/RAK-OneWireSerial, not
     // here — see the rationale at the top of battery.cpp. Deliberately not a member of this
@@ -149,6 +156,14 @@ class Battery {
     // Stays 0xFF until a provisioning handshake completes, and is never written by the read
     // path.
     uint8_t m_assigned_pid = 0xFF;
+
+    // Set once an announcement has been seen carrying a provId other than 0xFF — i.e. the pack
+    // has confirmed, in its own words, that it accepted the id this master assigned. Distinct
+    // from "we answered an announcement", which every previous revision could claim while the
+    // pack went on reporting 0xFF forever. Nothing depends on it yet beyond ending the
+    // provisioning window early and choosing the data-poll address; it exists so the one fact
+    // that has cost the most bench time is held explicitly instead of re-derived from hex.
+    bool m_pack_latched = false;
 
     // Set once the pack has produced a genuine measurement. Sampling is a persistent setting
     // on the pack, so a pack that has reported real values does not need configuring again —

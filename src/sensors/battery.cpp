@@ -382,12 +382,57 @@ constexpr uint32_t kPushListenUs = 20000000; // 20 s
 //   (28 bytes) immediately followed by `FF 7E 00 55 ...` (92 bytes) in a single read.
 constexpr size_t kRxCapacity = 0x100;
 
-// How many times to prompt for an announcement before giving up on provisioning for this
-// cycle. Each attempt costs one BOOT plus at most the first-byte window, so three bounds the
-// phase at roughly 1.5 s — comfortably inside the 120 s watchdog and cheap next to a wasted
-// cycle. Three rather than one because the pack announces on its own schedule, and rather
-// than ten because a pack that has not spoken in three windows is not going to.
-constexpr uint8_t kProvAttempts = 3;
+// How long to keep answering announcements before giving up on provisioning for this cycle.
+//
+// This replaces a three-attempt loop that answered the first announcement and immediately
+// moved on to polling. Every other explanation for the pack never latching the id has now
+// been eliminated by the bench: the response frame is byte-for-byte what the reference emits
+// (checksum arithmetic independently confirmed), VER3 is the type the reference answers, BOOT
+// is the only frame a master originates, and parameter writes are not involved. What is left
+// is the one behavioural difference between our driver and a real master — a real master
+// never stops answering.
+//
+// The reference is explicit about this. Re-entering snhub_provision_req_program() with a
+// serial number it has already recorded takes the `f_memcmp(...) == 0` break, skips the
+// re-copy, and still echoes provId and still re-fires ADD_PID. Answering the same probe
+// repeatedly is not a degenerate case in that code, it is the steady state. Meshtastic then
+// reschedules the handler every 50 ms for as long as the board is powered, so the answer
+// arrives for every announcement, indefinitely. Our wake-transact-sleep driver cannot do
+// "indefinitely", so it buys a window instead.
+//
+// 45 s because the pack re-announces on its own cadence and this has to span several of those
+// periods for "answered repeatedly" to be a real test rather than a re-run of "answered once".
+//
+// THE POWER COST IS NOT AFFORDABLE AS A STEADY STATE. 45 s of radio-silent awake time every
+// wake, on a node meant to run for months on a solar-recharged pack, is a bring-up measure and
+// nothing more — see docs/POWER_BUDGET.md. The intended end state is to provision once and
+// persist the latched id, or at minimum to run the long window only while the pack is not yet
+// latched and a short one afterwards; both are deliberately not done here, because the point
+// of this revision is to find out whether the latch happens at all, and a shortcut taken
+// before that is known would be a shortcut around the evidence. Tracked with the rest of the
+// battery bring-up in issue #5.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+//   snhub_provision_req_program(): the already-known-serial-number path breaks out of the
+//   record search rather than returning, so it falls through to the same body that sets
+//   `hub_api_prov->provId = pid`, recomputes the checksum, raises SNHUBAPI_EVT_QSEND and then
+//   SNHUBAPI_EVT_ADD_PID. A repeat announcement from a known probe is answered exactly like
+//   the first one.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+//   onewireHandle() ends `return 50;`, so the scheduler re-runs it every 50 ms forever, and
+//   the drain plus process() runs unconditionally on every tick. The one consumer this pack is
+//   known to accept never stops listening and never stops answering.
+// CITE(bench): docs/EVIDENCE.md — the announcement carries provId 0xFF on every cycle across
+//   every previous revision, i.e. the pack has never been observed to latch the id it was
+//   handed. That is the observation this window exists to change or to rule out.
+// CITE(datasheet): [CIT-NRF-WDT] nRF52840 PS, WDT — the watchdog cannot be stopped once
+//   started, so this window is sized against the 120 s timeout src/main.cpp arms rather than
+//   against patience. Worst case for the whole of Battery::read() is now roughly 68 s: this
+//   45 s window, two ~0.5 s poll attempts, and the 20 s push listen, with the 30 s parameter
+//   pass switched off (FEATURE_BATTERY_PARAM_PASS) to pay for it. main.cpp feeds the watchdog
+//   on either side of the battery read and never inside it, so 68 s is the number that has to
+//   fit, and it fits with about 50 s to spare.
+constexpr uint32_t kProvWindowMs = 45000;
 
 // How many wake cycles may spend time trying to enable sampling before the driver stops
 // asking. A pack that ignores two full enable passes is not going to answer the third, and a
@@ -682,11 +727,13 @@ size_t Battery::query(uint8_t dest, uint8_t *buf, size_t cap)
 // CITE(bench): docs/EVIDENCE.md — the announcement captured on 3d3425d carries provId 0xFF
 //   at frame index 34 and re-announces every cycle with an incrementing sequence, i.e. the
 //   pack was still waiting to be assigned an id after every previous firmware revision.
-bool Battery::provision(uint8_t *buf, size_t len)
+bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
 {
     SnHubFrame f;
     bool       bad_cksum = false;
     size_t     from      = 0;
+
+    announced_provid = kBroadcastId; // "still unprovisioned" until a frame says otherwise
 
     while (next_frame(buf, len, from, f, bad_cksum)) {
         from = f.delim + 1;
@@ -706,6 +753,26 @@ bool Battery::provision(uint8_t *buf, size_t len)
         if (prov + kProvIdOffset >= f.cksum) {
             continue; // too short to hold a provId — not a frame we can answer
         }
+
+        // Read the id the pack believes it has, before the mutation below overwrites it.
+        //
+        // This one byte is the whole verdict on the handshake and it has been free all along.
+        // The master assigns an id by echoing it back; the pack proves it accepted the
+        // assignment by carrying that id in its *next* announcement instead of 0xFF. Every
+        // capture so far shows 0xFF, which is how we know nothing has ever stuck — but the
+        // driver read it, overwrote it, and never reported it, so the fact had to be recovered
+        // by hand from hex dumps every single time. Surfaced to the caller so the provisioning
+        // loop can stop the instant it changes.
+        //
+        // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
+        //   SNHub_Api_Provision_t.provId, and onewire_master_protocol.c
+        //   snhub_provision_req_program() which writes `hub_api_prov->provId = pid` into the
+        //   frame it echoes. The field is the master's assignment on the way out and the
+        //   probe's own belief about its id on the way in.
+        // CITE(bench): docs/EVIDENCE.md — every announcement captured to date carries 0xFF at
+        //   this offset, on every revision, including the cycles where the response was
+        //   transmitted correctly. Unlatched is the observed state, not an assumed one.
+        announced_provid = buf[prov + kProvIdOffset];
 
         // Mutate and transmit FIRST. Nothing — not one log line — goes between recognising the
         // announcement and putting the answer on the wire.
@@ -750,7 +817,12 @@ bool Battery::provision(uint8_t *buf, size_t len)
             tx_byte(buf[i]);
         }
 
-        LOGF("   battery : provisioned probe 0x%02X as pid 0x%02X\n", f.source, kProbeId);
+        // Reworded from "provisioned probe ... as pid ...", which overstated what had
+        // happened: it announced an assignment the pack had not been observed to accept. The
+        // announced id is now printed beside it, so every line says which of the two facts it
+        // is — we answered, versus the pack agreed.
+        LOGF("   battery : answered probe 0x%02X (announced pid 0x%02X) with pid 0x%02X\n",
+             f.source, announced_provid, kProbeId);
 
         // The exact bytes we just transmitted, so the next capture can be compared against the
         // announcement that provoked them rather than trusted. Printed from the wake byte
@@ -808,61 +880,140 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
     LOGLN("");
 }
 
-// Complete the provisioning handshake, retrying rather than hoping.
+// Stay in the provisioning phase, answering every announcement, the way a real master does.
 //
-// The production capture that motivated this shows no `provisioned probe` line at all: the
-// single 500 ms listen after BOOT did not overlap the pack's announcement, so the handshake
-// silently did not happen and the SENDAT that followed went to an unprovisioned probe. That
-// is not a rare misfortune to be tolerated — it is the difference between a reading and no
-// reading, decided by timing luck.
+// The previous revision answered the first announcement and then moved on to polling within
+// milliseconds. That is the last structural difference between this driver and a master the
+// pack is known to accept, and it is now the only surviving explanation for the pack never
+// latching the id: everything else has been eliminated. The response bytes match the
+// reference exactly, VER3 is the type the reference acts on, BOOT is the only frame a master
+// originates, and the parameter writes were ours alone. What we have never done is keep
+// answering.
 //
-// The reference master never has this problem because it never stops listening: Meshtastic
-// runs the one-wire handler on a 50 ms periodic forever and requests data only once the
-// ADD_PID event has fired. A driver that wakes, transacts and sleeps cannot copy that, so it
-// buys the equivalent with bounded retries — BOOT, listen, and if nothing answerable arrived,
-// BOOT again — which converts "did the announcement land in our window" from a coin flip into
-// a near certainty without ever blocking indefinitely.
+// The reference's steady state is a loop, not a transaction. Meshtastic reschedules the
+// one-wire handler every 50 ms for as long as the board is powered and drains on every tick,
+// and the protocol code answers a repeat announcement from an already-known probe exactly as
+// it answers the first — the already-recorded path breaks out of the serial-number search and
+// falls through into the same echo-and-ADD_PID body. So the pack, in the configuration where
+// it is known to work, is answered over and over. If it only latches after several answered
+// announcements, or requires the master to still be answering when it next announces, a driver
+// that answers once and leaves could never reach that state no matter how correct its bytes
+// were.
+//
+// Structure:
+//   * BOOT once, at the top, and never again inside the window. Its documented effect is to
+//     make probes re-announce; the pack already re-announces on its own, and repeating a
+//     command whose purpose is to restart announcement is a plausible way to reset whatever
+//     state is accumulating across answered announcements. Nothing in the reference repeats
+//     it either — api_init() sends it at startup and api_set_provision() on an explicit
+//     request, never on a timer.
+//   * Then drain-and-answer until the deadline, with the same early-exit drain and the same
+//     mutate-and-transmit response as before. Nothing about the frame changes.
+//   * Break the moment the pack proves it latched (see below), because at that point the
+//     window has served its purpose and every further second is pure battery cost.
+//
+// No flush() inside the loop, deliberately: the receive path may be part-way through an
+// announcement when an iteration ends, and discarding those bytes would manufacture exactly
+// the missed-announcement failure this phase exists to remove.
 //
 // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-//   onewireHandle() returns 50 (ms) to reschedule itself indefinitely, and `if (provision !=
-//   0) { RakSNHub_Protocl_API.get.data(provision); }` gates the data request on provisioning
-//   having completed. Data is never requested from an unprovisioned probe.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_init() sends
-//   PLD_PROVI_TYPE_BOOT to PID_UNKNOW and nothing awaits a reply; the announcement arrives
-//   later and independently, which is what makes repeating BOOT safe.
-// CITE(bench): docs/EVIDENCE.md — stage2 capture on 7f65384 logged a valid 28-byte SENDAT
-//   reply with no preceding `provisioned probe` line, i.e. the announcement was missed and
-//   the request went out to an unprovisioned pack.
+//   onewireHandle() ends `return 50;` so the scheduler re-runs it every 50 ms indefinitely,
+//   with `while (mySerial.available()) { ... }` and `RakSNHub_Protocl_API.process()` on every
+//   tick and no exit condition. Continuous answering is the reference's normal operation.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c — BOOT is sent
+//   only from api_init() and api_set_provision(), both as
+//   snhub_provision_command(PID_UNKNOW, 0, SNHUB_GS_SET, PLD_PROVI_TYPE_BOOT), and nothing
+//   awaits a reply. Announcements arrive independently afterwards, which is why one BOOT is
+//   enough and why repeating it buys nothing.
+// CITE(bench): docs/EVIDENCE.md — a 20 s passive listen at 9600 that transmitted nothing at
+//   all still received the announcement, repeatedly and unchanged with provId 0xFF. The pack
+//   does not need prompting; it needs answering.
 bool Battery::acquire_pid(uint8_t *buf, size_t cap)
 {
-    for (uint8_t attempt = 0; attempt < kProvAttempts; attempt++) {
-        bus(m_pin).flush();
-        send_boot();
-        delay(2); // let the probe turn the line around
+    bus(m_pin).flush(); // anything queued predates this window
+    send_boot();
+    delay(2); // let the probe turn the line around
 
+    const uint32_t started_ms = millis();
+    bool           answered   = false;
+    uint8_t        answers    = 0;
+
+    while ((millis() - started_ms) < kProvWindowMs) {
         // Early-exit drain: answer the announcement as soon as it is complete, not after the
         // frame gap. This is the second half of the latency fix — see provision_ready().
+        // A quiet slice returns 0 after the first-byte timeout, which is what paces this loop.
         const size_t n = receive(buf, cap, /*stop_on_provision=*/true);
-        if (n > 0 && provision(buf, n)) {
-            // Two separate facts, recorded separately. `m_assigned_pid` is the id this
-            // master just handed the probe and is the only correct destination for a
-            // parameter write; `m_pid` is merely the address a SENDAT happens to be
-            // answered on, and the data path is allowed to fall back to 0xFF when the
-            // assigned id stays silent. Collapsing the two — which is what the previous
-            // revision did — meant that fallback re-latched m_pid to 0xFF and the enable
-            // pass then refused to run, on exactly the cycles it was needed.
-            m_assigned_pid = kProbeId;
-            m_pid          = kProbeId;
-            delay(50); // the reference's tick interval — the only timing guidance available
-            return true;
+        if (n == 0) {
+            continue;
         }
-        if (n > 0) {
+
+        uint8_t announced = kBroadcastId;
+        if (!provision(buf, n, announced)) {
             // Bytes arrived but held no answerable announcement. Worth the dump: it separates
             // "the pack is quiet" from "the pack said something this parser rejected".
             dump("prov?", buf, n);
+            continue;
         }
+
+        answered = true;
+        answers++;
+
+        // The latch test, and the reason this loop can be short-lived when it works.
+        //
+        // An announcement carrying anything other than PID_UNKNOW proves the pack accepted an
+        // assignment: that field is its own belief about its id, and it has read 0xFF in every
+        // capture ever taken from this pack. PID_MASTER is excluded because 0x00 is the
+        // master's address and cannot be a probe's id, so a 0x00 there is a decoding fault
+        // rather than a latch. The observed value is logged either way, so a latch onto some
+        // third id shows up as itself instead of being flattened into "worked".
+        //
+        // Two separate facts, still recorded separately. `m_assigned_pid` is the id the probe
+        // is believed to hold and is the only correct destination for a parameter write;
+        // `m_pid` is merely the address a SENDAT happens to be answered on, and the data path
+        // is allowed to fall back to 0xFF when the assigned id stays silent. Collapsing the
+        // two meant that fallback re-latched m_pid to 0xFF and the enable pass then refused to
+        // run on exactly the cycles it was needed.
+        //
+        // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
+        //   PID_UNKNOW = 0xFF is the id an unprovisioned probe carries and PID_MASTER = 0x00
+        //   is the master's own address; onewire_master_protocol.c api_set_snsr_param()
+        //   refuses `pid == PID_MASTER` outright, so neither value can be a probe's assigned
+        //   id.
+        // CITE(bench): docs/EVIDENCE.md — the announcement's provId has read 0xFF on every
+        //   cycle of every revision, including ones that transmitted a byte-correct response,
+        //   so any other value in this field is new information rather than noise.
+        const bool latched = (announced != kBroadcastId && announced != kMasterId);
+        if (latched) {
+            m_pack_latched = true;
+            m_assigned_pid = announced;
+            m_pid          = announced;
+            // The line that settles the question. One grep for "pack latched" tells the next
+            // bench run whether sustained answering is what the pack was waiting for.
+            LOGF("   battery : pack latched pid 0x%02X after %u answer(s), %lu ms\n", announced,
+                 (unsigned)answers, (unsigned long)(millis() - started_ms));
+            break;
+        }
+
+        m_assigned_pid = kProbeId;
+        m_pid          = kProbeId;
     }
-    return false;
+
+    if (!answered) {
+        return false;
+    }
+
+    if (!m_pack_latched) {
+        // Answered repeatedly and the pack still says 0xFF. That is a negative result worth
+        // stating plainly rather than leaving to be inferred from an absent line: it means
+        // sustained answering is not the missing piece either, and the next hypothesis has to
+        // come from somewhere other than the master's timing.
+        LOGF("   battery : answered %u announcement(s) in %lu ms — pack still reports pid "
+             "0x%02X\n",
+             (unsigned)answers, (unsigned long)(millis() - started_ms), kBroadcastId);
+    }
+
+    delay(50); // the reference's tick interval — the only timing guidance available
+    return true;
 }
 
 // Read one sensor's sampling parameters.
@@ -1375,7 +1526,26 @@ BatteryReading Battery::read()
     //   rather than from prior art, which cannot establish that the write is unnecessary —
     //   only that one particular consumer got away without it on a pack somebody else had
     //   already configured.
-    if (provisioned && !m_ever_sampled && m_enable_attempts < kEnableAttempts) {
+    //
+    // AND IT IS NOW OFF BY DEFAULT. The hypothesis it was built on — that the pack's sensors
+    // sit at RULE_DISABLE until armed — has been falsified from three directions: the pack's
+    // own announcement descriptors already report rule 0x0008 (periodic), the reference reader
+    // never sends a parameter write at all, and on this pack PARAMGET draws no reply while the
+    // "ack" we captured for PARAMSET turned out to be an announcement arriving on its own
+    // schedule. So the pass changes nothing and costs up to 30 s of awake time per cycle, which
+    // is precisely the budget the provisioning window above now needs. Switched off rather than
+    // deleted, because that conclusion is about one pack — see FEATURE_BATTERY_PARAM_PASS in
+    // src/build_features.h for how to put it back.
+    //
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+    //   the working reference never calls `set.param` or `get.param`. After ADD_PID it does
+    //   nothing but poll SENDAT, so a parameter write cannot be a precondition for sampling on
+    //   a pack this consumer reads successfully.
+    // CITE(bench): docs/EVIDENCE.md — the pack's announcement descriptor tail reads rule
+    //   0x0008 on every sensor, i.e. the sensors report themselves as already periodic, and the
+    //   PARAMGET sent to arm them drew no reply at all.
+    if (kParamPassEnabled && provisioned && !m_ever_sampled &&
+        m_enable_attempts < kEnableAttempts) {
         m_enable_attempts++;
         enable_sampling(rx, sizeof(rx));
         link.flush(); // the write's own traffic is not part of the data reply
