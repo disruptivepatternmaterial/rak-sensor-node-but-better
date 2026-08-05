@@ -386,7 +386,6 @@ void onewire_scan(uint8_t pin)
     }
     LOGLN();
 }
-#endif
 
 } // namespace diagnostics
 

@@ -159,7 +159,6 @@ void bus_scan()
     }
     LOGLN();
 }
-#endif
 
 } // namespace diagnostics
 
