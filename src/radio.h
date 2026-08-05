@@ -80,6 +80,13 @@ class Radio {
 
     uint32_t consecutive_failures() const { return m_failures; }
 
+    // Tells this class how many cycles will pass before it is called again, so a failed join
+    // can report the real next attempt instead of just the backoff. The backoff sets the sleep
+    // between cycles, but main.cpp only reaches ensure_joined() on some of them, so the two
+    // numbers differ by up to the heartbeat cadence — and reporting the smaller one understated
+    // the wait by hours during bring-up. Refs #24.
+    void set_cycles_until_next_call(uint32_t cycles) { m_cycles_until_next_call = cycles; }
+
   private:
     // How long to stay awake after an uplink so both Class A receive windows can open.
     // Read from the MAC, because the network assigns a longer delay than the
@@ -89,4 +96,8 @@ class Radio {
     bool m_joined   = false;
     bool m_started  = false;
     uint32_t m_failures = 0;
+
+    // Cycles until the next ensure_joined(). One means "next cycle", which is the honest
+    // default for a caller that has not said otherwise.
+    uint32_t m_cycles_until_next_call = 1;
 };

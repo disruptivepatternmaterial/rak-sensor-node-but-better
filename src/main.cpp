@@ -85,6 +85,20 @@ bool heartbeat_due(uint32_t quiet_cycles)
 {
     return quiet_cycles == 1 || (quiet_cycles % kQuietCyclesPerHeartbeat) == 0;
 }
+
+// How many cycles until one that would reach ensure_joined(), assuming both sensors stay
+// silent. Radio needs this to report a real next-attempt time rather than just its backoff:
+// the two differ by up to the heartbeat cadence, and the difference is what #24 is about. A
+// sensor recovering brings the attempt forward, so this is an upper bound by construction.
+uint32_t cycles_until_join_attempt(uint32_t quiet_cycles)
+{
+    for (uint32_t ahead = 1; ahead <= kQuietCyclesPerHeartbeat; ahead++) {
+        if (heartbeat_due(quiet_cycles + ahead)) {
+            return ahead;
+        }
+    }
+    return kQuietCyclesPerHeartbeat; // unreachable: a multiple always falls inside the span
+}
 #endif
 
 void print_banner()
@@ -231,6 +245,13 @@ void loop()
     // one-wire link is still heard from. Never granted for a hold backed by a measured low
     // voltage — see power.h. Refs #45.
     const bool keepalive = !brownout.transmit_allowed() && brownout.keepalive_due();
+
+    // Only total silence has to wait for the next heartbeat cycle; a payload or a due keepalive
+    // reaches ensure_joined() on the very next one. Handed to Radio so a failed join can report
+    // the real wait instead of just its own backoff. Refs #24.
+    radio.set_cycles_until_next_call((payload.empty() && !keepalive)
+                                         ? cycles_until_join_attempt(empty_cycles)
+                                         : 1);
 
     if (!brownout.transmit_allowed() && !keepalive) {
         // Deliberately still reading the sensors and still waking on schedule. The pack

@@ -244,12 +244,21 @@ bool Radio::ensure_joined()
         session::save();
     } else {
         m_failures++;
-        // "no sooner than" rather than a flat "next try in": the backoff sets the minimum
-        // sleep, but main.cpp's total-silence heartbeat only calls ensure_joined() on the
-        // 1st and every 8th quiet cycle, so the real next attempt can be later. Promising an
-        // exact time here understated it and cost bring-up debugging time. Refs #24.
-        LOGF("   radio   : join failed (attempt %lu, retry no sooner than %lu s)\n",
-             (unsigned long)m_failures, (unsigned long)backoff_seconds());
+
+        // The backoff is the sleep between cycles, not the wait until the next attempt. While
+        // both sensors are silent main.cpp reaches ensure_joined() only on some cycles, so the
+        // real wait is the backoff multiplied by however many cycles that is — up to the
+        // heartbeat cadence. Reporting the backoff alone understated it by hours and cost
+        // bring-up debugging time, which is the whole of #24.
+        //
+        // Stated as an upper bound because a sensor recovering brings the next attempt forward
+        // to the very next cycle. A bound that is honest about its direction is worth more than
+        // a precise-looking number that is wrong in the direction of optimism. Refs #24.
+        const uint32_t next_attempt_seconds = backoff_seconds() * m_cycles_until_next_call;
+        LOGF("   radio   : join failed (attempt %lu, next attempt within %lu s — %lu cycle(s) "
+             "at %lu s)\n",
+             (unsigned long)m_failures, (unsigned long)next_attempt_seconds,
+             (unsigned long)m_cycles_until_next_call, (unsigned long)backoff_seconds());
     }
 
     return m_joined;

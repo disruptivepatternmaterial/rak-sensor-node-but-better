@@ -10,6 +10,15 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The join backoff message now reports the real next attempt**
+  ([#24](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/24)).
+  It printed the radio's backoff — `next try in 60 s` — but while both sensors are silent
+  `main.cpp` only reaches `ensure_joined()` on the 1st and every 8th quiet cycle, so the node
+  then sat through cycles 2–7 without retrying. The backoff is the sleep *between* cycles, not
+  the wait until the next attempt; the two differ by up to the heartbeat cadence. `main.cpp` now
+  passes that cadence in, and the message reports the product as an upper bound, since a sensor
+  recovering brings the attempt forward to the next cycle.
+
 - **A dead one-wire link no longer silences a healthy node forever**
   ([#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45)).
   The #38 fix made the brownout gate fail closed, which was right, but it left the gate
