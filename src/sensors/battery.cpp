@@ -515,6 +515,21 @@ uint8_t frame_chksum(const uint8_t *buf, size_t delim, size_t payload_len)
     return c;
 }
 
+// What a scan saw besides the frame it returned.
+//
+// The scan's boolean answer — "is there a verified frame here" — throws away the two facts that
+// actually distinguish the failures. A frame whose declared length exceeds what arrived is a
+// truncated read; a verified PROVISION frame where SENDAT was expected is the pack talking past
+// us. Both used to collapse into BadFrame, and the collapse is what let a truncated 92-byte
+// announcement be reported as a record set full of zeros.
+struct ScanNotes {
+    bool   bad_cksum     = false;
+    bool   truncated     = false; // a candidate declared more bytes than arrived
+    bool   saw_provision = false; // a verified PROVISION frame was present
+    size_t declared      = 0;     // bytes the truncated candidate said it had, from the wake byte
+    size_t arrived       = 0;     // bytes actually in the buffer
+};
+
 // A located, checksum-verified frame inside a receive buffer.
 struct SnHubFrame {
     size_t  delim;       // index of the 0x7E
@@ -546,8 +561,10 @@ struct SnHubFrame {
 // CITE(bench): docs/EVIDENCE.md — SENDAT sweep on 3d3425d returned one buffer holding both
 //   `FF 7E 00 15 02 01 ...` (the 28-byte data reply) and `FF 7E 00 55 02 00 ...` (the
 //   announcement) concatenated, which is what makes the scan mandatory.
-bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, bool &bad_cksum)
+bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, ScanNotes &notes)
 {
+    notes.arrived = len;
+
     for (size_t d = from; d < len; d++) {
         if (buf[d] != kDelimiter) {
             continue;
@@ -568,11 +585,19 @@ bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, bool
         const size_t payload = d + 5;
         const size_t cksum   = payload + payload_len;
         if (cksum >= len) {
-            continue; // declared longer than what arrived
+            // Declared longer than what arrived. Recorded rather than silently skipped: this is
+            // the exact shape of the pack's 92-byte announcement caught at 28 bytes, and
+            // treating it as "no frame" is what made a transport fault look like bad data.
+            notes.truncated = true;
+            notes.declared  = cksum + 1; // through the checksum byte, counting from the wake byte
+            continue;
         }
         if (frame_chksum(buf, d, payload_len) != buf[cksum]) {
-            bad_cksum = true;
+            notes.bad_cksum = true;
             continue;
+        }
+        if (buf[payload + 3] == kHubTypeProvision) {
+            notes.saw_provision = true;
         }
 
         f.delim            = d;
@@ -616,10 +641,10 @@ bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, bool
 bool provision_ready(const uint8_t *buf, size_t len)
 {
     SnHubFrame f;
-    bool       bad_cksum = false;
-    size_t     from      = 0;
+    ScanNotes  notes;
+    size_t     from = 0;
 
-    while (next_frame(buf, len, from, f, bad_cksum)) {
+    while (next_frame(buf, len, from, f, notes)) {
         from = f.delim + 1;
         if (f.hub_type == kHubTypeProvision && f.flag == kRui3FlagReq &&
             f.hub_payload_type == kPldProvVer3 && f.dest == kMasterId) {
@@ -641,6 +666,9 @@ const char *battery_result_name(BatteryResult r)
     case BatteryResult::BadChecksum: return "bad checksum";
     case BatteryResult::NoRecords:   return "no records";
     case BatteryResult::Unsampled:   return "all-zero records (pack not sampled)";
+    case BatteryResult::Truncated:   return "truncated frame (declared longer than arrived)";
+    case BatteryResult::ProvisionOnly:
+        return "PROVISION announcement, no SENDAT reply";
     }
     return "?";
 }
@@ -778,12 +806,12 @@ size_t Battery::query(uint8_t dest, uint8_t *buf, size_t cap)
 bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
 {
     SnHubFrame f;
-    bool       bad_cksum = false;
-    size_t     from      = 0;
+    ScanNotes  notes;
+    size_t     from = 0;
 
     announced_provid = kBroadcastId; // "still unprovisioned" until a frame says otherwise
 
-    while (next_frame(buf, len, from, f, bad_cksum)) {
+    while (next_frame(buf, len, from, f, notes)) {
         from = f.delim + 1;
 
         if (f.hub_type != kHubTypeProvision || f.flag != kRui3FlagReq) {
@@ -1238,19 +1266,42 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     // Pick the SENDAT frame out of the buffer. There may be more than one frame in there,
     // and the data reply is not reliably the first — see next_frame().
     SnHubFrame f;
-    bool       bad_cksum = false;
-    bool       found     = false;
-    size_t     from      = 0;
+    ScanNotes  notes;
+    bool       found = false;
+    size_t     from  = 0;
 
-    while (next_frame(buf, len, from, f, bad_cksum)) {
+    while (next_frame(buf, len, from, f, notes)) {
         from = f.delim + 1;
         if (f.hub_type == kHubTypeSendData) {
             found = true;
             break;
         }
     }
+
+    // Classify the failure instead of flattening it. Order matters: a truncated read is the most
+    // specific and most actionable diagnosis, and it must not be masked by the checksum failures
+    // that a truncated buffer also tends to produce further along.
+    //
+    // Nothing below this point can yield a reading, so no `out` field is ever written on any of
+    // these paths — a wrong-type or short frame produces no value at all, not a zero.
     if (!found) {
-        return bad_cksum ? BatteryResult::BadChecksum : BatteryResult::BadFrame;
+        if (notes.truncated) {
+            // The single most misleading line in this driver's history was the one that did not
+            // exist here. State both numbers: the length the frame declared and the length that
+            // arrived. Everything the next reader needs to look at the transport is in it.
+            LOGF("   battery : truncated frame — declared %u bytes, %u arrived\n",
+                 (unsigned)notes.declared, (unsigned)notes.arrived);
+            return BatteryResult::Truncated;
+        }
+        if (notes.saw_provision) {
+            // The pack is alive and framing correctly; it is announcing rather than answering.
+            // This is its actual observed behaviour on this link and it is not a fault in the
+            // frame, so it must not read as one.
+            LOGLN(F("   battery : PROVISION announcement where a SENDAT reply was expected — "
+                    "the pack is announcing, not answering"));
+            return BatteryResult::ProvisionOnly;
+        }
+        return notes.bad_cksum ? BatteryResult::BadChecksum : BatteryResult::BadFrame;
     }
 
     // The same records arrive in opposite byte orders depending on which way the exchange
@@ -1704,7 +1755,8 @@ BatteryReading Battery::read()
     // need completely different fixes. Unsampled is included deliberately: the raw bytes are
     // the evidence for whether the zeros are the pack's or ours.
     if (m_last == BatteryResult::BadFrame || m_last == BatteryResult::BadChecksum ||
-        m_last == BatteryResult::Unsampled) {
+        m_last == BatteryResult::Unsampled || m_last == BatteryResult::Truncated ||
+        m_last == BatteryResult::ProvisionOnly) {
         LOG(F("   battery : raw"));
         for (size_t i = 0; i < n; i++) {
             LOGF(" %02X", rx[i]);

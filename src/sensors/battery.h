@@ -40,6 +40,25 @@ enum class BatteryResult : uint8_t {
     // failure — and distinct from Ok because 0.00 V from a pack that is powered by the cell
     // it is measuring is not a measurement. Reported as no data; never encoded.
     Unsampled,
+
+    // A frame arrived whose declared RUI3 length is longer than the bytes that actually
+    // landed. This is a transport fault, not a data fault, and conflating the two cost days.
+    //
+    // The pack's provisioning announcement is 92 bytes. A read that returns 28 of them looks,
+    // to a scanner that only asks "did any frame verify", exactly like a line with no frame on
+    // it — so it was reported as BadFrame, alongside genuine noise, and the trailing bytes of
+    // our own uninitialised buffer were then available to be walked as if they were records.
+    // Reported separately so the console says "declared 92, got 28" and the next reader looks
+    // at the receive path instead of at the protocol.
+    Truncated,
+
+    // A complete, checksum-valid PROVISION announcement arrived where a SENDAT reply was
+    // expected, and no SENDAT frame arrived at all.
+    //
+    // This is the pack's actual observed behaviour and it deserves its own name. It means the
+    // pack is alive, framing correctly, and talking — but it is announcing itself rather than
+    // answering the question we asked. Previously indistinguishable from a corrupt frame.
+    ProvisionOnly,
 };
 
 const char *battery_result_name(BatteryResult r);
