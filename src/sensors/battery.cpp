@@ -1392,6 +1392,14 @@ size_t Battery::receive(uint8_t *buf, size_t cap, bool stop_on_provision,
     constexpr size_t kMinFrame = 1 + 4 + kHubHeaderBytes + 1;
 
     while (n < cap) {
+        // The push-listen caller hands this loop kPushListenUs — 20 s — and it spins here
+        // without touching anything else. That is a sixth of the watchdog window spent inside
+        // one function, and it stacks with the provisioning window and a slow RK900 read on
+        // the same wake. Feeding is safe because the loop cannot run past its own deadline:
+        // the timeout below is what ends it, so a genuinely stuck line still returns.
+        // CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — 120 s hardware watchdog.
+        power::watchdog_feed();
+
         const int v = link.read();
         if (v >= 0) {
             buf[n++] = (uint8_t)v;
@@ -1527,6 +1535,21 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
             LOGF("   battery : status word sid 0x%02X = 0x%04X (not a measurement)\n",
                  buf[i], val16(i + 2));
             i += 4;
+        } else if (type == kIpsoDcCurrent || type == kIpsoDcVoltage ||
+                   type == kIpsoTemperature || type == kIpsoBitValues16) {
+            // Recognized type, but the frame ends before its payload does — the four branches
+            // above all require two value bytes and this one has fewer left.
+            //
+            // Reported separately because it is a different fault with a different fix. The
+            // branch below means "the pack speaks a record this build has never heard of",
+            // which is answered by adding a decoder. This means "the frame was cut short",
+            // which is answered by looking at the transport: a truncating receive buffer, an
+            // inter-byte gap that expired mid-record, or a length field that disagrees with
+            // what arrived. Collapsing the two would have sent the next reader to write a
+            // parser for type 185, which is already parsed here.
+            LOGF("   battery : record type %u truncated — %u byte(s) left, needs 4\n", type,
+                 (unsigned)(records_end - i));
+            break;
         } else {
             // Worth logging: it means the pack sends something this build does not know
             // about, and every record behind it is being discarded.
@@ -1920,18 +1943,39 @@ BatteryReading Battery::read()
         return out;
     }
 
+    // Sign is taken from the whole value, never from the integer part.
+    //
+    // The obvious formulation — `"%+d.%02u", v / 100, abs(v % 100)` — silently inverts every
+    // current between -0.99 A and -0.01 A. For v = -50, `v / 100` truncates toward zero to 0,
+    // which `%+d` renders as "+0", and `abs(v % 100)` supplies 50: a pack discharging at half
+    // an amp prints as `+0.50 A`. Temperatures from -0.9 to -0.1 C had the same defect.
+    //
+    // That band is not an edge case. It is where a pack sits on an overcast day and under a
+    // light load, which is exactly the condition an operator watches while settling the sign
+    // convention — and this is the log they read to settle it (ADR-0002, issue #3). A wrong
+    // sign here would make the wrong convention look confirmed, and that convention then gets
+    // frozen into the payload schema and the TTN decoder, where unwinding it is expensive.
+    //
+    // Splitting sign from magnitude before dividing removes the whole class: int16_t widens
+    // to int32_t without overflow, so negating the minimum is defined.
     LOG(F("   battery : "));
     if (out.voltage.valid) {
         LOGF("%u.%02u V  ", out.voltage.value / 100, out.voltage.value % 100);
     }
     if (out.current.valid) {
-        LOGF("%+d.%02u A  ", out.current.value / 100, abs(out.current.value % 100));
+        const int32_t  v   = out.current.value;
+        const uint32_t mag = (uint32_t)(v < 0 ? -v : v);
+        LOGF("%c%lu.%02lu A  ", (v < 0) ? '-' : '+', (unsigned long)(mag / 100),
+             (unsigned long)(mag % 100));
     }
     if (out.soc.valid) {
         LOGF("%u%%  ", out.soc.value);
     }
     if (out.temperature.valid) {
-        LOGF("%d.%u C", out.temperature.value / 10, abs(out.temperature.value % 10));
+        const int32_t  t   = out.temperature.value;
+        const uint32_t mag = (uint32_t)(t < 0 ? -t : t);
+        LOGF("%s%lu.%lu C", (t < 0) ? "-" : "", (unsigned long)(mag / 10),
+             (unsigned long)(mag % 10));
     }
     LOGLN("");
 

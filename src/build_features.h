@@ -1,8 +1,13 @@
 /*
  * Feature switches — bring one subsystem up at a time.
  *
- * Every feature defaults ON here. platformio.ini defines cut-down environments that turn
- * subsets OFF, so a failure can be isolated to one subsystem without editing code:
+ * The subsystem switches default ON: RK900, BATTERY, RADIO, SLEEP, WATCHDOG, CONSOLE.
+ * The diagnostic and experimental switches below them default OFF and are turned on only by
+ * their own environment — a scanner that drives the bus with addresses the node has no
+ * business using must never be one missing flag away from a field image.
+ *
+ * platformio.ini defines cut-down environments that turn subsets OFF, so a failure can be
+ * isolated to one subsystem without editing code:
  *
  *   pio run -e stage1    wind sensor only, printed over USB
  *   pio run -e stage2    + battery
