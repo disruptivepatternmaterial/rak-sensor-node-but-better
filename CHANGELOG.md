@@ -129,7 +129,38 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   that was fine, and puts a wrong verdict next to a commit SHA in the narrative
   `docs/EVIDENCE.md` depends on.
 
+- **The brownout gate now actually reaches the battery driver**
+  ([#39](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/39),
+  [#46](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/46)).
+  `Battery::set_brownout()` was declared, and `ladder_allowed()` read the pointer, but nothing
+  ever called it — so `m_brownout` stayed null and the brownout half of #39 was compiled in and
+  inert. A node that had correctly stopped transmitting to save the pack still spent roughly
+  28 s of every wake cycle hunting for a pack that was not answering, which is the exact
+  condition the gate exists to stop spending energy on.
+
+  The gate is now handed over in `setup()`, after `brownout.begin()` and inside
+  `FEATURE_BATTERY` — only a build that reads the pack, and can therefore lift the hold through
+  `update()`, gets one, so a restored hold can never become permanent.
+
+  An engaged gate cannot suppress a battery read. `Battery::read()` issues its direct SENDAT
+  query at `kProbeId` before consulting `ladder_allowed()`, and the announcement window is
+  guarded by `if (!answered_direct && full_ladder)`. So the skip drops only the 5 s
+  announcement window and the 20 s push listen; the direct query — the thing that detects the
+  pack coming back — is still paid for every cycle, at under half a second. A null gate still
+  reads as *not* engaged, which keeps the off-target tests and any build without the power
+  subsystem behaving exactly as before.
+
 ### Changed
+
+- **The off-target test suite now compiles at `gnu++11`, the standard the device is held to**
+  ([#42](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/42)).
+  `env:native` built at `gnu++17` while the Arduino nRF52 core builds at `gnu++11`, so a green
+  `pio test -e native` was never evidence that the firmware compiled. That is not a theoretical
+  gap: a full 10/10 host pass went green on code that could not build for the board at all,
+  because a struct with default member initialisers is an aggregate under C++14 and later but
+  **not** under C++11, so every brace-initialised `BatteryQueryMatch` call site failed only on
+  the device. The occurrence was fixed separately; this removes the trap that produced it. All
+  30 host tests pass unchanged at the lower standard, so nothing was traded away for it.
 
 - **Minimum reporting interval lowered from 1800 s to 900 s**, so the operator can run
   15-minute reporting. `docs/FIRMWARE_SPEC.md` §4 carries the corrected fair-use reasoning
