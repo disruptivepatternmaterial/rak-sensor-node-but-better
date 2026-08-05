@@ -90,6 +90,45 @@ constexpr uint16_t kTxResumeCentivolts  = 1020; // 3.4 V per cell — and start 
 //   from by itself, which is the rule that decides which way this fails.
 constexpr uint8_t kInvalidReadsBeforeInhibit = 4;
 
+// Cycles the node stays silent on the no-evidence path before it transmits anyway.
+//
+// The gate above closed a fail-open hole and opened a mirror one: the only voltage evidence
+// this node has comes from the RAK9154 one-wire link, so a broken wire or connector silences
+// a node whose pack is full, and it stays silent forever. Class A means a downlink can only
+// follow an uplink, so a permanently quiet node is also an uncommandable one — there is no
+// route left to tell it otherwise. Silent-forever and drained both end in a hike, and the
+// silent one gives no warning first.
+//
+// There is no second voltage source to cross-check against. The pack's P+ reaches this board
+// through a 12 V→5 V buck and is explicitly kept off the base board's `BAT` connector, which
+// is the only thing the base board's battery divider observes — so the chip's ADC cannot see
+// pack voltage at all, at any scaling. Inventing a mapping from the 3V3 rail back to the pack
+// would be a fabricated reading, which is worse than no reading. See ADR-0007.
+//
+// So the hold is bounded instead of absolute: after this many consecutive no-evidence cycles
+// the node sends one uplink regardless, then resumes holding for another full interval. That
+// keeps the node distinguishable from a dead one and keeps the downlink path reachable.
+//
+// This applies **only** to the no-evidence path. When the pack answers and reports a low
+// voltage, staying quiet is exactly right and there is no keepalive — the evidence says
+// spending energy is the wrong move, and #38 exists because that used to be ignored.
+//
+// Twenty-four, so at the default hourly interval the node is heard from about once a day. One
+// uplink per day is roughly 5% of the sandbox airtime allowance and a rounding error against
+// a pack measured in amp-hours, which is what makes this affordable where transmitting every
+// cycle blind into a sagging pack is not.
+//
+// CITE(policy): [CIT-TTN-FUP] — 30 s of uplink airtime per node per 24 h. A single short
+//   uplink a day sits far inside that, so the keepalive cannot breach the fair-use budget
+//   even when the node is otherwise silent for months.
+// CITE(spec): docs/FIRMWARE_SPEC.md §2 — "P+/P− ... → 12 V→5 V buck → WisBlock 5 V. Never
+//   feed P+ to `BAT`." This is the line that rules out an ADC cross-check and forces a
+//   bounded silence rather than a second voltage source.
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — the one-wire link is the element that has
+//   actually failed repeatedly during bring-up, which is why single-sourcing the gate on it
+//   is the risk worth bounding.
+constexpr uint16_t kNoEvidenceKeepaliveCycles = 24;
+
 // Called on a change of the gate's state so it can be remembered across a reset. Passed in
 // rather than called directly, because persistence lives in Config and this file has no
 // business knowing about a filesystem.
@@ -120,9 +159,31 @@ class Brownout {
     // False when a write could be interrupted by the pack sagging. A half-written
     // configuration or session file is worse than a stale one, because it survives the
     // reset and keeps breaking every boot afterwards.
+    //
+    // Stays false on the no-evidence path even on a keepalive cycle. Transmitting blind for
+    // the sake of being heard from is a bounded risk; writing flash blind is not, and the
+    // failure it produces survives every reset afterwards.
     bool flash_write_allowed() const { return !m_engaged; }
 
     bool engaged() const { return m_engaged; }
+
+    // True when the hold came from the absence of a reading rather than from a low one. The
+    // two want opposite handling and the log line should not conflate them: one means the
+    // pack is low, the other means nobody knows.
+    bool engaged_without_evidence() const { return m_engaged && m_without_evidence; }
+
+    // True when the node has been held silent on the no-evidence path long enough that it
+    // should transmit once anyway. Never true for a hold backed by a measured low voltage.
+    bool keepalive_due() const
+    {
+        return engaged_without_evidence() && m_silent_cycles >= kNoEvidenceKeepaliveCycles;
+    }
+
+    // Called after a keepalive uplink actually reaches the air, so the count restarts. Split
+    // from keepalive_due() on purpose: a join that fails must not consume the keepalive, or a
+    // node with a dead pack link and a missing gateway would go another full interval quiet
+    // for a transmission that never happened.
+    void note_keepalive_sent();
 
   private:
     void set_engaged(bool engaged, bool persist);
@@ -130,6 +191,13 @@ class Brownout {
     BrownoutPersistFn m_persist       = nullptr;
     bool              m_engaged       = false;
     uint8_t           m_invalid_reads = 0;
+
+    // Whether the current hold rests on absence of evidence, and how many cycles it has
+    // held. Neither is persisted: the no-evidence hold itself is not persisted either, since
+    // it re-engages within kInvalidReadsBeforeInhibit cycles for the same reason it did the
+    // first time.
+    bool     m_without_evidence = false;
+    uint16_t m_silent_cycles    = 0;
 };
 
 } // namespace power

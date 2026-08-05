@@ -10,6 +10,34 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A dead one-wire link no longer silences a healthy node forever**
+  ([#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45)).
+  The #38 fix made the brownout gate fail closed, which was right, but it left the gate
+  single-sourced on the RAK9154 one-wire link — the least reliable element in this build and
+  the one that has actually failed repeatedly on the bench. A broken wire or connector then
+  silenced a node with a full pack, permanently, and because a Class A downlink can only follow
+  an uplink there was no remote route left to override it. Silent-forever and drained both end
+  in a hike; the silent one gives no warning first.
+
+  The intended fix was a second, independent voltage source. **There isn't one.** The base
+  board's battery divider observes the `BAT` connector, and this build deliberately never
+  connects the pack there — `P+` goes through a 12 V→5 V buck, and `BAT` is a 4.2 V output, not
+  a supply input. Everything the chip can measure downstream of the buck is regulated and
+  therefore flat across the pack's whole usable range. Scaling a rail reading back to pack
+  voltage would be a fabricated measurement that the gate would then act on, which is worse
+  than no measurement. Recorded in
+  [ADR-0007](docs/decisions/ADR-0007-no-second-voltage-source.md).
+
+  So the silence is bounded instead: after `kNoEvidenceKeepaliveCycles` (24, about a day at the
+  default interval) held on the **no-evidence** path, the node transmits once regardless, then
+  resumes holding. Its silence is no longer indistinguishable from its death, and the downlink
+  route reopens daily. Critically this does not reopen #38 — a hold backed by a *measured* low
+  voltage gets no keepalive at all, because there the evidence says staying quiet is right, and
+  flash writes stay blocked on a keepalive cycle either way. This is a mitigation, not a
+  removal of the single point of failure; that needs a hardware divider from `P+`. Untested on
+  hardware — needs a bench run with the one-wire lead pulled from a full pack. No H1–H8 gate
+  closes.
+
 - **Brownout protection no longer fails open**
   ([#38](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/38)).
   The gate lived only in RAM and started at transmit-allowed, so any reset — watchdog,

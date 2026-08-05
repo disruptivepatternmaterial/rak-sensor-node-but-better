@@ -227,17 +227,33 @@ void loop()
     uint32_t sleep_for = config.interval_seconds();
 
 #if FEATURE_RADIO
-    if (!brownout.transmit_allowed()) {
+    // One uplink allowed through a no-evidence hold, so a node with a healthy pack and a dead
+    // one-wire link is still heard from. Never granted for a hold backed by a measured low
+    // voltage — see power.h. Refs #45.
+    const bool keepalive = !brownout.transmit_allowed() && brownout.keepalive_due();
+
+    if (!brownout.transmit_allowed() && !keepalive) {
         // Deliberately still reading the sensors and still waking on schedule. The pack
         // recovers on sunlight, not on being left alone, and the node has to notice the
         // moment it can transmit again.
-        LOGLN(F("   uplink  : held — pack too low to transmit"));
-    } else if (payload.empty() && !heartbeat_due(empty_cycles)) {
+        if (brownout.engaged_without_evidence()) {
+            LOGLN(F("   uplink  : held — no pack voltage evidence"));
+        } else {
+            LOGLN(F("   uplink  : held — pack too low to transmit"));
+        }
+    } else if (!keepalive && payload.empty() && !heartbeat_due(empty_cycles)) {
         // Both sensors silent, and the last proof-of-life was recent enough. Reading
         // continues on schedule because the fault may clear on its own.
         LOGF("   uplink  : nothing to send (%lu quiet cycle(s))\n", (unsigned long)empty_cycles);
     } else if (radio.ensure_joined()) {
-        if (payload.empty()) {
+        if (keepalive) {
+            // The uplink is the message. Whatever the sensors managed to produce rides along,
+            // but the point is that the node is alive and reachable — and being Class A, this
+            // is the only thing that reopens a downlink route to command it back to health.
+            LOGF("   uplink  : keepalive — %u cycle(s) with no pack voltage, transmitting "
+                 "once anyway\n",
+                 (unsigned)power::kNoEvidenceKeepaliveCycles);
+        } else if (payload.empty()) {
             // Deliberately transmitting with no measurements in it. Silence cannot be told
             // apart from a node that is gone, a flat pack, or a dead gateway, and all three
             // want different responses from whoever is deciding whether to drive out there.
@@ -248,6 +264,11 @@ void loop()
                  (unsigned long)empty_cycles);
         }
         if (radio.send(payload)) {
+            if (keepalive) {
+                // Only once it is actually on the air. A failed send leaves the count where it
+                // was, so the next cycle tries again rather than waiting out another interval.
+                brownout.note_keepalive_sent();
+            }
             DownlinkCommand cmd;
             if (radio.take_downlink(cmd)) {
                 if (cmd.set_interval && brownout.flash_write_allowed()) {

@@ -149,10 +149,20 @@ void Brownout::set_engaged(bool engaged, bool persist)
     }
 }
 
+void Brownout::note_keepalive_sent()
+{
+    m_silent_cycles = 0;
+}
+
 void Brownout::update(bool voltage_valid, uint16_t centivolts)
 {
     if (!voltage_valid) {
         if (m_engaged) {
+            // Counted only while the hold rests on absence of evidence. A hold backed by a
+            // measured low voltage gets no keepalive, so there is nothing to count toward.
+            if (m_without_evidence && m_silent_cycles < kNoEvidenceKeepaliveCycles) {
+                ++m_silent_cycles;
+            }
             return; // already holding; no news is certainly not good news
         }
 
@@ -169,14 +179,23 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
             // kInvalidReadsBeforeInhibit cycles for the same reason it did the first time.
             // Bounded and self-correcting, which the old fail-open behavior was not.
             set_engaged(true, false);
+            m_without_evidence = true;
+            m_silent_cycles    = 0;
             LOGF("   power   : pack silent for %u cycles — holding transmissions, no "
-                 "voltage evidence\n",
-                 (unsigned)kInvalidReadsBeforeInhibit);
+                 "voltage evidence (keepalive in %u cycles)\n",
+                 (unsigned)kInvalidReadsBeforeInhibit,
+                 (unsigned)kNoEvidenceKeepaliveCycles);
         }
         return;
     }
 
     m_invalid_reads = 0;
+
+    // Any valid reading ends the no-evidence condition, whatever it says. If it is low, the
+    // hold is now backed by evidence and the keepalive stops — the pack has told us that
+    // spending energy is the wrong move, which is the one case where staying quiet is right.
+    m_without_evidence = false;
+    m_silent_cycles    = 0;
 
     if (!m_engaged && centivolts <= kTxInhibitCentivolts) {
         // Persisted, and this is the write the whole scheme is built around. It happens on
