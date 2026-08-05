@@ -12,6 +12,10 @@ compile_commands.json
 *.key
 .particle_env.yaml
 
+# Soak captures — generated evidence, sometimes hundreds of MB of serial log. The
+# measured result belongs in docs/EVIDENCE.md; the transcript stays on the build host.
+soak-runs/
+
 # Build artifacts — rebuilt from source, never committed
 *.uf2
 *.hex
