@@ -92,26 +92,6 @@ class Battery {
     // that.
     bool acquire_pid(uint8_t *buf, size_t cap);
 
-    // Read one sensor's sampling rule and interval. Read-only: this is how the driver finds
-    // out whether the pack's sensors are armed (RULE_PERIODIC) or idle (RULE_DISABLE) without
-    // changing anything. `dest` is passed explicitly rather than taken from a member so a
-    // parameter exchange can never be sent to an address the data path merely fell back to.
-    bool param_get(uint8_t dest, uint8_t sid, uint32_t &intv, uint16_t &rule, uint8_t *buf,
-                   size_t cap);
-
-    // Switch one sensor to periodic sampling at `intv` seconds, leaving thresholds and tag
-    // zeroed as the reference does. The unit and the valid 60..86400 range come from RAK's
-    // own WisToolBox command catalogue, so `intv` is clamped into that range here rather than
-    // written through unchecked. Repeats on RAK's own budget — three attempts, three seconds
-    // each — and dumps whatever comes back, because a parameter write is acknowledged in
-    // RAK's tooling and the previous ~5 ms drain could never have observed the acknowledgement.
-    bool param_set(uint8_t dest, uint8_t sid, uint32_t intv, uint8_t *buf, size_t cap);
-
-    // Best-effort pass over every known sensor id. Cannot make a reading worse: a refused or
-    // ignored request leaves the pack as it was, and the caller re-reads and re-applies the
-    // all-zero test, so a pack that will not sample still yields nulls.
-    bool enable_sampling(uint8_t *buf, size_t cap);
-
     // One "send SENDAT to `dest`, collect whatever comes back" round trip.
     size_t query(uint8_t dest, uint8_t *buf, size_t cap);
 
@@ -150,21 +130,6 @@ class Battery {
     // steady state costs one request per cycle.
     uint8_t m_pid = 0xFF;
 
-    // The id this master actually *assigned*, which is a different fact from the one above
-    // and must be stored separately.
-    //
-    // `m_pid` is allowed to fall back to 0xFF whenever the assigned id does not answer a
-    // SENDAT, because a reading from the broadcast address is still a reading. A parameter
-    // write has no such latitude: it must go to the id the probe was given, or it addresses
-    // a parameter record that does not exist. Holding both in one variable meant the data
-    // path's fallback silently disarmed the enable pass — the driver logged "provisioned
-    // probe 0xFF as pid 0x01" and "not provisioned — skipping sampling enable" in the same
-    // cycle, and the one write that could start the pack sampling was never sent.
-    //
-    // Stays 0xFF until a provisioning handshake completes, and is never written by the read
-    // path.
-    uint8_t m_assigned_pid = 0xFF;
-
     // Set once an announcement has been seen carrying a provId other than 0xFF — i.e. the pack
     // has confirmed, in its own words, that it accepted the id this master assigned. Distinct
     // from "we answered an announcement", which every previous revision could claim while the
@@ -178,16 +143,6 @@ class Battery {
     // this is what keeps the enable pass off the critical path for the rest of the node's
     // deployment rather than repeating it on every wake for months.
     bool m_ever_sampled = false;
-
-    // Sensor ids the pack announced, learned from the provisioning announcement's descriptor
-    // tail. Empty until an announcement is parsed, in which case the enable pass falls back to
-    // the four ids the pack's own data records carry.
-    uint8_t m_sids[8]     = {0};
-    uint8_t m_sid_count   = 0;
-
-    // Wake cycles that have spent time trying to enable sampling. Bounded so a pack that
-    // ignores the request stops costing a parameter exchange on every cycle for months.
-    uint8_t m_enable_attempts = 0;
 
     BatteryResult m_last = BatteryResult::NoReply;
 };
