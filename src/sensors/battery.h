@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "../build_features.h"
 #include "../reading.h"
 
 #include <stddef.h>
@@ -94,6 +95,15 @@ class Battery {
 
     // One "send SENDAT to `dest`, collect whatever comes back" round trip.
     size_t query(uint8_t dest, uint8_t *buf, size_t cap);
+
+#if FEATURE_BATTERY_MODBUS
+    // Read the pack's holding registers as a plain Modbus RTU master over the same one-wire
+    // line, before any SensorHub handshake. Fills `out` and returns Ok only on a CRC-valid
+    // reply carrying at least one non-zero register; an all-zero block returns Unsampled so it
+    // can never become a fabricated 0.00 V. `n` reports how many bytes arrived either way, so
+    // the caller can dump them. Leaves `out` untouched on every non-Ok outcome.
+    BatteryResult modbus_read(uint8_t *buf, size_t cap, BatteryReading &out, size_t &n);
+#endif
 
     // Completes the provisioning handshake. The pack announces itself unbidden with a
     // PROVISION request carrying provId = 0xFF; the master's job is to answer that

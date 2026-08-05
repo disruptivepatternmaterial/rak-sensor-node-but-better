@@ -2,11 +2,57 @@
 
 #include "../build_features.h"
 #include "../power.h"
+#include "crc16.h"
 
 #include <Arduino.h>
 #include <SoftwareHalfSerial.h>
 
 namespace {
+
+#if FEATURE_BATTERY_MODBUS
+// The RAK9154 also answers plain Modbus RTU, and that path has no provisioning step at all.
+//
+// This is the whole reason it is tried first. The Sensor Hub announce/assign handshake below
+// has never latched on this pack — twenty-two byte-correct answers across 45 s left provId at
+// 0xFF — and every record it returns is a placeholder zero. A register read cannot be in that
+// state: there is no id to assign, no rule to arm, and no sampling handshake to complete. The
+// slave address, framing and register map are the same numbers the deployed sibling node reads
+// this pack with, so if the pack honours them on the one-wire line the measurement is one
+// 8-byte request away.
+//
+// Slave 0x6E (decimal 110), function 0x03 (read holding registers), 21 registers from 0x6000.
+// One transaction spans every useful slot, so there is no second round trip to get wrong.
+//
+// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
+//   rak-4-5-wire/firmware/nanoc6-rak9154-poll/include/registers.h — SLAVE_ADDRESS 0x6E,
+//   BAUD_RATE 9600 8N1, POLL_START_REG 0x6000, POLL_REG_COUNT 0x0015, IDX_VOLTAGE 0x00,
+//   IDX_CURRENT 0x01, IDX_SOC_PCT 0x02, IDX_TEMPERATURE_C 0x09, SCALE_VOLTAGE 0.01,
+//   SCALE_CURRENT 0.01. That header names LoRaWAN/docs/RAK2560_weather_station_settings.md
+//   §5d as its source of truth, verified against a deployed RAK9154 at Forest Lands Ridge.
+// CITE(spec): [CIT-MODBUS-APP] MODBUS Application Protocol V1.1b3 §6.3 — FC 0x03 request is
+//   { addr, 0x03, start_hi, start_lo, count_hi, count_lo } and the reply is
+//   { addr, 0x03, byte_count, data..., crc }, register values big-endian.
+// CITE(spec): [CIT-MODBUS-SERIAL] MODBUS over Serial Line v1.02 — RTU frames carry a
+//   reflected CRC-16 (poly 0xA001, seed 0xFFFF) appended low byte first.
+constexpr uint8_t  kModbusSlave     = 0x6E;
+constexpr uint8_t  kModbusReadHold  = 0x03;
+constexpr uint16_t kModbusStartReg  = 0x6000;
+constexpr uint16_t kModbusRegCount  = 0x0015; // 21 registers
+constexpr size_t   kModbusIdxVolt   = 0x00;   // 0x6000
+constexpr size_t   kModbusIdxCurr   = 0x01;   // 0x6001
+constexpr size_t   kModbusIdxSoc    = 0x02;   // 0x6002
+constexpr size_t   kModbusIdxTemp   = 0x09;   // 0x6009
+
+// Reply length: addr + function + byte-count + 2 bytes per register + 2 CRC bytes.
+constexpr size_t kModbusReplyBytes = 3 + (size_t)kModbusRegCount * 2 + 2; // 47
+
+// 1000 ms, the "Max wait" the sibling's Modbus POC uses against this same pack. Generous for
+// a 47-byte reply at 9600 (about 49 ms on the wire) because the pack's BMS may still be waking.
+// CITE(sibling): [CIT-RAK45WIRE] @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
+//   nanoc6-rak9154-poll/include/registers.h — MODBUS_TIMEOUT_MS 1000, "per Section 5d Max
+//   wait value".
+constexpr uint32_t kModbusFirstByteUs = 1000000;
+#endif // FEATURE_BATTERY_MODBUS
 
 // The RAK Sensor Hub one-wire link is NOT a bare TLV stream. Every frame is a RUI3
 // transport frame — { wakeup, delimiter, 16-bit length, type, flag, payload } — carrying a
@@ -343,7 +389,14 @@ constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 //   of that with a window wide enough to contain one push.
 // CITE(bench): docs/EVIDENCE.md — stage3 on 246add8: the poll returned a checksum-valid
 //   all-zero template every cycle and the 500 ms push listen that followed it caught nothing.
+#if FEATURE_BATTERY_FAST
+// Diagnostic builds trade coverage for turnaround: 2 s is far too short to contain the pack's
+// real reporting cadence, so this build cannot refute the push hypothesis — it is here to make
+// the Modbus experiment above cheap to repeat, not to test the push path.
+constexpr uint32_t kPushListenUs = 2000000; // 2 s
+#else
 constexpr uint32_t kPushListenUs = 20000000; // 20 s
+#endif
 
 // One buffer, used by every phase in turn, and sized like the reference's.
 //
@@ -412,7 +465,29 @@ constexpr size_t kRxCapacity = 0x100;
 //   no longer has to fit between two feeds -- acquire_pid() and receive() now feed the
 //   watchdog themselves -- but it is still the awake time the power budget pays for, and it
 //   is why the direct probe runs first: a provisioned pack never enters this window at all.
-constexpr uint32_t kProvWindowMs = 45000;
+// CAPPED, from 45 s. The 45 s window existed to test one hypothesis: that the pack latches an
+// id only if the master is still answering when it next announces, the way the reference master
+// (which answers forever, on a 50 ms tick) is. That hypothesis is now a verified negative —
+// twenty-two byte-correct answers across 45,382 ms left provId at 0xFF — and the response bytes
+// have been independently confirmed to match the reference's mutate-and-echo exactly. Paying
+// 45 s of a 50.5 s wake to re-run a settled experiment is the single largest avoidable cost in
+// the cycle, so the window is cut to one announcement period plus margin.
+//
+// The path is kept, not deleted: a replacement pack that does latch would still be provisioned
+// by it, and the negative result is about this pack rather than about the protocol.
+//
+// CITE(bench): docs/EVIDENCE.md — 22 answers over 45,382 ms on 8720dea, announced provId 0xFF
+//   on every one. Sustained answering is not the missing piece.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c:443-466
+//   snhub_provision_req_program() — the response is the received packet with flag flipped to
+//   RUI3API_FLG_RSP, dest/source swapped and provId set to `aid + 1`, checksum recomputed.
+//   src/sensors/battery.cpp Battery::provision() performs the identical mutation, so the
+//   framing is not what is failing.
+#if FEATURE_BATTERY_FAST
+constexpr uint32_t kProvWindowMs = 3000;
+#else
+constexpr uint32_t kProvWindowMs = 5000;
+#endif
 
 // SensorHub frame header (inside the RUI3 payload) before the first record: dest, source,
 // sequence, hub-type, payload-length, payload-type.
@@ -836,6 +911,120 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
     }
     return false;
 }
+
+#if FEATURE_BATTERY_MODBUS
+// Ask the pack for its holding registers as a plain Modbus RTU master, on the one-wire line.
+//
+// What this tests, precisely: whether the device answering on the 5-pin socket will bridge or
+// answer raw Modbus. The one-wire peer is understood to be a Generic Probe IO adapter that
+// speaks SensorHub northbound and Modbus RTU southbound to the BMS at slave 0x6E — so a raw
+// Modbus frame arriving from the north is not something it is documented to accept. It is
+// tried anyway because it is the cheapest distinguishing experiment available: one 8-byte
+// request, a bounded 1 s wait, no state changed, and a definitive answer either way. If the
+// adapter is transparent, the measurement arrives immediately and the entire SensorHub
+// handshake becomes unnecessary.
+//
+// Returns Ok only on a CRC-valid reply whose registers are not all zero. Every other outcome
+// leaves `out` untouched so the SensorHub path behind this can still run — and, critically, an
+// all-zero register block is reported as Unsampled rather than as a reading. §5b of the
+// sibling's settings doc documents all-zero as this system's signature for "probe present, not
+// sampling", which is a null, never a 0.00 V pack.
+//
+// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
+//   LoRaWAN/docs/RAK2560_weather_station_settings.md §5d — "The BMS uses Modbus slave address
+//   6E (hex), registers in the 0x6000 range, baud 9600", RS485 9600 8N1 NONE parity, Max wait
+//   1000 ms, Max retry 2; register table 6000 UINT16_BE x0.01 V, 6001 INT16_BE x0.01 A,
+//   6002 UINT16_BE x1 %, 6009 INT16_BE x1 degC.
+// CITE(sibling): [CIT-RAK45WIRE] @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 §5b — a wrong
+//   RS-485 baud on this exact pack produced "all-zero readings (Battery value 0.00V, Current
+//   0.00A, Capacity 0%, Temperature 0.0degC)", fixed by setting 9600. Zeros mean not sampling.
+// CITE(spec): [CIT-MODBUS-APP] MODBUS Application Protocol V1.1b3 §6.3 — FC 0x03 request
+//   { addr, 0x03, start_hi, start_lo, count_hi, count_lo }; reply { addr, 0x03, byte_count,
+//   data..., crc } with register values big-endian. An exception reply sets bit 7 of the
+//   function code, which is why the function byte is checked rather than assumed.
+// CITE(spec): [CIT-MODBUS-SERIAL] MODBUS over Serial Line v1.02 §2.5.1 — RTU CRC-16 is
+//   appended low byte first.
+BatteryResult Battery::modbus_read(uint8_t *buf, size_t cap, BatteryReading &out, size_t &n)
+{
+    n = 0;
+
+    uint8_t req[8] = {kModbusSlave,
+                      kModbusReadHold,
+                      (uint8_t)(kModbusStartReg >> 8),
+                      (uint8_t)(kModbusStartReg & 0xFF),
+                      (uint8_t)(kModbusRegCount >> 8),
+                      (uint8_t)(kModbusRegCount & 0xFF),
+                      0,
+                      0};
+    const uint16_t crc = modbus_crc16(req, 6);
+    req[6]             = (uint8_t)(crc & 0xFF); // low byte first
+    req[7]             = (uint8_t)(crc >> 8);
+
+    link_for(m_pin).flush();
+    LOGF("   battery : modbus req %02X %02X %02X %02X %02X %02X %02X %02X\n", req[0], req[1],
+         req[2], req[3], req[4], req[5], req[6], req[7]);
+    for (size_t i = 0; i < sizeof(req); i++) {
+        tx_byte(req[i]);
+    }
+
+    n = receive(buf, cap, /*stop_on_provision=*/false, kModbusFirstByteUs);
+    if (n == 0) {
+        return BatteryResult::NoReply;
+    }
+
+    // Every byte, always. A reply in an unexpected shape is the only thing that can move this
+    // forward, and a decoded verdict without the bytes cannot be re-examined later.
+    dump("modbus raw", buf, n);
+
+    if (n < kModbusReplyBytes) {
+        return BatteryResult::ShortFrame;
+    }
+    if (buf[0] != kModbusSlave || buf[1] != kModbusReadHold ||
+        buf[2] != (uint8_t)(kModbusRegCount * 2)) {
+        return BatteryResult::BadFrame;
+    }
+
+    const uint16_t want = modbus_crc16(buf, kModbusReplyBytes - 2);
+    if (buf[kModbusReplyBytes - 2] != (uint8_t)(want & 0xFF) ||
+        buf[kModbusReplyBytes - 1] != (uint8_t)(want >> 8)) {
+        return BatteryResult::BadChecksum;
+    }
+
+    // Register i occupies data bytes [3 + 2i, 3 + 2i + 1], big-endian.
+    auto reg = [&](size_t i) -> uint16_t {
+        const size_t at = 3 + i * 2;
+        return (uint16_t)(((uint16_t)buf[at] << 8) | buf[at + 1]);
+    };
+
+    const uint16_t v = reg(kModbusIdxVolt);
+    const int16_t  i = (int16_t)reg(kModbusIdxCurr);
+    const uint16_t s = reg(kModbusIdxSoc);
+    const int16_t  t = (int16_t)reg(kModbusIdxTemp);
+
+    if (v == 0 && i == 0 && s == 0 && t == 0) {
+        return BatteryResult::Unsampled;
+    }
+
+    out.voltage.set(v);
+    out.current.set(i);
+    out.soc.set(s);
+    out.temperature.set(t);
+
+    // The sign is recorded exactly as the register reads it and is NOT normalised here. §5d
+    // states negative = charging; the live TTN decoder asserts the opposite. That contradiction
+    // is ADR-0002 and is the user's decision, not this driver's — so the raw sign is carried
+    // through and flagged rather than quietly corrected in either direction.
+    // CITE(sibling): [CIT-RAK45WIRE] @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 §5d — register
+    //   6001 is INT16_BE x0.01 A, documented "negative = charging".
+    // CITE(spec): docs/decisions/ADR-0002-payload-contract-conflicts.md — the battery current
+    //   sign is contradictory between the spec and the live decoder and blocks the payload
+    //   freeze. Do not resolve it from a single reading.
+    LOGF("   battery : modbus regs 6000=%u 6001=%d 6002=%u 6009=%d (current sign RAW — "
+         "ADR-0002 unresolved)\n",
+         v, i, s, t);
+    return BatteryResult::Ok;
+}
+#endif // FEATURE_BATTERY_MODBUS
 
 // Hex-dump a buffer under a label. Every failure path in this driver ends in "the next bench
 // run has to be able to answer this", and a decoded verdict without the bytes behind it
@@ -1318,6 +1507,32 @@ BatteryReading Battery::read()
     // data we already hold would waste a second round trip on the common path.
     size_t n = 0;
     m_last   = BatteryResult::NoReply;
+
+#if FEATURE_BATTERY_MODBUS
+    // Phase -1: the register read, tried before anything else because it has no handshake to
+    // get stuck in. Costs one 8-byte request and at most 1 s of silence when nothing bridges
+    // Modbus, and short-circuits the whole cycle when something does. Falls through on every
+    // outcome except Ok, so the SensorHub path below is untouched by it.
+    {
+        size_t              got = 0;
+        BatteryReading      candidate;
+        const BatteryResult r = modbus_read(rx, sizeof(rx), candidate, got);
+        if (r == BatteryResult::Ok) {
+            LOGLN(F("   battery : answered raw Modbus at slave 0x6E — skipping SensorHub"));
+            out    = candidate;
+            m_last = r;
+            n      = got;
+            link.end();
+            pinMode(m_pin, INPUT);
+            LOGF("   battery : %u.%02u V  %u%%\n", out.voltage.value / 100,
+                 out.voltage.value % 100, out.soc.value);
+            return out;
+        }
+        LOGF("   battery : modbus 0x6E -> %s (%u bytes) — falling through to SensorHub\n",
+             battery_result_name(r), (unsigned)got);
+        link.flush();
+    }
+#endif
 
     bool answered_direct = false;
     {

@@ -10,6 +10,48 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 Firmware version is now `0.3.0` — a new capability, backward compatible with the decoder.
 
+### Added
+
+- **The battery driver now tries a plain Modbus RTU register read before any SensorHub
+  handshake.** Slave `0x6E`, FC `0x03`, 21 registers from `0x6000`, on the existing one-wire
+  harness — the same address, framing and register map the deployed sibling node reads this pack
+  with ([CIT-RAK45WIRE] `forest-weather-machines` @ `efc0e3c`,
+  `LoRaWAN/docs/RAK2560_weather_station_settings.md` §5d).
+
+  The reasoning is that a register read has no provisioning step to get stuck in: no id to
+  assign, no rule to arm, no sampling handshake to complete. It costs one 8-byte request and a
+  bounded 1 s wait, changes no state, and short-circuits the entire cycle if the one-wire peer
+  turns out to bridge Modbus. Every non-`Ok` outcome falls through to the existing SensorHub
+  path untouched, and an all-zero register block returns `Unsampled` rather than a reading —
+  §5b documents all-zero as this system's signature for "probe present, not sampling", which is
+  a null and never a 0.00 V pack.
+
+  The current register's sign is carried through raw and logged as raw. §5d says negative means
+  charging; the live TTN decoder asserts the opposite. That contradiction is
+  [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) and is not resolved here.
+
+- **New `battdiag` build environment** — battery only, RK900 out, radio and sleep out, ~10 s
+  cycle. `stage2` ran 110.5 s, of which the battery driver alone took 50.5 s and the RK900 added
+  3.1 s of guaranteed timeouts on a bus whose sensor is physically unplugged. Every experiment
+  cost two minutes and arrived buried in timeout noise. Diagnostic only: `FEATURE_BATTERY_FAST`
+  shortens the provisioning window to 3 s and the push listen to 2 s, neither of which is long
+  enough to test what the full-length versions exist to test.
+
+### Changed
+
+- **The provisioning window is capped at 5 s, down from 45 s.** It was 45 s to test one
+  hypothesis: that the pack latches an id only if the master is still answering when it next
+  announces, the way the reference master — which answers forever on a 50 ms tick — is. That is
+  now a verified negative: 22 byte-correct answers across 45,382 ms left `provId` at `0xFF`. The
+  response bytes have also been independently confirmed to match the reference's
+  mutate-and-echo exactly (`onewire_master_protocol.c:443-466` versus `Battery::provision()`),
+  so the framing is not what is failing either.
+
+  This was 45.4 s of a 50.5 s wake spent re-running a settled experiment — the single largest
+  avoidable cost in the cycle. The path is kept rather than deleted: a replacement pack that
+  does latch would still be provisioned by it, and the negative result is about this pack, not
+  about the protocol.
+
 ### Fixed
 
 - **The battery console log inverted every current between −0.99 A and −0.01 A.** The

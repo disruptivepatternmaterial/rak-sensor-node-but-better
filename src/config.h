@@ -61,9 +61,20 @@
 // CITE(spec): [CIT-MODBUS-SERIAL] the master's response timeout and retry behavior, which
 //   is what sets the floor on how long one poll can take before the next is due.
 // CITE(policy): [CIT-TTN-FUP] why this value may never reach a build that transmits.
+#if FEATURE_BATTERY_FAST
+// Battery bring-up cadence. Only reachable with the radio compiled out, and only from the
+// battdiag environment, so no airtime is spent and the fair-use arithmetic above still does not
+// apply. Ten seconds because the battery driver in that build finishes in about five: one
+// Modbus attempt, a 3 s provisioning window and a 2 s push listen. Short enough that a
+// hypothesis is confirmed or refuted while the operator is still watching the console.
+constexpr uint32_t kIntervalMinSeconds     = 10;
+constexpr uint32_t kIntervalMaxSeconds     = 86400;
+constexpr uint32_t kIntervalDefaultSeconds = 10;
+#else
 constexpr uint32_t kIntervalMinSeconds     = 60;
 constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 60;
+#endif
 #else
 constexpr uint32_t kIntervalMinSeconds     = 1800;
 constexpr uint32_t kIntervalMaxSeconds     = 86400;
