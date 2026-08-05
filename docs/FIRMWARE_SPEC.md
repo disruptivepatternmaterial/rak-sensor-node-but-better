@@ -96,7 +96,7 @@ TTN app: reuse `my-app-tobi` unless ingest requires a new app (decision in plan 
 | Item | Value |
 |---|---|
 | Default interval | **3600 s** |
-| Allowed | **1800–86400 s** inclusive |
+| Allowed | **900–86400 s** inclusive |
 | Downlink port | **fPort 10**. A fixed port so traffic on any other port cannot be mistaken for a configuration change |
 | Downlink format | `opcode` uint8, then arguments |
 | `0x01` set interval | followed by `interval_s` uint32 BE — 5 bytes total |
@@ -104,13 +104,34 @@ TTN app: reuse `my-app-tobi` unless ingest requires a new app (decision in plan 
 | Apply | next wake after RX; persist to flash |
 | Invalid downlink | ignore; keep previous |
 
-**The minimum was raised from 300 s to 1800 s** to stay inside the network's fair-use
-allowance of roughly 30 seconds of transmit time per device per day [CIT-TTN-FUP]. One
-11-byte uplink at the slowest US915 data rate takes about 370 ms, so 300 s intervals would
-mean 288 uplinks and roughly 107 seconds of airtime — over three times the allowance. At
-1800 s it is under 18 seconds even at the slowest rate. Adaptive data rate puts the nodes
-with the weakest coverage on that rate, which is exactly this deployment, so the worst case
-is the one to design against.
+**The minimum is 900 s, and it is an airtime limit, not a power one.** The energy a cycle
+costs is irrelevant at any interval in this range, so the fair-use allowance of roughly 30
+seconds of transmit time per device per day is the only thing that sets the floor
+[CIT-TTN-FUP].
+
+The history matters, because the floor has moved twice. It was originally 300 s. That is
+288 uplinks a day, and one 11-byte uplink at the slowest US915 rate takes about 370 ms —
+roughly 107 seconds of airtime, over three times the allowance. It was raised to 1800 s,
+which is under 18 seconds even at the slowest rate. It is now **900 s**, to give the
+operator 15-minute reporting.
+
+900 s is 96 uplinks a day. The airtime that costs depends entirely on the data rate the
+network has settled the node at:
+
+| Data rate | Spreading factor | ~Airtime per uplink (11–15 B) | 96 uplinks/day | Against the 30 s allowance |
+|---|---|---|---|---|
+| DR0 | SF10BW125 | ~370 ms | ~36 s | **over** |
+| DR3 | SF7BW125 | ~60 ms | ~6 s | comfortably under |
+
+So **900 s is fair-use compliant at DR3 or better and marginal at DR0.** This is a
+coverage-dependent condition rather than a fixed guarantee, and recording it that way is
+the point — the earlier 1800 s floor held at every rate, and 900 s does not.
+
+Adaptive data rate is enabled with an initial `DR_3` (`src/radio.cpp`), so a node with
+usable gateway coverage settles high enough for 900 s to be legal, while a node at the edge
+of coverage stays near DR0 and does not. The operator accepts that trade for 15-minute
+reporting; if a deployed node is observed sitting at DR0, the interval is the thing to
+raise. Data rate to spreading factor mapping is per [CIT-LORA-RP002].
 
 ### Bench cadence (`FEATURE_BENCH_INTERVAL`) — never in the field image
 
@@ -121,7 +142,7 @@ default to **60 s**. It is defined only by the `stage1` and `stage2` environment
 
 | Property | Field image | Bench build |
 |---|---|---|
-| Minimum interval | 1800 s | 60 s |
+| Minimum interval | 900 s | 60 s |
 | Default interval | 3600 s | 60 s |
 | Maximum interval | 86400 s | 86400 s |
 | Stored interval honored | yes | **no** — forced to 60 s, and never written back |
@@ -139,7 +160,7 @@ Three properties make this safe rather than merely documented:
   so a node already in the woods cannot be talked into one. `set_interval_seconds()` still
   refuses anything outside the bounds compiled into the running image.
 - **The stored interval is ignored on a bench build** and the bench value is never
-  persisted. Every field interval (1800–86400 s) falls inside the bench build's widened
+  persisted. Every field interval (900–86400 s) falls inside the bench build's widened
   range, so loading flash would quietly restore a half-hour cadence and read as the setting
   having been ignored.
 

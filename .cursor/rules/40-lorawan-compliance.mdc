@@ -19,7 +19,7 @@ not targets. Citation keys in brackets resolve in `docs/CITATIONS.md`.
 | ADR | ON | §3 |
 | Confirmed uplink | **OFF** | §3 |
 | Default interval | 3600 s | §4 |
-| Allowed interval | 1800–86400 s inclusive | §4 |
+| Allowed interval | 900–86400 s inclusive | §4 |
 | Bench cadence | 60 s, USB-only builds, `FEATURE_RADIO=0` | §4 |
 
 Class C is a non-goal because it holds the receiver open, which is incompatible with the
@@ -43,13 +43,16 @@ consequences the firmware must respect:
 
 TTN Fair Use allows roughly **30 seconds of uplink airtime per device per day** and
 **about 10 downlinks per device per day** [CIT-TTN-FUP]. This is what sets the interval
-floor, and it is why `FIRMWARE_SPEC.md` §4 raised that floor from 300 s to **1800 s**: an
-11-byte uplink at the slowest US915 data rate takes about 370 ms, so 300 s intervals would
-be 288 uplinks and roughly 107 seconds of airtime — over three times the allowance. At
-1800 s it stays under 18 seconds even at the slowest rate.
+floor. It is why `FIRMWARE_SPEC.md` §4 raised that floor from 300 s: an 11-byte uplink at
+the slowest US915 data rate takes about 370 ms, so 300 s intervals would be 288 uplinks and
+roughly 107 seconds of airtime — over three times the allowance.
 
-Design against the slowest rate, not the typical one. ADR puts the nodes with the weakest
-coverage on it, and that is exactly this deployment.
+The floor is now **900 s**, lowered from 1800 s for 15-minute reporting. That is 96 uplinks
+a day: about 36 s of airtime at DR0 (**over** the allowance) and about 6 s at DR3 (well
+under). So 900 s is compliant at DR3 or better and marginal at DR0 — a coverage-dependent
+condition, not a guarantee that holds at every rate the way 1800 s did. ADR starts at
+`DR_3`, so a node with usable coverage is legal and a node at the edge is not; if a
+deployed node is observed at DR0, raise its interval. See `FIRMWARE_SPEC.md` §4.
 
 The 60 s bench cadence (`FEATURE_BENCH_INTERVAL`) is compile-time and confined to builds
 with `FEATURE_RADIO=0`, so it never reaches the air. Do not combine it with the radio: at
@@ -88,7 +91,7 @@ woods cannot be taught a new message format. Required behavior:
 
 1. Check the fPort. Ignore other ports.
 2. Check the opcode, then the length for that opcode. Wrong length → ignore.
-3. Range-check **1800–86400 inclusive**. Out of range → ignore and keep the previous value.
+3. Range-check **900–86400 inclusive**. Out of range → ignore and keep the previous value.
 4. Persist to flash so it survives power loss (H5), then apply on the **next** wake (§4).
 5. **Never** let a downlink drive the interval outside the allowed range, and never let a
    malformed downlink reset it to a default. Invalid input keeps the previous value — an

@@ -8,6 +8,20 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **Minimum reporting interval lowered from 1800 s to 900 s**, so the operator can run
+  15-minute reporting. `docs/FIRMWARE_SPEC.md` §4 carries the corrected fair-use reasoning
+  rather than just the new number: 900 s is 96 uplinks a day, which is about 36 s of
+  airtime at DR0 — **over** the ~30 s TTN allowance — and about 6 s at DR3, comfortably
+  under. So the floor is compliant at DR3 or better and marginal at DR0. That is a
+  coverage-dependent condition, not the unconditional guarantee the 1800 s floor gave at
+  every data rate, and it is written down that way on purpose. ADR starts at `DR_3`, so a
+  node with usable gateway coverage settles high enough to be legal while a node at the
+  edge does not; a deployed node observed sitting at DR0 should have its interval raised.
+  Airtime is the only constraint here — the energy cost is irrelevant at any interval in
+  the legal range.
+
 ## [0.4.0] — 2026-08-05
 
 **Battery telemetry works on hardware.** A new working subsystem, backward compatible with the

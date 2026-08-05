@@ -38,17 +38,24 @@
 #endif
 
 // Bounds from docs/FIRMWARE_SPEC.md §4. The lower bound is a network-airtime limit rather
-// than anything the hardware cares about.
+// than anything the hardware cares about — at any interval in this range the energy the
+// node spends is irrelevant against the pack, so airtime is the only thing setting it.
 //
-// 1800 s, not the 300 s originally specified. The network's fair-use allowance is about 30
-// seconds of transmit time per device per day, and one 11-byte uplink at the slowest US915
-// data rate takes roughly 370 ms of that. At 300 s the node would transmit 288 times a day
-// — around 107 seconds of airtime, more than three times the allowance. At 1800 s it is
-// under 18 seconds even at the slowest rate, and comfortably lower at every faster one.
+// 900 s, lowered from 1800 s for 15-minute reporting. The allowance is about 30 seconds of
+// transmit time per device per day. 900 s is 96 uplinks a day; at the slowest US915 rate
+// (DR0, SF10BW125) an 11-15 byte uplink costs roughly 370 ms, so 96 of them is about 36
+// seconds — over the allowance. At DR3 (SF7BW125) the same uplink is about 60 ms and the
+// day totals under 6 seconds, comfortably inside it.
 //
-// The slow rate is not a corner case. Adaptive data rate moves nodes with weak coverage
-// down, so the node most likely to sit at the worst rate is the remote one this design is
-// for. A guard that only holds in good coverage would be no guard at all.
+// So 900 s is compliant at DR3 or better and marginal at DR0. That is a coverage-dependent
+// condition, not a fixed guarantee, and it is the reason this floor is not lower still:
+// adaptive data rate settles a node with usable gateway coverage well above DR0, while a
+// node at the edge of coverage stays there. The spec section records the trade explicitly.
+//
+// CITE(policy): [CIT-TTN-FUP] the sandbox allowance is 30 s of uplink airtime per node per
+//   24 h — the figure the arithmetic above is measured against.
+// CITE(spec): [CIT-LORA-RP002] US915 data rate to spreading factor mapping, which is what
+//   turns a payload size into the per-uplink airtime used here.
 #if FEATURE_BENCH_INTERVAL
 // Bench cadence. Only reachable with the radio compiled out, so no airtime is spent at all
 // and the fair-use arithmetic above does not apply — the node reads the sensor and prints.
@@ -76,7 +83,7 @@ constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 60;
 #endif
 #else
-constexpr uint32_t kIntervalMinSeconds     = 1800;
+constexpr uint32_t kIntervalMinSeconds     = 900;
 constexpr uint32_t kIntervalMaxSeconds     = 86400;
 constexpr uint32_t kIntervalDefaultSeconds = 3600;
 #endif

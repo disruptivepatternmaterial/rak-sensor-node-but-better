@@ -45,7 +45,7 @@ void Config::begin()
 
 #if FEATURE_BENCH_INTERVAL
     // The stored interval is deliberately not read on a bench build, and the bench value is
-    // never written back. A field image leaves 1800-86400 s in flash, all of which is inside
+    // never written back. A field image leaves 900-86400 s in flash, all of which is inside
     // the bench build's widened range, so loading it would quietly restore a half-hour
     // cadence on a board the operator is standing in front of — the setting would look
     // ignored. Not writing 60 s back keeps the flash clean for the next field image, which
