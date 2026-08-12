@@ -7,11 +7,21 @@ automatically; this is the index and the short version.
 
 - Specs in `docs/` are the contract; do not invent pinouts or Modbus maps.
 - Prefer libraries in [`docs/LIBRARIES.md`](docs/LIBRARIES.md).
-- Cross-check RAK9154 against `forest-weather-machines/rak-4-5-wire` (local sibling,
-  `~/Documents/GitHub/forest-weather-machines`) — but note it is **M5Stack NanoC6
-  (ESP32-C6) firmware, not RAK4631**. It is authoritative for the RAK9154 protocol
-  (slave `0x6E`, 9600 8N1, 21 registers from `0x6000`) and useless as an MCU-side
-  reference. There is no existing RAK4631 firmware to fork.
+- Cross-check RAK9154 against `forest-weather-machines/rak-4-5-wire` (local sibling, pinned at
+ `efc0e3c`, `~/Documents/GitHub/forest-weather-machines`) — but note it is **M5Stack NanoC6
+ (ESP32-C6) firmware, not RAK4631**, and **scope its authority precisely**. It is useless as an
+ MCU-side reference, and there is no existing RAK4631 firmware to fork.
+
+ | Path in the sibling @ `efc0e3c` | Authoritative for | Silent on |
+ |---|---|---|
+ | `firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c` | The **whole one-wire wire format**: `cal_chksum()` popcount algorithm and its byte span (:310), the provisioning reply construction (:398-474), pid = slot index + 1 (:458), dest/source swap (:450-456), length validation (:779) | — (this is the real reference; read it before touching `src/sensors/battery.cpp`) |
+ | `firmware/nanoc6-onewire-poll/src/onewire_protocol.cpp` | **Polling a pack that is already provisioned** — query, frame RX, response parse | The announcement handshake. It has **no provisioning handler at all**; it assumes some other master already latched the pid |
+ | `firmware/nanoc6-rak9154-poll/src/main.cpp` | **Nothing — the file is 0 bytes.** | Everything. The Modbus claim below has no code behind it in this repo |
+
+ The Modbus figures previously asserted here (slave `0x6E`, 9600 8N1, 21 registers from
+ `0x6000`) are **not backed by any source in the sibling** at `efc0e3c`. Treat them as
+ unverified until a datasheet or a working capture confirms them — do not cite the sibling
+ for them.
 - Never commit secrets, `*.env`, keys, or live OTAA AppKeys.
 - No aspirational "deployed" claims without bench/TTN evidence — see [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 - Null sensor readings stay null — never fabricate zeros.
