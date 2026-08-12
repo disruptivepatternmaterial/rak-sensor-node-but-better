@@ -181,9 +181,33 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
 {
     if (!voltage_valid) {
         if (m_engaged) {
-            // Counted only while the hold rests on absence of evidence. A hold backed by a
-            // measured low voltage gets no keepalive, so there is nothing to count toward.
-            if (m_without_evidence && m_silent_cycles < kNoEvidenceKeepaliveCycles) {
+            // A hold that is not already a no-evidence hold has to be able to become one, or
+            // the keepalive clock below never starts. Two ways in, and both end with a node
+            // that is mute and uncommandable for as long as the link stays down:
+            //
+            //   - begin() restored the hold from flash. It cannot know why the bit was set, so
+            //     it leaves m_without_evidence false. Every later cycle then hits this branch.
+            //   - The hold was set by a measured low voltage, and the pack has since stopped
+            //     answering. The hold is now resting on a reading we can no longer confirm.
+            //
+            // The comment this replaces was right that a hold backed by a *current* low
+            // reading earns no keepalive. It stops being current once the pack goes silent.
+            if (!m_without_evidence) {
+                if (m_invalid_reads < kInvalidReadsBeforeInhibit) {
+                    ++m_invalid_reads;
+                }
+                if (m_invalid_reads >= kInvalidReadsBeforeInhibit) {
+                    m_without_evidence = true;
+                    m_silent_cycles    = 0;
+                    LOGF("   power   : hold no longer backed by a reading after %u silent "
+                         "cycles — keepalive in %u cycles\n",
+                         (unsigned)kInvalidReadsBeforeInhibit,
+                         (unsigned)kNoEvidenceKeepaliveCycles);
+                }
+                return;
+            }
+
+            if (m_silent_cycles < kNoEvidenceKeepaliveCycles) {
                 ++m_silent_cycles;
             }
             return; // already holding; no news is certainly not good news
