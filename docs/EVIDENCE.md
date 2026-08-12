@@ -57,6 +57,77 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — `WB_IO2` rail exonerated; the "no announcement" failure was a stale binary. Current HEAD answers the pack but the pack still will not latch
+
+Two results, both on **Heliotrope Ridge**, board on `/dev/cu.usbmodem31101`, commit
+**`9c35e2f`** (build host on a clean tree at that SHA; the previously-uncommitted `owscan.cpp`
+accumulator fix was stashed as a duplicate of `b967008` and the branch fast-forwarded).
+
+#### Result 1 — the switched `3V3_S` rail does NOT gate the pack. Hypothesis disproven
+
+`owscan` phase 2b listens twice at 9600, once with `WB_IO2` driven HIGH and once driven LOW —
+the state `RK900::power_off()` leaves behind. Three consecutive cycles:
+
+```
+07:33:54 rail A/B verdict: HIGH 184 byte(s), LOW 184 byte(s) — the rail does not gate the pack; look at the driver
+07:34:29 rail A/B verdict: HIGH  92 byte(s), LOW 184 byte(s) — the rail does not gate the pack; look at the driver
+07:35:03 rail A/B verdict: HIGH  92 byte(s), LOW 184 byte(s) — the rail does not gate the pack; look at the driver
+```
+
+With the rail off the pack still emitted the full 92-byte announcement, twice per window. The
+`3V3_S` hypothesis raised in the entry below is **disproven**: no wiring change is required, and
+the pack's `3V3_In` is not gated by `WB_IO2` on this harness.
+
+#### Result 2 — `stage3` at `9c35e2f`: the driver sees and answers the announcement
+
+The 0-byte / `no announcement` behaviour recorded below came from an **unidentified image** at
+`[cycle 203]`, not from current code. Flashing `stage3` built from `9c35e2f` produced entirely
+different behaviour on the same harness:
+
+```
+07:36:41 battery : turnaround 2 ms (gap 1953 us), tx 95 bytes in 110352 us = 1161 us/byte (10 bits @ 9600 = 1042 us)
+07:36:41 battery : answered probe 0xFF (announced pid 0xFF) with pid 0x01
+07:36:41 battery : reply FF 7E 00 55 02 01 FF 00 00 01 50 03 44 01 02 09 00 30 00 ... 01 00 47 45 00 00 00 00 52 41 4B 32 35 36 30 2D 69 6F ... 06 15 BA 08 00 16 B9 08 00 17 B8 08 00 18 67 08 00 19 F3 08 00 1A F3 08 00 7C
+07:36:41 battery : probe 0xFF announces 6 sensor(s)
+07:36:41 battery :   sid 0x15 ipso 186 rule 0x0008 (08 00) periodic
+07:36:41 battery :   sid 0x16 ipso 185 rule 0x0008 (08 00) periodic
+07:36:41 battery :   sid 0x17 ipso 184 rule 0x0008 (08 00) periodic
+07:36:41 battery :   sid 0x18 ipso 103 rule 0x0008 (08 00) periodic
+07:36:41 battery :   sid 0x19 ipso 243 rule 0x0008 (08 00) periodic
+07:36:41 battery :   sid 0x1A ipso 243 rule 0x0008 (08 00) periodic
+07:36:42 battery : answered 2 announcement(s) in 5079 ms — pack still reports pid 0xFF
+07:36:43 battery : PROVISION announcement where a SENDAT reply was expected — the pack is announcing, not answering
+07:36:45 battery : no data (all-zero records (pack not sampled), 28 bytes)
+07:36:45 radio   : sent 20 bytes on port 2
+07:36:45 session : saved 0x260CE734, resume at 1760
+07:36:53 wait    : 1800 s (sleep disabled)
+```
+
+What this establishes:
+
+- **Announcement detection, parsing and the response mutation all work.** The reply frame carries
+  `01` in the `provId` slot (frame index 34) where the announcement carried `FF`, the addresses
+  are swapped (`dest FF`, `source 00`), the flag is `01` RSP, and the checksum is recomputed
+  (`7C`). The six descriptors decode correctly, every one at rule `0x0008` RULE_PERIODIC.
+- **The `no announcement — proceeding unprovisioned` symptom is not present in current code.** It
+  belonged to the unidentified binary. Any theory built on it — including the `3V3_S` theory
+  above — was explaining a stale artifact.
+- **The pack still refuses to latch.** Two answered announcements in 5079 ms, and the pack's next
+  announcement still carries `provId 0xFF`. SENDAT then returns the 28-byte all-zero template.
+- **The radio path works:** `radio : sent 20 bytes on port 2`, session restored from NVM.
+- Measured transmit cost of the 92-byte echo: **110352 us for 95 bytes = 1161 us/byte** against a
+  1042 us/byte theoretical floor at 9600 8N1. The whole provisioning response occupies the wire
+  for ~110 ms.
+
+**Not established:** why the pack will not latch. The 2026-08-05 entry records it latching pid
+`0x01` at `1a203d3`. Today, on `9c35e2f`, it does not, and `SENDAT` to `0x01`/`0x02`/`0x03` draws
+0 bytes while `0xFF` draws 120. Reconciliation: the 2026-08-05 latch is **historically accurate
+but describes a state the pack no longer holds** — the announcement's own `provId` field is the
+pack's belief about its id, and it reads `FF` on every capture today. `AGENTS.md`'s claim that the
+pack "latches pid `0x01`" is therefore stale as a description of current hardware state. The
+driver already handles this correctly by construction (`m_pid` starts at `0xFF` and falls back),
+so this is not an addressing regression.
+
 ### 2026-08-12 — The pack talks. `owscan` draws the announcement every cycle; the production image on the same bench gets 0 bytes
 
 Reverses the 2026-08-11 entry below on the one-wire bus. The RAK9154 is **not** silent: a
