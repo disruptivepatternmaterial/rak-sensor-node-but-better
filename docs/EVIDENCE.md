@@ -48,7 +48,7 @@ implementing lines for each gate.
 | H5 | Interval + keys survive power loss | ✅ interval and session over `InternalFS`; keys are compiled into the image, so "keys survive" is true trivially rather than by storage | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
 | H6 | RK900 absent → no livelock | ✅ bounded 1000 ms reply timeout; caller tolerates failure without retrying forever | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
 | H7 | BMS silent → no livelock | ✅ bounded first-byte and inter-byte timeouts, bounded provisioning window. Bounded but **long** — `acquire_pid()` measured at 45.4 s of a 50.5 s wake, inside the 120 s WDT window with less margin than it sounds | Unplug BMS data → cycle continues | ⬜ none |
-| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | ⬜ none — 24 h bench soak **started** 2026-08-12 (`f626698`), procedure in [`SOAK.md`](SOAK.md). Started is not closed, and hours either side of a power cycle do not sum to a soak |
+| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | ⬜ none — **zero soak hours exist.** The harness and procedure are built (`scripts/soak.sh`, [`SOAK.md`](SOAK.md), `env:soak`); the one attempt, 2026-08-12 at `f626698`, never attached to the board and logged 140 bytes in 180 s. **H8 has not started** |
 
 The [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §9 first-light list is now **closed**, and closing
 it changes nothing about the status above:
@@ -74,55 +74,68 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
-### 2026-08-12 — 24 h bench soak started (H8). Where to find it, and how to restart it
+### 2026-08-12 — H8 soak attempt FAILED to attach. Zero soak hours exist. Cause unestablished
 
-- **Commit:** `f626698` · **Host:** Heliotrope Ridge, RAK4631 on `/dev/cu.usbmodem31101`
-- **Started:** 2026-08-12 09:39:53 local (16:39:53Z) · **Image:** `rak4631` field image
-- **Capture pid:** `47297` · **Log:** `~/soak_rak4631.log` on the build host
+> **This entry replaces one titled "24 h bench soak started (H8)."** That title was wrong and
+> the reason is worth keeping: **it was committed at 09:41:23, ninety-two seconds before the
+> harness gave up at 09:42:53.** It described a launch as though it were a run, because the
+> outcome did not exist yet when it was written. Nothing was soaked. Two later documents
+> repeated the claim before it was caught. **Never write an entry for a thing still in
+> flight** — the ledger records observations, and an observation is not available until the
+> thing has finished happening.
 
-**Finding it later.** The log is on the build host, not in this repo, and it is the only
-record of the soak:
+- **Commit:** `f626698` · **Host:** Heliotrope Ridge
+- **Attempted:** 2026-08-12 09:39:53 local · **Gave up:** 09:42:53 · **Duration: 180 s, all
+  of it spent waiting**
+- **Measured:** whether a detached capture could hold a console across the field image's
+  sleep cycles for 24 h (H8).
+- **Observation** — the log is 140 bytes and two lines, and no capture process is running:
 
-```
-$ pgrep -f "capture.py --duration 93600"        # is it still running?
-$ tail -40 ~/soak_rak4631.log                   # what has it seen?
-$ grep -c "CAPTURE ATTACHED" ~/soak_rak4631.log # one per wake — a cycle counter
-```
+  ```
+  2026-08-12 09:39:53 === CAPTURE WAITING /dev/cu.usbmodem* ===
+  2026-08-12 09:42:53 === CAPTURE GAVE UP after 180s, device never appeared ===
+  ```
 
-The capture is `scripts/capture.py` running detached under `nohup`, appending. It is set
-for 93600 s (26 h) rather than 86400 so the window survives a restart or two without
-needing to be re-armed. **`setsid` does not exist on macOS** — the first attempt to start
-this died on that and captured nothing; `nohup ... & disown` is what works here.
+- **Verdict: fail. Zero soak hours.** **H8 has not started, let alone closed.** No pass, no
+  partial, no "in progress." The serial device never appeared, so nothing was ever captured.
 
-**Why every wake shows up as an attach.** The field image sleeps with system-off, which
-drops the USB CDC device, so the port disappears and reappears on each cycle.
-`=== CAPTURE ATTACHED ===` therefore marks a wake and the sentinel doubles as the
-heartbeat H8 wants. The old helper treated that disconnect as the end of the capture,
-which is half of why nothing was ever observed past the first cycle.
+**The tempting explanation is wrong, and checking it matters.** `env:rak4631` now builds
+`FEATURE_CONSOLE=0` and never calls `Serial.begin()`, so the field image does not enumerate a
+USB CDC device at all — which would explain "device never appeared" perfectly, as the console
+change working exactly as designed rather than a fault. **It does not apply here.** Both
+`FEATURE_CONSOLE=0` and `env:soak` landed in `094d5f5`, committed at **11:26:50** — one hour
+forty-four minutes *after* this attempt ended. At `f626698` the `rak4631` image still compiled
+the console in, so the board should have enumerated.
 
-**Interval is 900 s, not the 1800 s an earlier entry recorded.** From the network's uplink
-timestamps: `16:21:07Z → 16:36:14Z` is 15 min 7 s, and `16:05:59Z → 16:21:07Z` is 15 min
-8 s. The `sleep : 1800 s` console line predates the reflash. At 900 s the node is at the
-fair-use floor (`kFupFloorSeconds`, `src/config.h:62`), which is compliant, and it yields
-96 cycles a day — a denser soak than planned, not a thinner one.
+**So the cause is unestablished**, and this repo cannot establish it. Nothing here records
+what was actually flashed and running at 09:39 — and this project has been caught by a stale
+binary on the board once already (see the 2026-08-05 entry on `pio run` reusing a hex from an
+older commit). The candidates, none of them checked: the board was in DFU rather than running;
+a stale or absent flash; the board physically off the bus; a harness defect. **Whoever picks
+this up should establish what is on the board before theorising**, and should not go hunting a
+hardware fault on the strength of this entry alone.
 
-**This clock will be interrupted tonight** when the operator pulls the board to meter
-current. That is expected and the harness is built for it: the log **appends**, so the
-hours before the interruption are not lost, and the capture can be restarted with the same
-command. **State it plainly: if the interruption breaks continuity, the 24 h H8 clock
-restarts from the restart, not from 09:39.** Hours either side of a power cycle do not sum
-to a soak. What the pre-interruption hours are good for is catching an early fault, which
-is worth having on its own.
+**What actually exists, and it is real progress:** the soak *harness* — `scripts/soak.sh`,
+[`SOAK.md`](SOAK.md), and `env:soak`, the console-bearing twin of the field image. That is
+the machinery a soak needs, and it did not exist yesterday. It has never produced a soak hour.
 
-Restart after the board comes back:
+**Prove the harness before trusting it with 24 h.** `scripts/soak.sh selftest 90`
+([`SOAK.md`](SOAK.md)) runs it with no board attached. A harness that has only ever been
+started, never validated, is how 180 s of waiting got recorded as a day of soaking.
 
-```
-nohup python3 scripts/capture.py --duration 93600 --log ~/soak_rak4631.log \
-  > /tmp/soak_stdout.log 2>&1 < /dev/null & disown
-```
+**One harness lesson did survive from the attempt:** `setsid` does not exist on macOS, so an
+earlier launch died on that immediately and captured nothing. `nohup … & disown` is what works
+on this host.
 
-- **Status is unchanged: `🚧 NOT YET DEPLOYED`.** A soak that has been running for minutes
-  is not a soak. H8 needs ≥24 h bench and ≥7 d field shadow, and neither has closed.
+**Independent of the soak — the interval is 900 s, not 1800 s.** From the network's uplink
+timestamps: `16:21:07Z → 16:36:14Z` is 15 min 7 s, and `16:05:59Z → 16:21:07Z` is 15 min 8 s.
+This comes from TTN, not from the console, so the failed capture does not affect it. At 900 s
+the node sits at the fair-use floor (`kFupFloorSeconds`, `src/config.h:62`), which is
+compliant. Note that the `env:soak` comment in `platformio.ini` still describes the cadence as
+1800 s.
+
+- **Status is unchanged: `🚧 NOT YET DEPLOYED`.** H8 needs ≥24 h bench and ≥7 d field shadow.
+  Neither has closed and neither has begun.
 
 ### 2026-08-12 — Sleep current is not measurable from pack telemetry. Resolution floor 10 mA against a ~1 mA question
 
@@ -1804,6 +1817,65 @@ narrows the remaining suspect list.
 - **Notes:** This closes none of H1–H8. It says nothing about whether the board runs,
   enumerates USB, joins, sleeps, or draws the current we hope. The first real evidence
   comes from flashing hardware and reading the serial banner.
+
+### 2026-08-12 — the board presents no USB device at all; no hardware verification was possible
+
+Appended at the end of the ledger rather than in date order, per operator instruction on this
+date: append only, never edit an existing entry. Everything above this line is untouched.
+
+- **Commit:** `ec61a88` (the image that was *attempted*; nothing was flashed)
+- **Host:** Heliotrope Ridge
+- **Measured:** whether the RAK4631 is present on the build host's USB, in any mode, and
+  whether `env:soak` could be flashed and observed. This entry exists to record a **negative
+  result**, which is a result: the intended verification of `094d5f5` and `ec61a88` on hardware
+  did not happen and is still owed.
+- **Observation:**
+
+  PlatformIO's own port search, from `pio run -e soak -t upload -v`:
+
+      TimeoutError: Could not automatically find serial port for the `WisCore RAK4631 Board`
+        board based on the declared HWIDs=['239A:8029', '239A:0029', '239A:002A', '239A:802A']
+      TimeoutError: Could not automatically find serial port based on the known UART bridges
+
+  Every serial device on the host, none of them the node:
+
+      /dev/cu.Bluetooth-Incoming-Port
+      /dev/cu.PT-P710BT3824
+      /dev/cu.debug-console
+
+  The capture harness, twice, 25 s and 30 s attach windows:
+
+      2026-08-12 11:39:44 === CAPTURE WAITING /dev/cu.usbmodem* ===
+      2026-08-12 11:40:09 === CAPTURE GAVE UP after 25s, device never appeared ===
+
+- **Verdict:** FAIL — but a failure of the bench setup, not of the firmware. No device under
+  VID `0x239A` is on the bus in **any** of the four states the board can present. Per the PID
+  table in [`FIRST_FLASH.md`](FIRST_FLASH.md), the absence of `0029` and `002A` alongside the
+  absence of `8029` rules out "sitting in its bootloader" — a board in DFU still enumerates.
+  This is consistent with unpowered, unplugged, a dead cable, or a wedged USB peripheral, and
+  it is **not** distinguishable between those from here.
+- **Notes:** Three things the next session should not conclude from this.
+
+  First, **this is not caused by `FEATURE_CONSOLE=0`.** That flag and `env:soak` both landed in
+  `094d5f5` at 11:26:50, one hour 44 minutes after the 09:42:53 capture gave up; at `f626698`,
+  the image in play that morning, `env:rak4631` still compiled the console in. The timestamps
+  refute the explanation. Independently, the Adafruit core calls `TinyUSB_Device_Init(0)` from
+  its own `loop_task` before `setup()` runs, so USB enumeration does not depend on the sketch
+  calling `Serial.begin()` at all — see issue #58.
+
+  Second, **`scripts/flash.sh` is not implicated and was not what ran here.** It refuses at its
+  line 57 `no RAK4631 found on the build host USB` guard before uploading anything. The upload
+  above was a raw `pio run -t upload`, which bypasses that guard — and PlatformIO then fell
+  back to `/dev/cu.PT-P710BT3824`, a Bluetooth label printer, sent DFU packets at it, and
+  printed `[SUCCESS]`. Filed as #59. Do not use bare `pio run -t upload` on this project.
+
+  Third, **nothing about `094d5f5` or `ec61a88` is verified on hardware by this entry.** The
+  counter-headroom refusal (#55), the in-band brownout keepalive (#55), the `lmh_reset_mac()`
+  rejoin path, and the console-off sleep current (#56) are all still unexercised. The
+  counter-headroom fix in particular has silence as its only symptom, so only watching the
+  frame counter come back at or above what was transmitted, across a reset, can show the
+  regression is dead. Recovery is physical: double-tap RESET on the RAK19007, or re-seat the
+  cable, then re-run `scripts/flash.sh -e soak`.
 
 <!-- Template:
 
