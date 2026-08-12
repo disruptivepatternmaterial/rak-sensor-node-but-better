@@ -66,10 +66,12 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   `forest-weather-machines`. A drifted encoder does not lose one field; the decoder throws
   and discards the entire uplink. `scripts/check_decoder_parity.py` runs on every build.
 - **Status is `🚧 NOT YET DEPLOYED`** and stays that way until [`docs/EVIDENCE.md`](docs/EVIDENCE.md)
-  says otherwise. Stages 0-3 have all now run on hardware (join + uplink 2026-07-31, RK900 reply
-  2026-08-03, battery 12.23 V 2026-08-05). **That does not change the status.** Deployment stays
-  blocked until the H1-H8 gates and the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close —
-  not merely on "every subsystem answered once."
+  says otherwise. Stages 0-4 have all now run on hardware (join + uplink 2026-07-31, RK900 reply
+  2026-08-03, battery 12.23 V 2026-08-05, and on 2026-08-12 both sensors in one field-image cycle
+  plus network-side confirmation that the uplinks are landing at TTN and the first delivered
+  downlink). **That does not change the status.** Deployment stays blocked until the H1-H8 gates
+  and the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close — not merely on "every subsystem
+  answered once." A soak that has been *started* is not a soak that has *closed*.
 - **The RAK4631 board definition is vendored** in [`rakwireless/`](rakwireless/) because it
   does not exist in the PlatformIO registry. Do not edit it, and do not "fix" the build by
   copying files into `~/.platformio` — see [`rakwireless/README.md`](rakwireless/README.md).
@@ -84,13 +86,30 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 1 | RK900 Modbus over RAK5802 @ 9600 | proven at wire level 2026-08-03 (`998dc26`, `busscan`) — full 5-register frame read at **9600** (not 4800): 25.1 °C, 50.4 %RH, 1007.0 hPa, calm; register map confirmed ([ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md), [`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Remaining: same read through the production `stage1` path |
 | 2 | OTAA join + first uplink | done 2026-07-31 — join + accepted uplink, `puma-concolor-001`, session restore across reset ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | 3 | RAK9154 battery telemetry over one-wire | **working on hardware 2026-08-05 (`1a203d3`, re-verified `b6bbf31`)** — pack latches pid `0x01` and reports `12.23 V, +0.00 A, 98%, 23.0 °C` across seven consecutive cycles ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Root cause of the long stall was reply turnaround timing, not framing: answer no sooner than 2 ms after the pack's last byte (`kTurnaroundMs`) and lead every frame with four wake bytes. **Expect ~2 null cycles after boot while the pack samples — this line is load-bearing.** Re-confirmed 2026-08-12 (`b436aa9`): 20 consecutive `battdiag` cycles, 19 live, the one null being cycle 2, latched at `0x01` throughout with no `provId FF` anywhere in the capture. Several sessions read that null cycle as a provisioning failure because `stage3`'s 1800 s cycle means one capture window holds exactly one cycle — **use `battdiag` (~10 s) for any pack question, never `stage3`.** Open: [#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36), [#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) |
-| 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached (`sleep : 1800 s`). Uplink **transmitted, not confirmed accepted**: `radio : sent 35 bytes on port 2` is transmit only, and TTN acceptance is unverifiable here because `ttn-lw-cli` on the build host has no credentials. No join observed (session restored, not rejoined) and no downlink exercised ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
+| 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
+| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **Started, not closed.** 24 h bench soak launched 2026-08-12 (`f626698`), log `~/soak_rak4631.log` on the build host; procedure in [`docs/SOAK.md`](docs/SOAK.md). Interval is **900 s**, not the 1800 s the console line printed — established from network uplink timestamps. This is the gate the status depends on; do not read it as closed until [`docs/EVIDENCE.md`](docs/EVIDENCE.md) says so |
 
 ## Open blockers
 
 - [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — battery current sign
   is contradictory between the spec and the live decoder. Blocks the payload freeze. Do not
-  guess it.
+  guess it. The six code paths whose meaning depends on it are enumerated in
+  [`docs/reviews/2026-08-12_spec_drift.md`](docs/reviews/2026-08-12_spec_drift.md) §2.2 —
+  none of them is a *control* decision, so resolving it wrongly inverts the record without
+  stranding the node.
+- **Sleep current is unmeasured and cannot be measured from the pack.** Its telemetry LSB is
+  10 mA; [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md) turns on ~1 mA. Do not quote a sleep
+  current from pack telemetry — it is a resolution floor, not a measurement
+  ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-12).
+- **Downlink handling is half-exercised** — [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54).
+  A `0x03` request was delivered and drained, but `take_downlink()` has never been seen on
+  the console and malformed-downlink bounds checking is untested.
+- Today's audits are in [`docs/reviews/`](docs/reviews/) — read them before re-deriving:
+  [spec-versus-code drift](docs/reviews/2026-08-12_spec_drift.md),
+  [RAK reference benchmark](docs/reviews/2026-08-12_rak_reference_benchmark.md),
+  [adversarial review](docs/reviews/2026-08-12_adversarial_review.md) and
+  [round 3](docs/reviews/2026-08-12_adversarial_review_round3.md),
+  [deferred cruft pass](docs/reviews/2026-08-12_cruft_plan.md) ([#52](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/52)).
 - Remaining open decisions are in [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
   Decision #1 (BMS bus) is closed by [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md);
   decision #4 (framework) by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).

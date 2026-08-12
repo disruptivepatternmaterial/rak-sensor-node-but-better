@@ -135,7 +135,9 @@ the node is plugged in there and nowhere else.
 
 **If every read times out**, in order of likelihood: RS-485 A and B swapped (harmless, and
 the usual cause — try swapping them), the sensor not powered, the wrong slave address, or
-the wrong baud rate. The firmware fixes the RK900 at 4800 8N1, slave `0x01`.
+the wrong baud rate. The firmware fixes the RK900 at **9600** 8N1, slave `0x01` — not the
+4800 on the datasheet, because this physical unit answers only at 9600
+([ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md)).
 
 **If reads succeed but the numbers are wrong**, that is a register map or scaling problem,
 not wiring. Record the raw values and check them against `FIRMWARE_SPEC.md` §2.1.

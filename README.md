@@ -4,7 +4,9 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 ## Status
 
-🚧 **Not deployed.** All four bring-up stages have now run on hardware: the board boots and prints, the RK900 answers a full five-register read, an OTAA join plus a real-sensor uplink have reached TTN, and as of 2026-08-05 the RAK9154 pack reports `12.23 V, +0.00 A, 98%, 23.0 °C` over one-wire across seven consecutive cycles. **Every subsystem answering once is not a deployment.** None of the H1–H8 hardening gates has closed, the ≥24 h bench soak and ≥7 d field shadow have not run, and the battery-current sign convention is still unresolved ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md)). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records those gates.
+🚧 **Not deployed.** The field image now runs end to end. On 2026-08-12 at `4510763` both sensors read in the **same cycle of the `rak4631` image** for the first time — `RK900 : wind 0.00 m/s @ 0 deg, 24.7 C, 58.7 %RH, 1004.4 hPa` and `battery : 12.12 V -0.01 A 91% 23.0 C` — the cycle reached sleep, and the uplink went out. Network side, TTN shows the session live and advancing: `dev_addr 260CE734`, `last_f_cnt_up` climbing, gateway `3356-gateway-002` at 13–14 dB SNR, with `f_cnt 1792` landing the same second as the console's `radio : sent 35 bytes on port 2`. The first downlink ever delivered to this node — a `0x03` status request — drained from the queue across one uplink.
+
+**Every subsystem answering once is not a deployment.** None of the H1–H8 hardening gates has closed. A 24 h bench soak started 2026-08-12 (`f626698`) and has not finished; the ≥7 d field shadow has not begun; sleep current has never been metered — the pack's own telemetry cannot answer it (10 mA LSB against a ~1 mA question); and the battery-current sign convention is still unresolved ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md)). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records those gates.
 
 Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
@@ -19,6 +21,8 @@ Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment pro
 | Environments | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) |
 | Citation registry | [`docs/CITATIONS.md`](docs/CITATIONS.md) |
 | Evidence ledger | [`docs/EVIDENCE.md`](docs/EVIDENCE.md) |
+| Soak procedure (H8) | [`docs/SOAK.md`](docs/SOAK.md) |
+| Reviews & audits | [`docs/reviews/`](docs/reviews/) |
 | Power budget | [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md) |
 | Versioning / release | [`docs/RELEASE.md`](docs/RELEASE.md) |
 | Decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
@@ -64,8 +68,9 @@ Rules live in [`.cursor/rules/`](.cursor/rules/) and are indexed in [`AGENTS.md`
 
 ## Known blockers
 
-- **RAK9154 provisioning** — the pack announces itself as unprovisioned (`provId = 0xFF`) and waits for the host to assign it an id. That is our firmware's job, over the one-wire link, in `acquire_pid()` — and it is not latching: 22 correct-looking answers, still `0xFF` ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-05). An undiagnosed host-side protocol defect, not an operator step. Earlier revisions of this file claimed a WisToolBox NFC/BLE provisioning step was required; that claim was fabricated and is withdrawn.
-- [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — the battery current sign convention contradicts between our spec and the live decoder. Blocks the payload freeze.
+- [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — the battery current sign convention contradicts between our spec and the live decoder. Blocks the payload freeze. It corrupts the record, not the node: nothing in `src/` makes a control decision from the sign ([`docs/reviews/2026-08-12_spec_drift.md`](docs/reviews/2026-08-12_spec_drift.md) §2.2 enumerates the six dependent paths).
+- **Sleep current is unmeasured**, and the pack cannot measure it — its current telemetry has a 10 mA LSB while [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md) turns on ~1 mA, and a USB-powered bench node barely loads the pack ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-12, `4510763`). A meter is the only instrument that settles it. H2 stays open until it does.
+- **Downlink handling is only half exercised.** A `0x03` status request was delivered and drained on 2026-08-12, but `take_downlink()` has never been observed on the console and the malformed-downlink bounds checking is untested ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)).
 - **Buck converter** not yet selected, and it must be chosen on no-load quiescent current — a part drawing milliamps at idle exceeds the node's entire average draw.
 - Open decisions for the first firmware PR: [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
 

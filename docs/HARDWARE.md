@@ -130,7 +130,11 @@ protocol fault. Take pin 4 from the always-on `VDD` pad on the base-board header
 
 ## RK900
 
-4-wire: V+, GND, A, B → RAK5802 @ **4800**. Probe IO optional as junction box only.
+4-wire: V+, GND, A, B → RAK5802 @ **9600**, slave `0x01`. Probe IO optional as junction box
+only. The datasheet and the one field-deployed twin both say 4800; **this physical unit
+answers only at 9600** and gives zero bytes at 4800 across four consecutive sweeps
+([ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md), 2026-08-03, `998dc26`).
+Wiring from 4800 costs a bench session debugging a bus that is silent by configuration.
 
 ## P0 wiring — decided
 

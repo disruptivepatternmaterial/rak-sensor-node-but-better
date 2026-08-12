@@ -20,7 +20,13 @@ The operator has the physical adapter for the one-wire path from the 5-pin socke
 ## Decision
 
 **The RAK9154 uses the one-wire half-duplex path on the 5-pin Sensor Hub Load socket. The
-RAK5802 is dedicated to the RK900 at a fixed 4800 8N1.**
+RAK5802 is dedicated to the RK900 at a fixed baud.**
+
+> **The baud figure in this ADR is superseded.** Written 2026-07-30 as 4800, from the
+> datasheet. [ADR-0006](ADR-0006-rk900-baud-and-register-map.md) settled it at **9600** on
+> 2026-08-03 by measurement — this unit gives zero bytes at 4800. What ADR-0004 actually
+> decides is *one device per bus, no baud switching*, and that is unaffected. Read every
+> "4800" below as historical context for the decision, not as a wiring instruction.
 
 ## Rationale
 
@@ -73,6 +79,19 @@ harder to diagnose from a hillside.
 
 ## Verification
 
-Not yet verified on hardware. Stage 3 must demonstrate: one good BMS frame over one-wire,
-and an RK900 read that still succeeds while the battery link is unplugged (H6/H7). Record
-in `docs/EVIDENCE.md`.
+**Partly verified on hardware. Updated 2026-08-12 — this section previously read "Not yet
+verified," which was stale by a week and risked a reader re-running a bench test that had
+already passed.**
+
+| What this ADR asked Stage 3 to demonstrate | State |
+|---|---|
+| One good BMS frame over one-wire | **Done.** 2026-08-05, `1a203d3`, re-verified `b6bbf31`: the pack latches pid `0x01` and reports `12.23 V, +0.00 A, 98%, 23.0 °C` across seven consecutive cycles. Re-confirmed 2026-08-12 at `b436aa9` — 19 of 20 `battdiag` cycles live, latched at `0x01` throughout, `provId FF` absent from the whole capture |
+| Both sensors on their separate buses in one cycle | **Done.** 2026-08-12, `4510763`, in the `rak4631` field image — the RK900 on RS-485 and the pack on one-wire both read in the same cycle. This is the observation that actually vindicates the two-bus choice |
+| An RK900 read that still succeeds while the battery link is unplugged (H6/H7) | **Not done.** Requires physically unplugging each sensor mid-cycle. H6 is `🟡 partial` and H7 is `⬜ none` in `docs/EVIDENCE.md` |
+
+So the decision is validated; the **failure-isolation** half of it is not. A code audit is
+explicitly not sufficient for H6/H7 — the unplug test is the evidence, and it is still owed.
+
+Use `env:battdiag` (~10 s per cycle) for any question about the pack, never `stage3`: its
+1800 s cycle means a capture window holds exactly one cycle, and several sessions misread the
+pack's normal post-boot settling null as a provisioning failure for exactly that reason.

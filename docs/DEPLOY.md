@@ -37,6 +37,12 @@ CITE(bench): [`EVIDENCE.md`](EVIDENCE.md) 2026-08-05 — `1a203d3` latched pid `
 answered announcement at 3031 ms and read `12.23 V, +0.00 A, 98%, 23.0 °C` across seven
 consecutive cycles; re-verified on `b6bbf31`.
 
+CITE(bench): [`EVIDENCE.md`](EVIDENCE.md) 2026-08-12 — `b436aa9`, 20 consecutive `battdiag`
+cycles, 19 carrying live values, latched at `0x01` throughout with `provId FF` absent from the
+entire capture. **Use `battdiag` for any question about the pack**, not `stage3`: at an 1800 s
+cycle one capture window holds exactly one cycle, which is why several sessions mistook the
+pack's normal post-boot settling null for a provisioning failure.
+
 ### How to tell it worked
 
 Flash `stage2` and watch the console. The pack answers a `SENDAT` addressed to `0x01` with a

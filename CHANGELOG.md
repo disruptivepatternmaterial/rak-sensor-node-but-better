@@ -10,6 +10,122 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The stored frame counter can no longer fall behind what was transmitted**
+  ([#51](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/51)).
+  Two ways in, one outcome. `session::save()` advanced `s_saved_counter_ceiling` *before*
+  `write_file()`, so a failed write left the ceiling claiming headroom the file did not have;
+  and the H3 brownout gate returns before the assignment, so a withheld save left the ceiling
+  stale while the keepalive kept transmitting. Either way the live counter runs past the stored
+  value, and a reset then restores a counter below what the network has already seen.
+
+  The network discards a replayed frame in silence. Because uplinks are unconfirmed,
+  `lmh_send()` still reports success, so `m_failures` never increments and the
+  `kFailuresBeforeRejoin` escape never fires — the node reports healthy, transmits into a void,
+  and recovers at roughly one frame per `kCounterMargin` resets. Days to weeks of loss with no
+  fault indication anywhere.
+
+  The ceiling is now assigned only after the write has landed, so it and the file cannot
+  disagree, and `session::counter_headroom_ok()` is checked in `Radio::send()` *before* the
+  frame reaches the MAC — `lmh_send()` consumes the counter and there is no putting it back.
+  When the stored value cannot be advanced the uplink is refused rather than replayed: the same
+  silence, without the power cost, and it clears itself the moment the pack recovers and the
+  write becomes affordable. It is inert when no session is stored, because a reset then rejoins
+  to a fresh address and counter and there is nothing to collide with — without that
+  distinction the check would refuse the first uplink after a join whose save was withheld,
+  which is the healthy case. Deliberately not counted as a send failure: the session is fine,
+  the flash write is not, and a rejoin is both the most expensive thing this node can do and
+  useless against it.
+
+- **A brownout hold the node cannot lift by itself is now bounded, not permanent**
+  (hike-class). `Brownout::update()` reset the keepalive clock on *any* valid reading, so a pack
+  answering every cycle from inside the 960–1020 cV hysteresis band never accumulated silent
+  cycles and never earned a keepalive. The hold is persisted and restored on every boot, and its
+  only exit is a reading at or above `kTxResumeCentivolts` — which nothing the node does can
+  cause. A solar pack hovering in that band through short winter days therefore parked the node
+  permanently: mute, and being Class A, uncommandable, because a downlink can only follow an
+  uplink. Recoverable only by walking out there, which is exactly what `AGENTS.md` forbids —
+  "never let the pack reach a state it cannot recover from by itself."
+
+  The keepalive is now armed for either hold the node cannot escape unaided: the no-evidence
+  hold, and the in-band hold. A reading at or below `kTxInhibitCentivolts` still earns no
+  keepalive at all, because that pack really is too low to spend energy on a transmission —
+  [#38](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/38)
+  exists because a keepalive there used to be sent anyway, and that behavior is preserved.
+
+### Changed
+
+- **The field image no longer initializes the serial console; `env:soak` is the observable
+  twin.** RAK's own low-power document is unambiguous — "As we want to achieve maximum power
+  savings, the Serial port **MUST NOT** be initialized… FreeRTOS is as well starting a task
+  running in the background (and never sleeps), that prevents the MCU from sleeping"
+  ([`Low_Power_Example.md:45`](https://github.com/RAKWireless/WisBlock/blob/master/examples/RAK4630/communications/LoRa/LoRaWAN/Low_Power_Example.md))
+  — and their sketch enforces it by wrapping `Serial.begin()` itself in `#ifndef MAX_SAVE`.
+  `docs/LIBRARIES.md:55` already carried the same rule from the RAK forum while `env:rak4631`
+  ignored it.
+
+  `env:rak4631` now builds `-D FEATURE_CONSOLE=0`. The obvious cost is that a deployed node
+  prints nothing, so `env:soak` was added: byte-identical apart from `FEATURE_CONSOLE`, with the
+  field values for sleep, radio, both sensors, the watchdog and the 1800 s cadence. Anything to
+  be observed is observed there, and the two images differ in exactly one dimension so an
+  observation on one is evidence about the other. Do not add a second difference between them.
+
+  **Unmeasured.** RAK's document predicts milliamps against a budget in microamps; this node has
+  never metered either configuration
+  ([#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47),
+  and `docs/reviews/2026-08-12_rak_reference_benchmark.md` §8). The change is made on the
+  strength of the vendor's documentation, not on a reading taken here.
+
+- **The sleep wait is a bounded `xSemaphoreTake()` rather than a `delay(1000)` loop.** RAK
+  rejects `delay()` for this — "while in the `delay()` function, the task cannot receive any
+  information about external events… for most scenarios the `delay` is not a good solution"
+  (`Low_Power_Example.md:13`) — and both the shipped sketch and WisBlock-API-V2's
+  [`api_wait_wake()`](https://github.com/beegee-tokyo/WisBlock-API-V2/blob/main/src/api_functions.cpp)
+  use the semaphore instead.
+
+  Their `portMAX_DELAY` is deliberately **not** copied. With `WDT_CONFIG_SLEEP_Pause` the
+  watchdog does not count while the CPU sleeps, so an indefinite wait whose wake source fails to
+  arrive means sleeping forever *with no watchdog left to recover it* — trading current for a
+  hike. The timeout is the bound, and it is what makes this safe where the reference is not.
+  Slices are 60 s rather than 1 s, cutting scheduler wakeups from 1800 per 1800 s cycle to 30.
+  Nothing gives the semaphore yet, so today it behaves as a coarser bounded wait; the shape is
+  what lets a future sensor interrupt wake the node without reopening the watchdog question.
+  Also unmeasured, and the smaller of the two sleep-path changes — whether it matters at all
+  depends on the core's tickless-idle behavior, which is unverified.
+
+- **`lmh_reset_mac()` on the rejoin path.** WisBlock-API-V2 ships that call as
+  [`re_init_lorawan()`](https://github.com/beegee-tokyo/WisBlock-API-V2/blob/main/src/lorawan.cpp),
+  titled "Workaround for bug after NAK". We were dropping the session and rejoining on top of
+  whatever MAC state produced three consecutive failures. Watchdog-recoverable, so this was
+  battery and data cost rather than a hike, but cheap to close.
+
+- **The decoder-parity gate catches three classes of drift it used to pass.** All three were
+  demonstrated failing and then passing again on a restored tree:
+  - **Cross-wired emits.** `_CALL_RE` matched the channel constant and then a *backreference*
+    to it, so `put_u16(kChHumidity, kTyPressure, …)` did not match the pattern at all and was
+    dropped before any comparison ran — the single most damaging encoder mistake was the one the
+    gate was structurally blind to. Channel and type names are now captured independently, a
+    mismatch is a failure, and an emit naming an undeclared constant is a failure rather than a
+    silent skip.
+  - **Scale errors.** The encoder's contract is that it never scales, because the decoder owns
+    every divisor (`src/payload.cpp:51-53`). Nothing enforced it, so `w.pressure.value * 10`
+    shipped green and arrived as a plausible wrong number. The value argument must now be a
+    plain pass-through.
+  - **Total payload length.** Nothing compared the bytes the encoder emits against
+    `kMaxPayloadBytes`. A buffer one byte short does not fail — `put_*()` sheds the
+    lowest-priority field on every uplink, which reads as a sensor fault and gets chased in the
+    wrong place. The gate now reports `35 byte(s) across 9 field(s), buffer 35, DR0 floor 11`
+    and fails on any disagreement.
+
+  Also added: two schema fields sharing a decoder type must agree on `size`, `signed` and
+  `divisor`. Gate 2 compares each field to the decoder independently, so a disagreement between
+  *them* was unreachable — and channels 3 and 24 both use type 103 with an open question about
+  the pack's temperature scaling (`src/payload.cpp:101-106`).
+
+- **`FEATURE_CONSOLE=0` builds again.** `TinyUSBDevice.detach()` sat outside the
+  `#if FEATURE_CONSOLE` guard while the matching `attach()` and the `Adafruit_TinyUSB.h` include
+  sat inside it. Nothing set the flag to `0`, so the break was latent — until the field
+  environment below started setting it, which would have turned it live.
+
 - **`busscan` no longer sweeps a slave that cannot answer it**
   ([#34](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/34)).
   The scan included slave `0x6E`, the RAK9154, reading register `0x0000` when the pack

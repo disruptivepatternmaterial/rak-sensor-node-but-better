@@ -369,21 +369,44 @@ def main() -> int:
 
 
 ENCODER = REPO_ROOT / "src" / "payload.cpp"
+ENCODER_HEADER = REPO_ROOT / "src" / "payload.h"
 
 # constexpr uint8_t kChWindSpeed = 1, kTyWindSpeed = 190;
 _CONST_RE = re.compile(
     r"kCh(\w+)\s*=\s*(\d+)\s*,\s*kTy\1\s*=\s*(\d+)"
 )
 
-# put_u16(kChWindSpeed, kTyWindSpeed, ...)
-_CALL_RE = re.compile(r"put_(u8|u16|s16)\(\s*kCh(\w+)\s*,\s*kTy\2\s*,")
+# put_u16(kChWindSpeed, kTyWindSpeed, w.wind_speed.value);
+#
+# The channel and type names are captured INDEPENDENTLY — group 2 and group 3, not group 2
+# and a backreference to it. The backreference version only matched a call whose two
+# constants agreed, so `put_u16(kChWindSpeed, kTyHumidity, ...)` did not match at all and was
+# dropped before any comparison ran: the one mistake most worth catching was the one the gate
+# was structurally blind to. Cross-wiring is now a parse hit and a failure.
+#
+# The value argument is captured too, because the divisor lives in the decoder and the
+# encoder's whole contract is that it does not scale. See check_encoder().
+_CALL_RE = re.compile(
+    r"put_(u8|u16|s16)\(\s*kCh(\w+)\s*,\s*kTy(\w+)\s*,\s*([^;]*?)\)\s*;"
+)
 
-# Width and signedness implied by each emitter.
+# constexpr size_t kMaxPayloadBytes = 35;
+_MAX_BYTES_RE = re.compile(r"kMaxPayloadBytes\s*=\s*(\d+)")
+_MIN_DR_BYTES_RE = re.compile(r"kMinDataRatePayloadBytes\s*=\s*(\d+)")
+
+# A value the encoder passes straight through: `w.wind_speed.value`, `b.soc.value`. Anything
+# else — an arithmetic expression, a multiply, a cast around a computation — means the
+# firmware is scaling a field whose divisor the decoder also applies.
+_PASSTHROUGH_RE = re.compile(r"^[A-Za-z_]\w*(?:\.\w+)*\.value$")
+
+# Width and signedness implied by each emitter, plus the two header bytes every field
+# carries on the wire. [channel][type][value...], no length prefix anywhere.
 _EMITTERS = {
     "u8":  (1, False),
     "u16": (2, False),
     "s16": (2, True),
 }
+_HEADER_BYTES = 2
 
 
 def check_encoder(schema) -> list:
@@ -406,21 +429,62 @@ def check_encoder(schema) -> list:
         return ["Could not parse channel/type constants from src/payload.cpp — "
                 "the encoder's structure changed and this gate went blind."]
 
+    failures = []
+
     # name -> (channel, type, size, signed), deduplicated across add() and build().
     encoded = {}
     for m in _CALL_RE.finditer(src):
-        emitter, name = m.group(1), m.group(2)
-        if name not in consts:
+        emitter, ch_name, ty_name, value_arg = m.groups()
+
+        for kind, n in (("kCh", ch_name), ("kTy", ty_name)):
+            if n not in consts:
+                failures.append(
+                    f"encoder calls put_{emitter}() with {kind}{n}, which is not declared "
+                    "in src/payload.cpp.\n"
+                    "        Previously this call was skipped silently and the field went "
+                    "unchecked."
+                )
+        if ch_name not in consts or ty_name not in consts:
             continue
-        channel, type_id = consts[name]
+
+        channel = consts[ch_name][0]
+        type_id = consts[ty_name][1]
         size, signed = _EMITTERS[emitter]
-        encoded[name] = (channel, type_id, size, signed)
+
+        if ch_name != ty_name:
+            # Cross-wired: the channel of one field carrying the type of another. The uplink
+            # decodes under the wrong field with the wrong width and divisor, and because
+            # there is no length prefix every field after it shifts too.
+            failures.append(
+                f"encoder cross-wires kCh{ch_name} (channel {channel}) with "
+                f"kTy{ty_name} (type {type_id}) in a put_{emitter}() call.\n"
+                "        Channel and type must come from the same field. This decodes under "
+                "the wrong field and shifts every field after it."
+            )
+
+        if not _PASSTHROUGH_RE.match(value_arg.strip()):
+            # The encoder's contract is that it does not scale: every divisor is applied by
+            # the decoder, and payload.cpp:51-53 says so explicitly. An expression here means
+            # a factor is being applied on both sides, which is the 10x class of error that
+            # arrives as a plausible-looking wrong number rather than a failure.
+            failures.append(
+                f"encoder passes a computed value to put_{emitter}(kCh{ch_name}, ...): "
+                f"'{value_arg.strip()}'.\n"
+                "        The decoder owns every divisor (see payload.cpp:51-53), so scaling "
+                "here double-applies it — a 10x error that decodes as a plausible number.\n"
+                "        If the scaling is genuinely required, record it in "
+                "payload/schema.yaml and teach this gate about it."
+            )
+
+        encoded[ch_name] = (channel, type_id, size, signed)
 
     if not encoded:
-        return ["Found channel/type constants in src/payload.cpp but no emit calls using "
-                "them — this gate cannot see what the firmware sends."]
+        failures.append(
+            "Found channel/type constants in src/payload.cpp but no emit calls using "
+            "them — this gate cannot see what the firmware sends."
+        )
+        return failures
 
-    failures = []
     by_channel = {f["channel"]: f for f in (schema.get("fields") or [])}
 
     for name, (channel, type_id, size, signed) in sorted(encoded.items()):
@@ -462,8 +526,100 @@ def check_encoder(schema) -> list:
             "Either the encoder lost a field or the schema is stale."
         )
 
+    failures.extend(_check_total_length(encoded))
+    failures.extend(_check_divisor_consistency(schema))
+
     print(f"{DIM}   encoder: {len(encoded)} emitted field(s) checked against "
           f"the schema{RESET}")
+    return failures
+
+
+def _check_total_length(encoded) -> list:
+    """Does the buffer the firmware declares actually hold what the firmware emits?
+
+    Nothing checked this. Every field is [channel][type][value] with no length prefix, and
+    put_*() drops a field that does not fit by incrementing m_dropped — so a buffer one byte
+    too small does not fail, it silently sheds the lowest-priority field on every single
+    uplink. That reads as a sensor fault from the network side and would be chased in the
+    wrong place entirely.
+    """
+    failures = []
+    if not ENCODER_HEADER.is_file():
+        return [f"encoder header not found: {ENCODER_HEADER.relative_to(REPO_ROOT)}"]
+
+    header = ENCODER_HEADER.read_text(encoding="utf-8")
+    m_max = _MAX_BYTES_RE.search(header)
+    m_min = _MIN_DR_BYTES_RE.search(header)
+    if not m_max or not m_min:
+        return ["Could not parse kMaxPayloadBytes / kMinDataRatePayloadBytes from "
+                "src/payload.h — the total-length check went blind."]
+
+    declared = int(m_max.group(1))
+    min_dr = int(m_min.group(1))
+    needed = sum(_HEADER_BYTES + size for _, _, size, _ in encoded.values())
+
+    if needed > declared:
+        consequence = (
+            "        Too small: put_*() sheds the lowest-priority field on every uplink "
+            "rather than failing,\n"
+            "        which reads as a sensor fault and gets chased in the wrong place."
+        )
+    elif needed < declared:
+        consequence = (
+            "        Too large: harmless on the wire, but payload.h's own field-count "
+            "comment and the\n"
+            "        airtime budget are now both wrong."
+        )
+    else:
+        consequence = None
+
+    if consequence is not None:
+        failures.append(
+            f"payload length mismatch — the {len(encoded)} emitted field(s) need "
+            f"{needed} bytes, kMaxPayloadBytes is {declared}.\n"
+            f"{consequence}"
+        )
+
+    if min_dr > declared:
+        failures.append(
+            f"kMinDataRatePayloadBytes ({min_dr}) exceeds kMaxPayloadBytes ({declared}) — "
+            "the slow-data-rate floor cannot be larger than the buffer."
+        )
+
+    print(f"{DIM}   encoder: {needed} byte(s) across {len(encoded)} field(s), "
+          f"buffer {declared}, DR0 floor {min_dr}{RESET}")
+    return failures
+
+
+def _check_divisor_consistency(schema) -> list:
+    """Two schema fields sharing a decoder type must agree on every property of that type.
+
+    Gate 2 checks each field against the decoder independently, so two fields sharing a type
+    are each compared to the same decoder entry and a disagreement between *them* is not
+    reachable from that direction. It matters here because channels 3 and 24 — air temperature
+    and pack temperature — both use type 103, and payload.cpp:101-106 records an open question
+    about whether the pack reports tenths or whole degrees. If that is ever resolved by
+    editing one field's divisor, the two would silently disagree and one of them would decode
+    off by a factor of ten.
+    """
+    failures = []
+    by_type = {}
+    for f in schema.get("fields") or []:
+        by_type.setdefault(f["type"], []).append(f)
+
+    for type_id, group in sorted(by_type.items()):
+        if len(group) < 2:
+            continue
+        for attr in ("size", "signed", "divisor"):
+            values = {str(f[attr]) for f in group}
+            if len(values) > 1:
+                channels = ", ".join(str(f["channel"]) for f in group)
+                failures.append(
+                    f"schema fields on channels {channels} all use type {type_id} but "
+                    f"disagree on {attr}: {sorted(values)}.\n"
+                    "        One decoder type has one behavior. Whichever field is wrong "
+                    "decodes off by that factor, as a plausible number."
+                )
     return failures
 
 

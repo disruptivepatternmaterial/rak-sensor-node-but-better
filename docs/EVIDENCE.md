@@ -29,21 +29,38 @@ Measurement traps that invalidate an entry:
 
 ## Release gates awaiting evidence
 
-From [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §7. None of these can be closed by inspection.
+From [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §7. **None of these can be closed by inspection.**
 
-| ID | Requirement | Evidence needed | Status |
-|---|---|---|---|
-| H1 | Hardware WDT resets a hung Modbus/BMS read | Induced hang → observed reset | ⬜ none |
-| H2 | Deep sleep between cycles; radio sleeps | Measured sleep current on battery | ⬜ none |
-| H3 | Brownout: no flash thrash, no TX when low | Sag the supply → observed skip | ⬜ none |
-| H4 | Bounded backoff; survives multi-day no-gateway | Gateway off ≥48 h → observed backoff | ⬜ none |
-| H5 | Interval + keys survive power loss | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
-| H6 | RK900 absent → no livelock | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
-| H7 | BMS silent → no livelock | Unplug BMS data → cycle continues | ⬜ none |
-| H8 | Bench soak ≥24 h, field shadow ≥7 d | Soak log + TTN ingest history | ⬜ none |
+Two different questions get confused here, so the table separates them. **"In source"** means
+the mechanism exists in `src/` and was read by a human — that is a precondition, not a pass,
+and it is the weakest form of evidence this repo accepts. **"Status"** is the gate itself,
+which only a measurement closes. A gate can be fully implemented and still `⬜ none`; H4 is
+exactly that. The source column is from the read-only audit in
+[`reviews/2026-08-12_spec_drift.md`](reviews/2026-08-12_spec_drift.md) §1, which names the
+implementing lines for each gate.
 
-Also outstanding, from [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §9: one good RK900 frame, one
-good BMS frame, one TTN uplink, one interval downlink applied.
+| ID | Requirement | In source (2026-08-12 audit) | Evidence needed | Status |
+|---|---|---|---|---|
+| H1 | Hardware WDT resets a hung Modbus/BMS read | ✅ `NRF_WDT` armed at 120 s, fed on the long sensor paths. Paused across sleep by design — guards the awake path only | Induced hang → observed reset | ⬜ none |
+| H2 | Deep sleep between cycles; radio sleeps | 🟡 radio + SPI + USB-detach sleep are real; the "deep" half is a `delay()` loop, not the chip's deepest state, and the code says so | Measured sleep current on battery — **and it must be a meter.** Pack telemetry cannot answer it: 10 mA LSB against a ~1 mA question (2026-08-12, `4510763`) | ⬜ none |
+| H3 | Brownout: no flash thrash, no TX when low | ✅ thresholds, TX gate and flash gate all wired; the ungated session writer found by the audit was closed in `378384e` | Sag the supply → observed skip | ⬜ none |
+| H4 | Bounded backoff; survives multi-day no-gateway | ✅ doubling, clamped | Gateway off ≥48 h → observed backoff | ⬜ none |
+| H5 | Interval + keys survive power loss | ✅ interval and session over `InternalFS`; keys are compiled into the image, so "keys survive" is true trivially rather than by storage | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
+| H6 | RK900 absent → no livelock | ✅ bounded 1000 ms reply timeout; caller tolerates failure without retrying forever | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
+| H7 | BMS silent → no livelock | ✅ bounded first-byte and inter-byte timeouts, bounded provisioning window. Bounded but **long** — `acquire_pid()` measured at 45.4 s of a 50.5 s wake, inside the 120 s WDT window with less margin than it sounds | Unplug BMS data → cycle continues | ⬜ none |
+| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | ⬜ none — 24 h bench soak **started** 2026-08-12 (`f626698`), procedure in [`SOAK.md`](SOAK.md). Started is not closed, and hours either side of a power cycle do not sum to a soak |
+
+The [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §9 first-light list is now **closed**, and closing
+it changes nothing about the status above:
+
+| §9 item | Closed by |
+|---|---|
+| One good RK900 frame | 2026-08-03, `998dc26` — full five-register read at 9600 |
+| One good BMS frame | 2026-08-05, `1a203d3` / `b6bbf31` — and re-confirmed 2026-08-12 at `b436aa9`, 19 of 20 `battdiag` cycles live |
+| One TTN uplink | 2026-07-31 join + accepted uplink; network-side session confirmed still advancing 2026-08-12 at `f4075c0` |
+| One downlink applied | 2026-08-12 — a `0x03` status request delivered and drained across one uplink. **Half the surface only**: `take_downlink()` has never been observed on the console and malformed-downlink bounds checking is untested ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)) |
+
+First light is not hardening. H1–H8 above is the gate that governs deployment.
 
 ## Power budget
 
@@ -131,7 +148,8 @@ nohup python3 scripts/capture.py --duration 93600 --log ~/soak_rak4631.log \
   LSB. **A meter is the only instrument that can settle this.** No number is recorded and
   none should be quoted from pack telemetry.
 - **Not a `bench` citation for sleep current.** It is a bench citation for the *resolution
-  floor*: `CITE(bench): pack current LSB = 0.01 A, measured 2026-08-12 at 4510763`.
+  floor*, and the citable form of it names this file and the commit so it points somewhere:
+  `CITE(bench): docs/EVIDENCE.md 2026-08-12 @ 4510763 — pack current LSB = 0.01 A`.
 
 ### 2026-08-12 — Field image: both sensors in one cycle. Uplink transmitted; TTN acceptance NOT verified
 
@@ -1070,7 +1088,7 @@ narrower and checkable: nothing reads them.
 | Gate | Source state | Still needs hardware |
 |---|---|---|
 | H1 watchdog 120 s | `watchdog_begin(120)`; feeds now inside `acquire_pid()` and `receive()`, which previously ran unfed for up to 45 s and 20 s | Measured worst-case awake time across a real cycle |
-| H2 sleep | `SPI_LORA.end()`, `Serial.end()`, `NRF_USBD->ENABLE = 0` all present on the sleep path | **Sleep current with a meter** (issue #8) — the number the power budget rests on |
+| H2 sleep | `SPI_LORA.end()`, `Serial.end()`, `NRF_USBD->ENABLE = 0` all present on the sleep path — **superseded, see the correction below** | **Sleep current with a meter** (issue #8) — the number the power budget rests on |
 | H3 brownout | `power::Brownout` instantiated and wired: `update()` from the pack voltage, `transmit_allowed()` gates TX, `flash_write_allowed()` gates the flash write. Thresholds 9.60 V stop / 10.20 V resume | Behavior through a real low-voltage excursion |
 | H4 backoff | `radio.backoff_seconds()` replaces the normal interval after any join or send failure | — implemented |
 | H5 session persist | `session.cpp` writes through `Adafruit_LittleFS` to `InternalFS` | **Real join → reset → rejoin** (issue #12) |
@@ -1080,6 +1098,16 @@ narrower and checkable: nothing reads them.
 **Verdict: no gate closes here.** H4 is implemented and H1's known feeding gap is fixed in
 source; everything else is a code reading, which is the weakest form of evidence this repo
 accepts and is not what `FIRMWARE_SPEC.md` §7 asks for.
+
+> **Correction, appended 2026-08-12.** The H2 row above is no longer true of the firmware and
+> must not be used to re-check H2. `Serial.end()` and `NRF_USBD->ENABLE = 0` were the **two
+> independent causes of the dead USB console** root-caused the next day (see the 2026-08-05
+> entry "USB CDC death root-caused in source"). They were removed in `7dfc26f` and replaced
+> with `TinyUSBDevice.detach()` / `attach()`, and `FIRMWARE_SPEC.md:200` now **forbids both**.
+> Neither appears on the sleep path in `src/power.cpp` today — confirmed by the read-only
+> audit in [`reviews/2026-08-12_spec_drift.md`](reviews/2026-08-12_spec_drift.md) §3.4.
+> Only `SPI_LORA.end()` survives from that row. The log is append-only, so the row stands as
+> written with this note attached rather than being edited away.
 
 #### Blocked, and on what
 
