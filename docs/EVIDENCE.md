@@ -1886,6 +1886,136 @@ date: append only, never edit an existing entry. Everything above this line is u
   regression is dead. Recovery is physical: double-tap RESET on the RAK19007, or re-seat the
   cable, then re-run `scripts/flash.sh -e soak`.
 
+### 2026-08-12 (later) — flashed `env:soak`; post-reset uplink accepted by the network, and the USB dropout explained
+
+Appended at the end per the operator's append-only instruction. Nothing above is edited. All
+times are **build-host local**, which ran ~13 minutes behind the workstation clock during this
+session; network times are converted from UTC at UTC-7.
+
+- **Commit:** `6933114`
+- **Host:** Heliotrope Ridge, board on `/dev/cu.usbmodem31201` before the flash
+- **Image on the board:** `env:soak` (identical to `env:rak4631` since the `636e421` revert)
+- **Measured:** (1) whether the flash lands and the board runs; (2) whether the frame counter
+  survives a reset at or above the last transmitted value, cross-checked against TTN rather than
+  the console; (3) why the board keeps vanishing from USB.
+
+#### 1. Flash — PASS
+
+`scripts/flash.sh --yes -e soak`, which refuses to run bare `pio run -t upload` (#59):
+
+      Device programmed.
+      ========================= [SUCCESS] Took 15.23 seconds =========================
+         waiting up to 30s for the board to re-enumerate...
+         USB 239A:8029 -- application running
+      === FLASH OK ===
+      commit: 6933114a010d8ec13f5d7344583882ce0dc523c0
+      usb:    239A:8029 (application running)
+
+Before the flash, `ioreg` showed the board present and running an application:
+
+      "USB Product Name" = "WisCore RAK4631 Board"
+      "idVendor" = 9114        (0x239A)
+      "idProduct" = 32809      (0x8029 — application)
+
+#### 2. Counter ceiling across a reset — PASS, network-side, with one caveat
+
+A DFU flash resets the MCU, so this is a reset with a firmware write on top of it. The LittleFS
+region is untouched by an application-region write, so the stored session and counter are the
+same ones a plain reset would restore.
+
+TTN, queried on the build host with `ttn-lw-cli`, after the flash:
+
+      dev_addr           260CE734
+      last_f_cnt_up      1920
+      last_n_f_cnt_down  60
+      started_at         2026-07-31T14:33:20.636657834Z
+      last_seen_at       2026-08-12T19:54:15.902616Z    (= 12:54:15 host, ~1 min AFTER the flash)
+
+Two things follow, and both are network-side facts rather than console claims:
+
+- **The session survived a firmware write.** `started_at` is still 2026-07-31 and `dev_addr` is
+  unchanged, so the device restored the stored session rather than rejoining.
+- **The restored counter was at or above the last transmitted value.** The device transmitted
+  after the reset and the network *accepted* the frame — `last_f_cnt_up` is 1920 and
+  `last_seen_at` advanced to one minute after the flash. Under the regression that `094d5f5`
+  fixed, the restored counter would have come back *below* what had already been sent, and TTN
+  would have discarded the frame as a replay in silence, leaving `last_seen_at` stale. It did
+  not. **The failure mode does not reproduce on this build.**
+
+**Caveat, stated because it bounds the claim:** the exact pre-flash counter was not recorded, so
+this shows "the post-reset frame was accepted as fresh", not "the ceiling advanced by exactly N".
+A second post-reset uplink would tighten it and was not obtainable inside the session window —
+see §4. Verdict: **PASS for the observable claim, and the strongest evidence available today**,
+but not a full characterisation. #55 stays open for the refusal path itself, which requires
+driving the counter to the ceiling.
+
+#### 3. Why the board keeps disappearing from USB — #58 explained, and it is our firmware
+
+The board vanished from `ioreg` again within ~10 minutes of a successful flash — not just the tty
+node, the whole USB device:
+
+      $ ls /dev/cu.*
+      /dev/cu.Bluetooth-Incoming-Port
+      /dev/cu.PT-P710BT3824
+      /dev/cu.debug-console
+      $ ioreg -p IOUSB -l | grep "USB Product Name"
+      "USB2 Hub" / "USB3 Gen2 Hub" / "MacBook Air SuperDrive"      — no WisCore RAK4631 Board
+
+That is the signature of `src/power.cpp:111-136`, which runs before every sleep:
+
+      const bool console_in_use = (bool)Serial;
+      if (!console_in_use) {
+          TinyUSBDevice.detach();
+      }
+
+`detach()` clears `USBPULLUP`, which removes the device from the bus entirely — exactly what
+`ioreg` shows. `(bool)Serial` is false until a host program opens the port and asserts DTR, so a
+node that boots with nobody already attached detaches within seconds of its first cycle and stays
+off the bus for the whole sleep interval.
+
+**This is a catch-22 for observation, and it explains the failures that have been read as hardware
+faults all day.** `scripts/capture.py` waits for `/dev/cu.usbmodem*` to appear, but by the time it
+starts, the port is already gone; it then waits through an interval in which no port can exist.
+Two captures this session reproduce it exactly:
+
+      2026-08-12 12:54:33 === CAPTURE WAITING /dev/cu.usbmodem* ===
+      2026-08-12 12:54:53 === CAPTURE GAVE UP after 20s, device never appeared ===
+      2026-08-12 12:55:40 === CAPTURE WAITING /dev/cu.usbmodem* ===
+      2026-08-12 12:57:10 === CAPTURE DONE lines=0 ===
+
+and a third, given a 600 s window, was still waiting at 13:10:49 having never seen a port.
+
+**Verdict: #58's "device never appeared" is explained without a hardware fault.** The morning
+soak attempt at `f626698` waited 180 s against an interval far longer than that, on a node that
+had already detached. Filed as #60 with a proposed grace period so the field behavior is kept
+while the bench stays observable. The board's physical recovery earlier today was the operator's
+bench intervention; **what that intervention actually corrected is still unknown**, and #58 is
+closed as recovered-cause-unknown rather than diagnosed.
+
+#### 4. Reporting interval is 3600 s, not 900 s
+
+The node did not transmit for **16.5 minutes** after the post-flash uplink at 12:54:15 —
+`last_f_cnt_up` still 1920 and `last_seen_at` unchanged at 13:10:49. So the stored interval is the
+`kIntervalDefaultSeconds = 3600` default, not the 900 s floor. The earlier note in this ledger
+inferring 900 s from network timestamps does not hold for the current stored value. This is why
+the console and downlink work below could not be completed in the session window: one observation
+costs an hour of waiting.
+
+#### 5. Not observed — no claim made
+
+- **Both sensors in one cycle on this image.** Not seen; the console was unreachable (§3).
+- **`take_downlink()` and the malformed-downlink rejections (#54).** Not exercised. Sending a
+  downlink to a node on a 3600 s cadence, without a console to watch it land, would have been a
+  launch rather than an outcome.
+- **`lmh_reset_mac()` on the rejoin path.** Not provoked. The node is joined and healthy, and
+  forcing a rejoin on the only board available was not worth the risk of stranding it.
+- **Sleep current.** Not metered — the operator is doing this himself.
+
+**Board left in this state:** `env:soak` at `6933114`, running (`239A:8029` confirmed at flash),
+joined as `puma-concolor-001` / `260CE734`, uplinking hourly. **It presents no USB port while
+asleep** — that is normal for this firmware per §3, not a fault. A port appears for a few seconds
+around each wake, roughly hourly. All background capture and polling processes were killed.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary
