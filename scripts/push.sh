@@ -25,7 +25,7 @@ RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; DIM=$'
 die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 
 BUILD_HOST="${BUILD_HOST:-ntableman@192.168.10.223}"
-REMOTE_PATH="${REMOTE_PATH:-Documents/GitHub/rak-sensor-node-but-better}"
+REMOTE_PATH="${REMOTE_PATH:-Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 GH_SSH="git@github.com:disruptivepatternmaterial/rak-sensor-node-but-better.git"
 RELAY_REF="refs/heads/from-workstation"
 

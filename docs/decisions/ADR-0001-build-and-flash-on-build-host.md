@@ -14,8 +14,9 @@ down: the agent sandbox denies writes outside the workspace, so `$HOME` is read-
 `/dev/cu.Bluetooth-Incoming-Port` and `/dev/cu.debug-console`.
 
 **Heliotrope Ridge** (`192.168.10.223`, ssh alias `wx3-harness`) already has PlatformIO
-6.1.19, `gh`, `GITHUB_TOKEN`, PyYAML, a clone at `~/Documents/GitHub/rak-sensor-node-but-better`,
-and — decisively — it is where the hardware physically connects.
+6.1.19, `gh`, `GITHUB_TOKEN`, PyYAML, a clone at
+`~/Documents/GitHub/lorawan/rak-sensor-node-but-better`, and — decisively — it is where the
+hardware physically connects.
 
 You also work directly on the build host or a laptop at times, so neither clone can be
 assumed current.

@@ -25,7 +25,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 BUILD_HOST="${BUILD_HOST:-ntableman@192.168.10.223}"
-REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/rak-sensor-node-but-better}"
+REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 SOAK_ROOT="${SOAK_ROOT:-soak-runs}"
 LATEST="$SOAK_ROOT/latest"

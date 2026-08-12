@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd ~/Documents/GitHub/rak-sensor-node-but-better
+cd ~/Documents/GitHub/lorawan/rak-sensor-node-but-better
 
 gh issue comment 20 --body-file - >/dev/null <<'EOF'
 **The premise changed.** The no-solar 910406 was out of stock, so the shell in hand is the

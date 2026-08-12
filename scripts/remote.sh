@@ -22,7 +22,7 @@ set -euo pipefail
 
 BUILD_HOST="${BUILD_HOST:-ntableman@192.168.10.223}"
 BUILD_HOST_NAME="${BUILD_HOST_NAME:-Heliotrope Ridge}"
-REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/rak-sensor-node-but-better}"
+REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; DIM=$'\033[2m'; NC=$'\033[0m'

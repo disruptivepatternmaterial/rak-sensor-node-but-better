@@ -11,7 +11,7 @@ nothing and check.
 | | Workstation (this workspace) | Heliotrope Ridge (build host) |
 |---|---|---|
 | Role | Author code, docs, specs, git, `gh` | Compile, flash, serial capture, soak |
-| Path | `~/Documents/Brandt/rak-sensor-node-but-better` | `~/Documents/GitHub/rak-sensor-node-but-better` |
+| Path | `~/Documents/Brandt/rak-sensor-node-but-better` | `~/Documents/GitHub/lorawan/rak-sensor-node-but-better` |
 | Reach | local | `ssh ntableman@192.168.10.223` (alias `wx3-harness`) |
 | PlatformIO | **absent** | `/opt/homebrew/bin/pio` |
 | `gh` CLI | present | `/opt/homebrew/bin/gh`, `GITHUB_TOKEN` in `~/.zprofile` |
@@ -39,7 +39,7 @@ like "PlatformIO is not installed." It is installed. Your shell is just wrong.
 Always force a login shell:
 
 ```bash
-ssh ntableman@192.168.10.223 'zsh -l -c "cd ~/Documents/GitHub/rak-sensor-node-but-better && pio run"'
+ssh ntableman@192.168.10.223 'zsh -l -c "cd ~/Documents/GitHub/lorawan/rak-sensor-node-but-better && pio run"'
 ```
 
 Use `scripts/remote.sh` instead of hand-rolling this — it handles the login shell, the

@@ -7,7 +7,7 @@ project. Agent-facing version: [`.cursor/rules/10-environments.mdc`](../.cursor/
 
 ```
 Workstation (locked down)                Heliotrope Ridge (build host)
-~/Documents/Brandt/                      ~/Documents/GitHub/
+    ~/Documents/Brandt/                      ~/Documents/GitHub/lorawan/
   rak-sensor-node-but-better               rak-sensor-node-but-better
                                            192.168.10.223  (ssh alias: wx3-harness)
   author code + docs                       PlatformIO 6.1.19, gh, PyYAML
