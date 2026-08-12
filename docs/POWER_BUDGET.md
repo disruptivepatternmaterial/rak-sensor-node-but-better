@@ -100,6 +100,38 @@ The buck converter's **quiescent draw is a load 24/7** and is easy to forget. A 
 poor no-load efficiency can dominate the entire budget regardless of firmware quality.
 Select the part with this in mind and record the figure here.
 
+## Sleep current cannot be measured from the pack's telemetry — use a meter
+
+Attempted 2026-08-12 (`4510763`) on the operator's instruction to try the RAK9154's own
+current reading before setting up a meter. **It cannot answer the question**, for two
+independent reasons, either of which alone is fatal:
+
+1. **Resolution.** The pack reports current in units of 0.01 A — the raw register reads
+   `i=-1` for the observed `-0.01 A`, so one LSB is **10 mA**. The number this budget turns
+   on is **~1 mA** (see the interval-sensitivity note above: one stray milliamp costs ~25×
+   what the wake costs). Even the documented defect cases — 0.89–1.2 mA for peripherals
+   left enabled, ~6 mA for the radio left awake — sit **at or below a single LSB**. A
+   sensor whose smallest step is ten times the threshold cannot distinguish a healthy
+   sleep from the worst failure mode in this table.
+2. **The bench node is not powered from the pack.** With USB attached the board draws from
+   USB, so the pack sees essentially no load and its current reading says nothing about
+   node draw. Consistent with observation: the reading sat at `-0.01 A` unchanged across
+   20 consecutive `battdiag` cycles and again in the field image, awake and transmitting,
+   where a pack actually supplying a ~30 mA awake node should have read about `-0.03 A`.
+   Detaching USB removes the confound and also removes the console, which is the only way
+   the reading gets off the board.
+
+**Resolution floor: 10 mA. Required resolution: ~1 mA. A meter is the only way.** No sleep
+current figure is recorded here, and none should be quoted from pack telemetry.
+
+This leaves the `delay()`-based sleep at `src/power.cpp:134-136` unmeasured, exactly as its
+own comment at `:129-133` states. It parks the task in FreeRTOS and lets the idle task drop
+the CPU to a lighter low-power state; it does **not** reach system-off, deliberately, since
+system-off resets the nRF52 on wake and would force a rejoin every interval. The watchdog
+is configured `WDT_CONFIG_SLEEP_Pause` (`src/power.cpp:52`), so it is **paused across
+sleep, not fed**. Whether the residual draw is nearer 1 µA or 1 mA is open, and issue #47
+(residual USB peripheral draw) is part of the same measurement.
+
 ## Interval sensitivity
 
 Complete once `I_sleep` and per-phase costs are measured. The interval is downlink-settable

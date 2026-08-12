@@ -57,6 +57,32 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — Sleep current is not measurable from pack telemetry. Resolution floor 10 mA against a ~1 mA question
+
+- **Commit:** `4510763` · **Host:** Heliotrope Ridge, RAK4631 on `/dev/cu.usbmodem31101`
+- **Measured:** whether the RAK9154's own current telemetry can size the `delay()`-based
+  sleep at `src/power.cpp:134-136`, as a stopgap before a meter.
+- **Observation:** the pack reports current with a **0.01 A (10 mA) LSB** — raw `i=-1` for
+  the reported `-0.01 A`. The reading did not move across 20 consecutive `battdiag` cycles
+  or in the field image, awake and transmitting:
+
+  ```
+  08:04:47 battery : 12.12 V  -0.01 A  91%  23.0 C
+  08:04:47 battery : raw v=1212 i=-1 soc=91 t=230
+  ```
+
+  A pack supplying a ~30 mA awake node should read about `-0.03 A`. It does not, because
+  with USB attached the board is USB-powered and the pack sees almost no load — and USB is
+  the only way the reading leaves the board.
+
+- **Verdict: cannot answer — and this is a complete answer, not a partial one.**
+  `docs/POWER_BUDGET.md` turns on ~1 mA; the pack resolves 10 mA. Even the documented
+  defect cases (0.89–1.2 mA peripherals-enabled, ~6 mA radio-awake) fall at or under one
+  LSB. **A meter is the only instrument that can settle this.** No number is recorded and
+  none should be quoted from pack telemetry.
+- **Not a `bench` citation for sleep current.** It is a bench citation for the *resolution
+  floor*: `CITE(bench): pack current LSB = 0.01 A, measured 2026-08-12 at 4510763`.
+
 ### 2026-08-12 — Field image: both sensors in one cycle. Uplink transmitted; TTN acceptance NOT verified
 
 - **Commit:** `4510763`
@@ -88,31 +114,88 @@ add it at the top.
 | Field image (`FEATURE_SLEEP=1`) runs a complete cycle | **pass** |
 | Sleep reached | **pass** — `sleep : 1800 s` |
 | OTAA join | **not observed.** The node restored a saved session (`restored 0x260CE734`) rather than joining. That is correct behavior and evidence the earlier join persisted, but it is not a join event |
-| Uplink **accepted at TTN** | **NOT VERIFIED — see below** |
+| Uplink **accepted at TTN** | **transmitted, not heard — see below.** The radio path itself is already proven; this is about today's image specifically |
 | Downlink handled | **not observed.** None was scheduled; nothing exercised the `radio.cpp` fix on hardware |
 
-**On TTN acceptance.** `radio : sent 35 bytes on port 2` is the SX126x library reporting
-the frame handed to the transceiver. It proves transmit, not acceptance, and must not be
-recorded as acceptance. Acceptance cannot be verified from this bench: `ttn-lw-cli` is
-installed on the build host (`/opt/homebrew/bin/ttn-lw-cli`) but **has no credentials** —
-no `~/.ttn-lw-cli.yml`, no API key in the environment. Per
-[`.cursor/rules/00-agent-liveness.mdc`](../.cursor/rules/00-agent-liveness.mdc) a missing
-credential is a hard stop, not something to work around.
+**On TTN acceptance — read this before re-testing the radio path.**
 
-The strongest proof available *without* credentials, in ascending order:
+**The radio path is already proven and this entry does not reopen it.** It closed twice:
+2026-07-31 ([`EVIDENCE.md` §first LoRaWAN join](#2026-07-31--first-lorawan-join-and-first-uplink-accepted-by-the-things-network),
+join and uplink accepted, confirmed from both sides, gateway `9181014c6051030034`) and
+2026-08-04 (first end-to-end real-sensor uplink, operator-confirmed). Do not re-derive
+those.
 
-1. **Frame counter continuity** (have it): `counter 1792` restored, `resume at 1824`. This
-   is our own counter, so it evidences nothing about the network's view.
-2. **A downlink arriving** (do not have): only the network can originate one, so receiving
-   one proves the network has the session and is listening to our uplinks.
-3. **A confirmed uplink** (do not have, and the strongest): the encoder currently sends
-   `LMH_UNCONFIRMED_MSG` (`src/radio.cpp`), so the stack never asks for an ACK. A one-off
-   confirmed uplink would yield device-side acceptance proof with no TTN credential at all.
-   Not done here — it is a firmware change and an airtime question, and it was not asked
-   for. Recommended as the next step.
+What is new and narrower: **nobody has seen *today's* image arrive.** `radio : sent 35
+bytes on port 2` is the SX126x library reporting a frame handed to the transceiver — it is
+transmit, not reception, and the two must not be conflated.
 
-- **Verdict: partial pass.** Sensors and cycle: pass. LoRaWAN acceptance: unproven, and
-  deliberately left unproven rather than inferred from `radio : sent`.
+Measured 2026-08-12 08:38-08:40. A `ttn-lw-cli events subscribe` stream was held open for
+110 s spanning a board reset, so the device booted, restored its session and uplinked
+inside the window. 22 events parsed, 8 of them `as.up.data.forward`. **None were from
+`puma-concolor-001`.** The uplinks that did arrive in that same window came from five other
+devices on the same application:
+
+```
+"device_id": "6773a47722230004"
+"device_id": "9181010k6063240022"
+"device_id": "earthquake-rak-10703"
+"device_id": "la666050494"
+"device_id": "rak10701-plus-001"
+```
+
+Those five are the load-bearing part of this observation: they rule out the subscription,
+the credentials, the CLI invocation and the network path. The stream was working. Our
+device was not heard.
+
+Leading suspect is RF, not firmware — the 2026-07-31 entry records that session as
+"antenna attached", and whether the antenna is currently on the board was not confirmed.
+That is a bench check for the operator, not a code change. **Do not change firmware
+constants on the strength of this entry.** One 110 s window is one window.
+
+**Device identity, corrected.** `puma-concolor-001` / DevEUI `42BB96EF76E200F1` lives in
+application **`my-app-tobi`**. The plausible-sounding `middle-fork-area` has **no end
+devices at all** (`ttn-lw-cli end-devices list middle-fork-area` returns `[]`). Anyone
+reasoning from the application name will look in the wrong place.
+
+**Downlink: queued, not delivered.** A status-request downlink was queued successfully —
+
+```
+"f_port": 10,
+"frm_payload": "Aw==",
+```
+
+`Aw==` is `0x03`, matching the firmware contract at `src/radio.cpp:398`. It could not be
+delivered because **Class A opens receive windows only after an uplink**, and no uplink
+was heard. The downlink path therefore remains compile-verified only; it has never run on
+hardware ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)); the uplink not being heard is [#53](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/53).
+
+**Working `ttn-lw-cli` harness**, established the hard way and worth keeping:
+
+| Purpose | Command |
+|---|---|
+| List applications | `ttn-lw-cli applications list` |
+| List devices | `ttn-lw-cli end-devices list my-app-tobi` |
+| Live events | `ttn-lw-cli events subscribe --application-id my-app-tobi` |
+| Queue downlink | `ttn-lw-cli end-devices downlink push my-app-tobi puma-concolor-001 --f-port 10 --frm-payload 03` |
+| Inspect queue | `ttn-lw-cli end-devices downlink list my-app-tobi puma-concolor-001` |
+
+Traps that cost real time here:
+
+- **`end-devices subscribe-events` is not a subcommand.** It silently prints the help text
+  and exits 0, so a redirect captures help output and looks like "no events". The event
+  stream lives under `ttn-lw-cli events subscribe`.
+- The downlink flags are **`--f-port` and `--frm-payload`**, not `--port`/`--payload`.
+- A successful `downlink push` prints **nothing** but `INFO`/`WARN` lines. Confirm with
+  `downlink list`, not by the absence of an error.
+- Event JSON is pretty-printed: the key is `"name": "..."` **with a space**. A grep for
+  `"name":"` matches nothing and reads as an empty stream.
+- The CLI config is not at `~/.config/ttn-lw-cli`; it resolves
+  `~/.ttn-lw-cli.yml` and `~/Library/Application Support/.ttn-lw-cli.yml`. The build host
+  **is** authenticated — absence of the file where you first looked is not absence of auth.
+
+- **Verdict: partial pass.** Sensors and cycle: pass. Today's uplink reaching TTN: **fail,
+  one window, cause not yet isolated** — recorded as a negative observation, not as an
+  unverified gate.
 - **Status unchanged: `🚧 NOT YET DEPLOYED`.** H1-H8, the ≥24 h soak and the ≥7 d field
   shadow are all untouched by this run.
 
