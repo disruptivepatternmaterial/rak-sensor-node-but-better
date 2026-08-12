@@ -52,7 +52,7 @@ Use these as **implementation references**, not as “copy Meshtastic into the w
 20. [adafruit/Adafruit_SleepyDog](https://github.com/adafruit/Adafruit_SleepyDog) — watchdog  
 21. [rocketscream/Low-Power](https://github.com/rocketscream/Low-Power) — sleep patterns (AVR-oriented; ideas only on nRF52)  
 22. [disk91/WioLoRaWANFieldTester](https://github.com/disk91/WioLoRaWANFieldTester) — field RF / margin testing mindset  
-23. RAK forum: [RAK4631 deep sleep / Serial1.end()](https://forum.rakwireless.com/t/rak4631-deep-sleep-until-reset/7253) — **must `Serial.end()` before sleep** or current stays ~mA  
+23. RAK forum: [RAK4631 deep sleep / Serial1.end()](https://forum.rakwireless.com/t/rak4631-deep-sleep-until-reset/7253) — ~~**must `Serial.end()` before sleep** or current stays ~mA~~ **CORRECTED 2026-08-12: do not apply this to USB `Serial`.** `Adafruit_USBD_CDC::end()` only calls `clearConfiguration()` — it does not stop the `usbd` task, disable `NRF_USBD`, or release HFCLK, so it removes no current and does discard the descriptor the host enumerated. The USB peripheral is gated by **VBUS**, not by `begin()`/`end()` (`NRF_USBD->ENABLE` is set only from the VBUS event handler, `dcd_nrf5x.c:927`), and `TinyUSBDevice.detach()` in `src/power.cpp:135` is the correct lever. This line is still valid for the **UART** `Serial1`, which is a different peripheral. See [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md) and the `CIT-RAK-LOWPOWER` content correction in [CITATIONS.md](CITATIONS.md#corrections-log) — this entry, read as applying to USB, is what justified a field build that was reverted the same day.  
 
 ### Platform
 
