@@ -209,6 +209,34 @@ else
   echo "commit: ${SHA}"
   echo "reason: ${FAIL_REASON:-board did not come back as an application}"
   echo "usb:    239A:${PID_SEEN:-none} ($(pid_meaning "$PID_SEEN"))"
+  if [[ -z "$PID_SEEN" ]]; then
+    # No 239A device of ANY kind. That is NOT the same as a bricked board, and reading it that
+    # way wasted a session on 2026-08-12. A board with an invalid application stays in its
+    # bootloader and enumerates as 0029/002A -- visibly. A board that is absent entirely is far
+    # more likely to be running an application that has detached itself: src/power.cpp clears
+    # USBPULLUP before sleep whenever nothing holds the console open, which removes the device
+    # from the bus for the whole interval (issue #60). At a 3600 s interval the board is
+    # unreachable for up to an hour at a time, and both flashing and capturing fail in exactly
+    # this way while the firmware is perfectly healthy.
+    echo
+    echo "${YELLOW}=== NO USB DEVICE -- PROBABLY ASLEEP, NOT BRICKED ===${NC}"
+    echo "commit: ${SHA}"
+    echo "reason: ${FAIL_REASON:-no 239A device on the bus at all}"
+    echo
+    echo "A bricked board would still show its bootloader (239A:0029 or 002A). Nothing at all"
+    echo "on the bus points at ${GREEN}an application that is running and has detached USB${NC}"
+    echo "before sleeping -- see issue #60 and src/power.cpp."
+    echo
+    echo "Options, cheapest first:"
+    echo "  1. ${GREEN}Wait for the next wake${NC} and flash inside the window. The node attaches"
+    echo "     on wake and, from the #60 fix onward, stays attached 180 s after every boot."
+    echo "  2. ${GREEN}Double-tap RESET on the RAK19007${NC} to enter DFU immediately."
+    echo
+    echo "${YELLOW}Do not conclude the board is dead from this message.${NC} Check again after"
+    echo "one reporting interval before escalating. See docs/FIRST_FLASH.md."
+    exit 1
+  fi
+
   if [[ "$PID_SEEN" != "$PID_APP" ]]; then
     echo
     echo "${RED}THE BOARD HAS NO VALID APPLICATION ON IT. NOTHING IS RUNNING.${NC}"

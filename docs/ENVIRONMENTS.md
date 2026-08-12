@@ -90,6 +90,37 @@ PlatformIO Core, version 6.1.19      # correct
 hand-rolling SSH. Before concluding a tool is missing, check with
 `zsh -l -c "command -v <tool>"`.
 
+## The workstation's SSH key is authorized on the build host
+
+**Added 2026-08-12.** The workstation's `~/.ssh/id_rsa.pub` is in the build host's
+`~/.ssh/authorized_keys`, so `ssh` to the build host works without a password.
+
+This is load-bearing, not a convenience. `scripts/push.sh` — and therefore
+`scripts/build.sh`, `scripts/flash.sh` and `scripts/remote.sh sync`, all of which relay
+through it — runs SSH with **`BatchMode` on**, which disables every interactive
+authentication method. Before the key was authorized, all of them failed with a message
+that reads like a network fault:
+
+```console
+ERROR cannot reach build host 'wx3-harness'.
+      (BatchMode is on here, so a host needing a password also lands here;
+       load the key into the agent or use an alias with IdentityFile.)
+```
+
+The address is fine and the host is up; there is simply no way to answer a password prompt
+from inside those scripts. That failure cost time repeatedly on 2026-08-12 and sent more
+than one session hand-rolling `ssh` calls around the tooling instead of using it.
+
+To verify the key still works, or to diagnose the same failure recurring:
+
+```bash
+ssh -o BatchMode=yes "$BUILD_HOST" 'echo ok'      # must print ok, with no prompt
+```
+
+If that prompts or fails, re-append the workstation public key to the build host's
+`~/.ssh/authorized_keys`. Per the section above, **the host address stays out of this
+repository** — pass it as `BUILD_HOST=ntableman@<address>` or via an SSH alias.
+
 ## Git is the only transport
 
 You sometimes work directly on the build host or a laptop, so **neither machine is
