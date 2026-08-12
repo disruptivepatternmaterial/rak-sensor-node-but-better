@@ -295,6 +295,16 @@ bool Radio::send(const Payload &p)
         return false;
     }
 
+    // Discard anything left over from a previous cycle before opening new RX windows.
+    // take_downlink() clears the flag when it consumes a command, but nothing guarantees it is
+    // called: a cycle that returns early leaves the flag set, and the next cycle then applies a
+    // command the network sent for the last one. For a set-interval command that means the node
+    // silently adopts a stale interval nobody sent it. This restores what radio.h promises —
+    // that a downlink belongs to the windows after *this* send and no other.
+    s_have_downlink = false;
+    s_rx_len        = 0;
+    s_rx_port       = 0;
+
     const size_t len = (p.length() > sizeof(s_tx_buf)) ? sizeof(s_tx_buf) : p.length();
     memcpy(s_tx_buf, p.bytes(), len);
     s_tx_data.buffsize = len;
