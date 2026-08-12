@@ -57,6 +57,29 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-11 — RS-485 dead on bench: busscan 0 bytes powered and unpowered
+
+- **Commit on the board:** `e2c7088` (`busscan` image, flashed same day)
+- **Host:** Heliotrope Ridge
+- **Measured:** Modbus FC `0x03` sweep at 4800/9600/19200/38400/115200, slaves `0x01`–
+  `0x03`, with WB_IO2 HIGH then LOW; plus the 9600/0x01 five-register production frame.
+- **Observation** (two independent captures, same verdict):
+
+  ```
+  [bus scan] total with rail HIGH: 0 byte(s)
+  [bus scan] total with rail LOW: 0 byte(s)
+  [bus scan] verdict: 0 byte(s) powered vs 0 unpowered; 9600/0x01 production frame: 0 byte(s)
+  [bus scan] the line is dead in both states. Nothing the firmware controls
+             can change that — check 12 V at the RK900 and the A/B pair.
+  ```
+
+- **Verdict:** FAIL for a live RK900 path. Baud, slave ID, and IO2 control are ruled out
+  (all rates/slaves silent; HIGH≡LOW). Remaining: pack pin 1 `P+` → RK900 12 V, and A/B on
+  the RAK5802. Tracked as [#49](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/49).
+- **Notes:** Board left on `busscan` for the re-check after wiring. Field image was
+  `0.4.0` / Aug 5 before this flash; restore `rak4631` only after `busscan` shows a
+  non-zero production frame.
+
 ### 2026-08-05 — Board recovered via UF2; "off the USB bus" turns out to be the sleep detach, not a fault
 
 **Host:** Heliotrope Ridge. **Commit on the board:** `7dfc26f` (see the stale-binary note below —
