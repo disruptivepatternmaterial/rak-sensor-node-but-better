@@ -78,6 +78,12 @@ constexpr long kOwRailAbBaud = 9600;
 //   3V3_S"; a switched rail's rise time is a property of the switch, not of the load.
 constexpr uint32_t kOwRailSettleMs = 250;
 
+// Bytes per point in the phase-0 transmit-timing sweep. Large enough that the ~1 us micros()
+// quantisation and the one-off begin()/end() cost are negligible against a per-byte figure in
+// the hundreds of microseconds, small enough that the burst of garbage is over in well under a
+// tenth of a second at the slowest rate swept.
+constexpr uint16_t kOwTimingBytes = 64;
+
 // Capture depth. 64 was silently the most consequential number in this scanner: the pack's
 // provisioning announcement is a 92-byte frame whose *tail* carries the per-sensor sampling
 // rules, so a 64-byte buffer captured the identity fields and threw away the only bytes that
@@ -213,6 +219,73 @@ uint32_t ow_census(bool pull_up)
 
     power::watchdog_feed();
     return edges;
+}
+
+// Phase 0 — is the transmit path's per-byte overshoot in the BIT PERIOD or BETWEEN BYTES?
+//
+// The provisioning capture measured `tx 95 bytes in 110352 us = 1161 us/byte` against the
+// 1041.7 us that ten bit periods at 9600 take in theory — 11.4% slow. Those two possible
+// causes have opposite fixes and cannot be told apart from a per-frame average:
+//
+//   * A stretched BIT PERIOD is fatal. An asynchronous receiver samples each bit against its
+//     own clock started at the start-bit edge, and tolerates only a few percent of total error
+//     before the stop bit is sampled in the wrong place. Every byte would be malformed.
+//   * Idle time BETWEEN bytes is free. Async framing resynchronises on every start bit, so the
+//     gap between characters is unbounded by construction. The bytes are individually valid.
+//
+// Sweeping the baud separates them arithmetically. Model the cost of one write() as
+// `T = k * bit_period + F`, where k is the number of bit periods actually spent on the wire and
+// F is baud-independent fixed cost (pin reconfiguration, interrupt detach/attach). Measuring T
+// at three bauds over-determines k and F, so both fall out and neither has to be assumed:
+// k = (T_slow - T_fast) / (bit_slow - bit_fast).
+//
+// k == 10 would mean the frame is exactly its ten bits and every excess microsecond is fixed
+// overhead. k == 11 means one whole extra bit period is being spent per byte — which is what
+// the library source predicts, because beginTx() opens with its own delayMicroseconds(_tx_delay)
+// before the start bit is driven. Either way the bit period itself is (T - F) / k, and that is
+// the number that decides whether the pack can receive us at all.
+//
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 src/SoftwareHalfSerial.cpp begin():
+//   `uint32_t bit_delay = (float(1)/speed)*1000000; _tx_delay = bit_delay;` — an integer
+//   truncation, so 9600 gives 104 us against an ideal 104.1667 us, i.e. -0.16%. Bits come out
+//   marginally SHORT, which cannot produce an 11% overshoot.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 src/SoftwareHalfSerial.cpp beginTx() ends
+//   with `delayMicroseconds(_tx_delay)`, one full bit period charged per write() call before
+//   any data bit is driven — the leading candidate for the excess.
+// CITE(spec): docs/FIRMWARE_SPEC.md §2.2 — 9600 8N1 half-duplex is the specified rate; 4800 and
+//   19200 are swept here only as timing reference points and transmit nothing meaningful.
+//
+// 0x55 alternates every bit, so the pattern exercises a rise and a fall in every bit position
+// rather than letting a run of identical bits hide a timing error. The bytes are deliberate
+// garbage: the pack rejects them, and this phase runs before any protocol phase so a rejected
+// burst cannot be mistaken for a protocol result.
+void ow_tx_timing(long baud, uint16_t n)
+{
+    SoftwareHalfSerial &link = ow_bus();
+    link.end();
+    link.begin(baud);
+
+    const uint32_t t0 = micros();
+    for (uint16_t i = 0; i < n; i++) {
+        link.write(0x55);
+    }
+    const uint32_t t1 = micros();
+    link.end();
+
+    const uint32_t total = t1 - t0;
+    // Scaled by 100 so the fractional microsecond survives integer arithmetic; a 104 vs 104.17
+    // distinction is the whole point of the measurement and rounding it away defeats it.
+    const uint32_t per_x100   = (total * 100UL) / n;
+    const uint32_t ideal_x100 = (1000000000UL / (uint32_t)baud); // 10 bit periods, us * 100
+
+    LOGF("   %6lu baud  tx %u x 0x55 : %lu us total, %lu.%02lu us/byte "
+         "(10 bits = %lu.%02lu us, excess %ld.%02lu us)\n",
+         (unsigned long)baud, (unsigned)n, (unsigned long)total, (unsigned long)(per_x100 / 100),
+         (unsigned long)(per_x100 % 100), (unsigned long)(ideal_x100 / 100),
+         (unsigned long)(ideal_x100 % 100), (long)((per_x100 - ideal_x100) / 100),
+         (unsigned long)((per_x100 - ideal_x100) % 100));
+
+    power::watchdog_feed();
 }
 
 // Phase 2 — listen with the transmitter never used. The reference protocol has an
@@ -365,6 +438,14 @@ void onewire_scan(uint8_t pin)
     ow_best_baud    = 0;
 
     LOGF("[ow scan] pin WB_IO1 (Arduino %u), pack pins 3+5 joined\n", (unsigned)g_pin);
+
+    // Three points, so k and F in `T = k * bit_period + F` are over-determined rather than
+    // assumed. 64 bytes per point keeps the micros() quantisation far below the signal.
+    LOGLN(F("[ow scan] phase 0: transmit timing — is the excess in the bit period or between "
+            "bytes?"));
+    ow_tx_timing(4800, kOwTimingBytes);
+    ow_tx_timing(9600, kOwTimingBytes);
+    ow_tx_timing(19200, kOwTimingBytes);
 
     LOGLN(F("[ow scan] phase 1: idle level and falling-edge census, no UART, no framing"));
     ow_edges_pulled += ow_census(true);
