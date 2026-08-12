@@ -332,6 +332,19 @@ void onewire_scan(uint8_t pin)
 {
     g_pin = pin;
 
+    // Cleared before every sweep. main.cpp calls this once per cycle and these four are file
+    // scope, so without the reset the verdict reports every cycle since boot instead of the one
+    // just run: a single byte captured once latches "bytes arrived — the pack talks" forever,
+    // and ow_best_baud pins phase 4 to a rate that answered in some earlier cycle. That is the
+    // exact false negative this scan exists to prevent, because it sends the next reader after a
+    // framing constant while the wire is dead. bus_scan() is not exposed to it — it totals in
+    // locals. Observed on the bench 2026-08-11: cycles 5 and 6 printed 0 bytes in every phase
+    // under a "2 byte(s) total" verdict.
+    ow_edges_pulled = 0;
+    ow_edges_float  = 0;
+    ow_bytes        = 0;
+    ow_best_baud    = 0;
+
     LOGF("[ow scan] pin WB_IO1 (Arduino %u), pack pins 3+5 joined\n", (unsigned)g_pin);
 
     LOGLN(F("[ow scan] phase 1: idle level and falling-edge census, no UART, no framing"));

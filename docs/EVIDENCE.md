@@ -57,6 +57,115 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-11 — Both known-good images reflashed; both stayed silent. Firmware is exonerated on both buses
+
+The headline result of the day, and the one that redirects the search. Two images with recorded
+passes were put back on the board unchanged. Neither reproduced its own recorded result.
+
+- **Host:** Heliotrope Ridge
+- **Commits reflashed:** `998dc26` (`busscan`) and `8720dea` (`stage2`) — the exact images
+  behind the 2026-08-03 RK900 pass and the 2026-08-05 battery pass recorded below.
+- **Measured:** whether either recorded pass still reproduces on today's bench, with the
+  firmware held constant and only the rig between then and now.
+- **Observation — `998dc26`, `busscan`, three full cycles:**
+
+  ```
+  total with rail HIGH: 0 byte(s)
+  total with rail LOW: 0 byte(s)
+  9600/0x01 production frame: 0 byte(s)
+  ```
+
+  The 2026-08-03 pass on this same image read
+  `15 byte(s) <- 01 03 0A 00 00 00 00 00 FB 01 F8 27 56 DA A1`. **Not reproduced.**
+
+- **Observation — `8720dea`, `stage2`, full 50.5 s awake window:**
+
+  ```
+  battery : no announcement — proceeding unprovisioned
+  battery : no data (no reply, 0 bytes)
+  wait    : 60 s (sleep disabled)
+  ```
+
+  The 2026-08-05 pass on this same image read 22 announcements in 45.4 s plus a 28-byte
+  checksum-valid SENDAT reply. **Not reproduced.**
+
+- **Verdict:** FAIL on both buses, and **firmware is exonerated for both.** The binaries that
+  produced the passes are byte-for-byte the binaries that are silent now, so no code change
+  since can be the cause and no code change can be the fix.
+
+**Why this is conclusive for the one-wire side in particular.** The pack's 2026-08-05
+announcements were **unsolicited** — the pack talks first, and that depends on nothing the node
+transmits. Framing, addressing, turnaround timing, `kWakeCount`, provisioning state: none of it
+can suppress a message we never asked for. Silence from an unsolicited talker means nothing is
+driving the wire.
+
+**Operator-confirmed context.** The RK900 has 12 V. The pack is healthy and powers the board
+when the board is off USB. The rig that passed on 2026-08-05 is recorded below
+(_"Phase-0 direct probe exonerated on hardware"_) as having pack pin 1 `P+` **deliberately
+unconnected with the buck out of circuit** — 12 V entered the circuit only after that capture.
+That is the largest known delta between the passing rig and today's, and it is physical.
+
+Remaining suspects on both buses are wiring, connectors, and the 12 V introduction — not
+firmware. Tracked as [#49](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/49)
+(RS-485) and [#50](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/50)
+(one-wire).
+
+### 2026-08-11 — One-wire dead: no edge, no byte, in any mode — and the scan reporting otherwise was lying
+
+- **Host:** Heliotrope Ridge
+- **Commit:** `8994d02`, `owscan` image. The after-fix capture additionally carries the
+  accumulator reset committed alongside this entry.
+- **Measured:** whether the RAK9154 drives the one-wire line at all — idle level and
+  falling-edge census with no UART and no framing, passive listen at five bauds, BOOT to dest
+  `0xFF` at five bauds, and SENDAT to dest `0x01`/`0x02`/`0x03`/`0xFF` at 9600.
+- **Observation — the edge census, which needs no protocol to be right:**
+
+  ```
+  INPUT_PULLUP idle HIGH : 0 falling edge(s), 0 of 1735294 samples LOW
+  INPUT (float) idle HIGH : 0 falling edge(s), 0 of 1734024 samples LOW
+  ```
+
+  0 bytes on passive listen at all five bauds. 0 bytes from BOOT dest `0xFF` at all five
+  bauds. 0 bytes from SENDAT dest `0x01`/`0x02`/`0x03`/`0xFF` at 9600. Verdict line:
+
+  ```
+  0 pulled-up edge(s), 0 floating edge(s), 0 byte(s) total
+  ```
+
+- **Verdict:** FAIL. Nothing pulled the line low across ~1.73 M samples in either pin mode,
+  so the pack is not driving the wire — this is below the level where framing or addressing
+  could matter. Tracked as [#50](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/50).
+
+#### The diagnostic lied first, so every earlier `owscan` verdict inherits the doubt
+
+`owscan`'s four verdict accumulators — `ow_edges_pulled`, `ow_edges_float`, `ow_bytes`,
+`ow_best_baud` — are file scope and were never cleared between sweeps, while `main.cpp` calls
+the scan once per cycle. Two bytes captured in some early cycle therefore latched their verdict
+permanently.
+
+**Before the fix**, at 20:47:32, 20:48:00 and 20:48:28, the scan printed a screen of zeros in
+every phase and then concluded:
+
+```
+2 byte(s) total
+bytes arrived. The pack talks, so the fault is framing or addressing, not the wire
+```
+
+and pinned phase 4 to `19200 baud (first baud that answered)` when 19200 had returned nothing.
+
+**After the fix**, at 20:52:40, the same wire and the same board:
+
+```
+0 byte(s) total
+nothing ever pulled this line low… the pack is not driving the wire at all
+```
+
+This is recorded as evidence, not as a changelog line, because it invalidates readings: **any
+`owscan` verdict captured before 20:52:40 today reports the union of every cycle since boot,
+not the cycle printed above it.** The failure mode is the precise one the scan exists to
+prevent — it sent the reader after a framing constant while the wire was dead. `bus_scan()` was
+never exposed to this; it totals in locals.
+
 ### 2026-08-11 — RS-485 dead on bench: busscan 0 bytes powered and unpowered
 
 - **Commit on the board:** `e2c7088` (`busscan` image, flashed same day)
