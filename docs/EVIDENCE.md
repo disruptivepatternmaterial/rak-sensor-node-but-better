@@ -57,6 +57,95 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — The pack talks. `owscan` draws the announcement every cycle; the production image on the same bench gets 0 bytes
+
+Reverses the 2026-08-11 entry below on the one-wire bus. The RAK9154 is **not** silent: a
+standalone `owscan` image reads its 92-byte announcement on every cycle at 9600, and draws a
+SENDAT reply from dest `0xFF`. The production ladder, on the same board and the same wiring
+minutes earlier, saw nothing at all.
+
+- **Host:** Heliotrope Ridge, board on `/dev/cu.usbmodem31101`
+- **Build-host tree:** `8994d02` plus the uncommitted `src/diagnostics/owscan.cpp`
+  accumulator-reset fix. That working-tree diff is byte-identical to the diff local commit
+  `b967008` carries (`git diff … | md5` = `8b02d1ef78ea5c232c01385e34b9933f` on both sides), so
+  the image built here is the content of `b967008`.
+- **Measured:** whether the pack transmits at all on `WB_IO1`, and at which baud and address.
+
+#### Observation A — the production image already on the board, before anything was flashed
+
+Image SHA **not established** — it was not the `owscan` image it was believed to be. It reported
+`[cycle 203]`, read the RK900, and ran the battery ladder:
+
+```
+07:21:19 battery : no announcement — proceeding unprovisioned
+07:21:40 battery : no data (no reply, 0 bytes)
+07:21:40 wait    : 60 s (sleep disabled)
+07:22:40 [cycle 203]
+07:22:40 RK900   : raw 0x0000-0x0004 = 0000 0000 00F4 024C 2738
+07:22:40 RK900   : wind 0.00 m/s @ 0 deg, 24.4 C, 58.8 %RH, 1004.0 hPa
+```
+
+The 21 s between the two battery lines is the non-`FAST` 20 s push listen. **Zero bytes across
+the whole cycle.** RK900 reads correctly on the same cycle.
+
+#### Observation B — `owscan`, flashed immediately afterwards, three consecutive cycles
+
+Passive listen, transmitting nothing, 9600 baud, identical on all three cycles:
+
+```
+9600 baud  passive 3000 ms : 92 byte(s)  <- FF 7E 00 55 02 00 00 FF 00 01 50 03 44 01 02 09 00 30
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 FF 00 47 45 00 00 00 00 52 41 4B 32 35 36 30 2D
+69 6F 00 00 00 00 00 00 00 00 00 00 00 00 00 00 06 15 BA 08 00 16 B9 08 00 17 B8 08 00 18 67 08
+00 19 F3 08 00 1A F3 08 00 82
+```
+
+Decoded: `hub_type 0x01` PROVISION, `payload_type 0x03` VER3, `dest 0x00` master, `source 0xFF`.
+`provId` at frame index 34 reads **`FF`** — still unprovisioned. `snsr_num` = **6**, and every
+descriptor carries rule **`0x0008` (RULE_PERIODIC)**: sid `0x15` ipso `0xBA` (186 DC voltage),
+`0x16`/`0xB9` (185 DC current), `0x17`/`0xB8` (184 capacity), `0x18`/`0x67` (103 temperature),
+`0x19` and `0x1A` both `0xF3` (243 status word). The sensors are armed, not disabled.
+
+SENDAT probe-id sweep at 9600:
+
+```
+9600 baud  SENDAT dest 0x01 : 0 byte(s)
+9600 baud  SENDAT dest 0x02 : 0 byte(s)
+9600 baud  SENDAT dest 0x03 : 0 byte(s)
+9600 baud  SENDAT dest 0xFF : 120 byte(s)  <- FF 7E 00 15 02 01 00 FF 09 03 10 02 15 BA 00 00
+16 B9 00 00 17 B8 00 18 67 00 00 2F FF 7E 00 55 02 00 ...
+```
+
+The first frame is `flag 0x01` (RSP), `dest 0x00`, `source 0xFF`, `hub_type 0x03` SENDAT — a
+genuine answer to our request — and **every record value is zero**, i.e. the
+`BatteryResult::Unsampled` template. It is immediately followed in the same read by the 92-byte
+announcement. BOOT drew 0 bytes at 4800/9600/19200/38400, unchanged from prior sweeps.
+
+Phase 1 line census, cycles 2 and 3:
+
+```
+INPUT_PULLUP   idle HIGH : 334 falling edge(s), 121385 of 1732860 samples LOW
+INPUT (float)  idle HIGH : 0 falling edge(s), 0 of 1734024 samples LOW
+```
+
+Open-drain behaving as expected: activity only with the pull-up engaged.
+
+#### What this establishes, and what it does not
+
+Established: the wire, the pin (`WB_IO1`), the baud (9600) and the pack are all good. The pack
+is **unprovisioned** (`provId 0xFF`), listens only on `0xFF`, and answers with an all-zero
+record template. Nothing here is a framing or checksum fault.
+
+**Not established:** why the production image gets 0 bytes where `owscan` gets 92. The leading
+hypothesis is that `owscan` never reads the RK900 and therefore never drops `WB_IO2`, whereas the
+production cycle reads the RK900 first and `src/sensors/rk900.cpp` drops `WB_IO2` LOW afterwards —
+which is precisely the failure `docs/HARDWARE.md` predicts if the pack's `3V3_In` sits on the
+switched `3V3_S` rail rather than the always-on `VDD` pad ("the symptom would be a battery that
+never replies"). **This was not tested.** The controlled test is one `owscan` cycle with `WB_IO2`
+driven LOW; if the announcement disappears, the hypothesis is proven.
+
+The operator states the pack is wired `IO1` + `VDD` + `GND` with P+/P−, which matches
+`docs/HARDWARE.md` §"P0 wiring — decided" exactly. No contradiction with the documented pinout.
+
 ### 2026-08-11 — Both known-good images reflashed; both stayed silent. Firmware is exonerated on both buses
 
 The headline result of the day, and the one that redirects the search. Two images with recorded

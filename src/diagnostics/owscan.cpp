@@ -59,6 +59,25 @@ constexpr uint8_t kOwBroadcast   = 0xFF; // CITE(prior-art): [CIT-ONEWIRE-SERIAL
 constexpr uint32_t kOwCensusMs  = 2000;
 constexpr uint32_t kOwPassiveMs = 3000;
 
+// Phase 2b, the WB_IO2 rail A/B. Only the one rate that is known to frame correctly is worth
+// sweeping here — the question is whether the pack is powered, not what baud it speaks, and
+// the other four rates in kOwBauds are the same 9600 stream misframed.
+// CITE(spec): docs/FIRMWARE_SPEC.md §2.2 — 9600 half-duplex is the specified one-wire rate.
+// CITE(bench): docs/EVIDENCE.md 2026-08-12 — the 92-byte announcement decodes cleanly only at
+//   9600; 4800/19200/38400 returned byte counts that do not reproduce between cycles and
+//   115200 returned all-zero runs, i.e. misframing and noise rather than data.
+constexpr long kOwRailAbBaud = 9600;
+
+// Settling time after switching the rail, before listening.
+//
+// Deliberately far longer than the 20 ms rk900.cpp allows its RS-485 transceiver. That figure
+// covers a transceiver whose supply never dropped; this one has to cover a pack whose voltage
+// reference may have just been removed and restored, and an under-short settle would produce a
+// false "the rail gates the pack" by measuring the recovery rather than the steady state.
+// CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet — "IO2 controls the power switch of
+//   3V3_S"; a switched rail's rise time is a property of the switch, not of the load.
+constexpr uint32_t kOwRailSettleMs = 250;
+
 // Capture depth. 64 was silently the most consequential number in this scanner: the pack's
 // provisioning announcement is a 92-byte frame whose *tail* carries the per-sensor sampling
 // rules, so a 64-byte buffer captured the identity fields and threw away the only bytes that
@@ -355,6 +374,59 @@ void onewire_scan(uint8_t pin)
     for (uint32_t i = 0; i < (sizeof(kOwBauds) / sizeof(kOwBauds[0])); i++) {
         ow_passive(kOwBauds[i]);
     }
+
+    // Phase 2b — the one difference between this scan and the production cycle.
+    //
+    // This diagnostic returns from main.cpp before either sensor is read, so it never touches
+    // WB_IO2. The production cycle reads the RK900 first, and RK900::power_off() ends with
+    // `digitalWrite(WB_IO2, LOW)` and never raises it again — so by the time Battery::read()
+    // runs, the switched 3V3_S rail is dead. That is the only environmental difference between
+    // a scan that captures a 92-byte announcement every cycle and a production cycle that
+    // reports `no data (no reply, 0 bytes)` on the same harness minutes apart.
+    //
+    // docs/HARDWARE.md predicts this exact symptom if the pack's 3V3_In (socket B pin 4) is
+    // taken from the RAK5802's 3V3 terminal instead of the always-on VDD pad: "the pack's
+    // reference would be dead exactly when it is needed, and the symptom would be a battery
+    // that never replies — easy to misread as a wiring or protocol fault."
+    //
+    // So: listen twice at the one baud known to work, once with the rail up and once with it
+    // down, and let the byte counts decide. Bytes with HIGH and silence with LOW proves the
+    // pack is powered through 3V3_S. Bytes in both rules the rail out entirely and sends the
+    // next reader back to the driver. Either way the answer is one capture, not an argument.
+    //
+    // CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet — "IO2 controls the power switch of
+    //   3V3_S", the rail the RAK5802's 3V3 terminal sits on.
+    // CITE(datasheet): [CIT-RAK9154] RAK9154 socket B (SP1110/P5) pin 4 is 3V3_In, a level
+    //   reference the pack requires; docs/HARDWARE.md routes it to the always-on VDD pad
+    //   precisely so that WB_IO2 cannot gate it.
+    // CITE(bench): docs/EVIDENCE.md 2026-08-12 — owscan captured 92 bytes on every cycle while
+    //   the production image on the same board and harness captured 0 bytes in a 21 s window.
+    LOGLN(F("[ow scan] phase 2b: WB_IO2 rail A/B at 9600 — is the pack powered through 3V3_S?"));
+    pinMode(WB_IO2, OUTPUT);
+
+    digitalWrite(WB_IO2, HIGH);
+    delay(kOwRailSettleMs);
+    LOGLN(F("   rail HIGH (3V3_S on) —"));
+    const uint32_t rail_high_bytes = ow_passive(kOwRailAbBaud);
+
+    // Exactly the state rk900.cpp leaves behind before Battery::read() runs.
+    digitalWrite(WB_IO2, LOW);
+    delay(kOwRailSettleMs);
+    LOGLN(F("   rail LOW (3V3_S off, what rk900.cpp leaves) —"));
+    const uint32_t rail_low_bytes = ow_passive(kOwRailAbBaud);
+
+    // Leave the rail up. A diagnostic that ends with the sensor rail switched off would make
+    // the next phase measure the fault it just created.
+    digitalWrite(WB_IO2, HIGH);
+    delay(kOwRailSettleMs);
+
+    LOGF("   rail A/B verdict: HIGH %lu byte(s), LOW %lu byte(s) — %s\n",
+         (unsigned long)rail_high_bytes, (unsigned long)rail_low_bytes,
+         (rail_high_bytes > 0 && rail_low_bytes == 0)
+             ? "the pack is powered through 3V3_S; WB_IO2 gates it"
+         : (rail_high_bytes > 0 && rail_low_bytes > 0)
+             ? "the rail does not gate the pack; look at the driver"
+             : "inconclusive, no bytes either way this cycle");
 
     LOGLN(F("[ow scan] phase 3: BOOT/provision broadcast, swept across bauds"));
     for (uint32_t i = 0; i < (sizeof(kOwBauds) / sizeof(kOwBauds[0])); i++) {
