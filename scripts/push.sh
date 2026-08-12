@@ -24,8 +24,24 @@ cd "$(dirname "$0")/.."
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; DIM=$'\033[2m'; NC=$'\033[0m'
 die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 
-BUILD_HOST="${BUILD_HOST:-ntableman@192.168.10.223}"
+# No literal address here on purpose. The LAN address this used to default to
+# (192.168.10.223) is currently unreachable, and the address that does work is a public one
+# that must not live in a tracked file. Point BUILD_HOST at the host, or better, define an
+# ssh alias so the address stays in ~/.ssh/config where it belongs:
+#
+#   export BUILD_HOST=ntableman@<address>        # one shell
+#   Host wx3-harness                              # ~/.ssh/config, persistent
+#       HostName <address>
+#       User ntableman
+#
+# See docs/ENVIRONMENTS.md.
+BUILD_HOST="${BUILD_HOST:-wx3-harness}"
 REMOTE_PATH="${REMOTE_PATH:-Documents/GitHub/lorawan/rak-sensor-node-but-better}"
+# Pushed by explicit SSH URL, never by `git push origin`. The build host's tracked origin is
+# an HTTPS remote, and over a non-interactive ssh it has no credential helper and no tty, so
+# it dies with "fatal: could not read Username for 'https://github.com': Device not
+# configured" — observed 2026-08-12. The SSH remote authenticates from the host's key and
+# works. Verified the same day: main advanced 8994d02..4510763 over this URL.
 GH_SSH="git@github.com:disruptivepatternmaterial/rak-sensor-node-but-better.git"
 RELAY_REF="refs/heads/from-workstation"
 
@@ -48,6 +64,21 @@ echo "${DIM}   route:  workstation -> ${BUILD_HOST} -> github${NC}"
 if [[ "$DRY" -eq 1 ]]; then
   echo "${YELLOW}dry run — nothing pushed.${NC}"
   exit 0
+fi
+
+# Fail here, with instructions, rather than 60 s into a TCP timeout that reads as a broken
+# script. The old default was a LAN address that stopped resolving, and the resulting
+# "ssh: connect ... Operation timed out" told nobody what to do about it.
+if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$BUILD_HOST" true 2>/dev/null; then
+  echo "${RED}ERROR${NC} cannot reach build host '${BUILD_HOST}'." >&2
+  echo "       Set BUILD_HOST to the current address, or add an ssh alias:" >&2
+  echo "         export BUILD_HOST=ntableman@<address>" >&2
+  echo "       The LAN address 192.168.10.223 in docs/ENVIRONMENTS.md is currently" >&2
+  echo "       unreachable. The working address is public and is deliberately not" >&2
+  echo "       recorded in this repository — see docs/ENVIRONMENTS.md." >&2
+  echo "       (BatchMode is on here, so a host needing a password also lands here;" >&2
+  echo "        load the key into the agent or use an alias with IdentityFile.)" >&2
+  exit 1
 fi
 
 echo

@@ -108,6 +108,40 @@ it is inferred from the IPSO type. The first pack reply settles it — a value n
 room temperature means tenths and the code is right, while a value near 21 means whole
 degrees and the ×10 comes back. Tracked in issue #4.
 
+## New measurement — 2026-08-12 (does NOT resolve conflict 1)
+
+Recorded here because it bears directly on the battery-current sign and would otherwise be
+lost, **not** because it decides anything. The ADR stays open.
+
+On `4510763`, Heliotrope Ridge, across 20 consecutive `battdiag` cycles and again in the
+`rak4631` field image, the pack reported:
+
+```
+08:04:47 battery : 12.12 V  -0.01 A  91%  23.0 C
+08:04:47 battery : raw v=1212 i=-1 soc=91 t=230
+```
+
+The raw current register is `i=-1`, i.e. **-0.01 A on a pack at 91% that is not connected
+to a charger** — the RK900's 12 V feed on pack pin 1 is deliberately unconnected, and the
+node is running from the pack.
+
+Why it is suggestive and still not sufficient:
+
+- A pack that is **discharging** (which this one is, at a small rate — it is powering the
+  node) reporting a **negative** current is consistent with `FIRMWARE_SPEC.md` §2.2's
+  "negative = charging" being **wrong**, and with the live decoder's "positive = charging".
+- But -0.01 A is one LSB. At that magnitude the reading is not distinguishable from a zero
+  offset or a rounding artifact, and the sign of a single-LSB value is exactly the thing a
+  calibration offset gets wrong. **One LSB is not a sign convention.**
+
+What would settle it, and what nobody has run: put a real charge current into the pack —
+connect the panel, or a bench supply — and read the sign at a magnitude well clear of the
+LSB. A discharge under a deliberate load would do equally well. Until then conflict 1 is
+open and the payload freeze stays blocked.
+
+CITE(bench): docs/EVIDENCE.md 2026-08-12 — 20 consecutive cycles at `12.12 V, -0.01 A,
+  91%, 23.0 C`, plus the same values in the `rak4631` field image.
+
 ## Citations
 
 - CITE(sibling): live TTN formatter `rak-wx-station-default.js` @ `efc0e3c` [CIT-FWM-DECODER]

@@ -19,11 +19,39 @@ Workstation (locked down)                Heliotrope Ridge (build host)
                     (the only transport)
 ```
 
+## The build host address — do not commit it
+
+**`192.168.10.223` is currently unreachable.** It is kept in the diagram above as the
+historical LAN address, not as a working one. As of 2026-08-12 the host answers on a
+**public** address, which is deliberately **not recorded anywhere in this repository** — a
+public address plus the account name in a tracked file is an invitation, and this repo is
+public.
+
+Set it per-shell, or once in ssh config:
+
+```bash
+export BUILD_HOST=ntableman@<address>          # this shell only
+```
+
+```
+Host wx3-harness                                # ~/.ssh/config — preferred, persists
+    HostName <address>
+    User ntableman
+```
+
+`scripts/push.sh`, `scripts/remote.sh`, `scripts/build.sh` and `scripts/flash.sh` all read
+`BUILD_HOST` and default to the `wx3-harness` alias. `push.sh` now probes reachability first
+and prints this instruction instead of stalling in a TCP timeout that reads as a broken
+script.
+
+Ask the operator for the current address. Do not guess it, and do not paste it into a
+commit, an issue, a doc, or a comment.
+
 ## Capability matrix
 
 | | Workstation | Heliotrope Ridge |
 |---|---|---|
-| Reach | local | `ssh ntableman@192.168.10.223` |
+| Reach | local | `ssh "$BUILD_HOST"` — **see the address note below** |
 | PlatformIO | absent | `/opt/homebrew/bin/pio` (6.1.19) |
 | `gh` CLI | present | `/opt/homebrew/bin/gh`, `GITHUB_TOKEN` in `~/.zprofile` |
 | Python | 3.14 (Homebrew) | 3.9 system + Homebrew python3 with PyYAML 6.0.3 |

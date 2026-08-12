@@ -180,8 +180,15 @@ terminal, so both are solder joints.
    that module's `BAT` and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the
    buck for the WisBlock alone and select it on no-load quiescent draw; the RK900 does not
    pass through it.
-2. RAK5802 → RK900 **data only** (A/RX, B/TX, and GND for the reference), fixed **4800** 8N1,
+2. RAK5802 → RK900 **data only** (A/RX, B/TX, and GND for the reference), fixed **9600** 8N1,
    slave `0x01`. No baud switching. Power comes from step 1, not from this module.
+   **This physical unit is set to 9600**, not the 4800 this line claimed until 2026-08-12: a
+   `busscan` read the full register frame at 9600 and nothing at 4800
+   [CITE(bench): docs/EVIDENCE.md, 2026-08-03 `998dc26` busscan](EVIDENCE.md), accepted in
+   [ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md). The baud is field-settable
+   per sensor and the one fleet precedent for this sensor+battery pairing runs 4800, so
+   confirm the rate on any replacement unit rather than assuming either value.
+   `src/sensors/rk900.cpp:16` is the authority in code.
 3. RAK9154 → **one-wire half-duplex** on the 5-pin socket, TXD/RXD bridged, via the SP11
    adapter cable. Watch pin 4 (`3V3_In`): tie to 3V3, **never 5 V**.
 4. Leave the 4-pin Gateway Load socket unused — it is the documented fallback.

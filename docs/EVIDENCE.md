@@ -57,6 +57,65 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — Field image: both sensors in one cycle. Uplink transmitted; TTN acceptance NOT verified
+
+- **Commit:** `4510763`
+- **Host:** Heliotrope Ridge, RAK4631 on `/dev/cu.usbmodem31101`
+- **Image:** `rak4631` — the actual field image. Radio in, **sleep in**. Not a diagnostic.
+- **Measured:** whether both sensors read in the same image and the same cycle (never
+  previously observed), and how far toward TTN acceptance the console can actually take us.
+- **Observation:** one full cycle, verbatim:
+
+  ```
+  08:04:47 config  : interval 1800 s, boot #2
+  08:04:47 session : restored 0x260CE734, counter 1792
+  08:04:47 [cycle 1]
+  08:04:47 RK900   : raw 0x0000-0x0004 = 0000 0000 00F7 024B 273C
+  08:04:47 RK900   : wind 0.00 m/s @ 0 deg, 24.7 C, 58.7 %RH, 1004.4 hPa
+  08:04:47 battery : pack answered at 0x01 — skipping provisioning
+  08:04:47 battery : sampling confirmed — pack is reporting live values
+  08:04:47 battery : 12.12 V  -0.01 A  91%  23.0 C
+  08:04:47 radio   : sent 35 bytes on port 2
+  08:04:47 session : saved 0x260CE734, resume at 1824
+  08:04:55 sleep   : 1800 s
+  ```
+
+**What this does and does not establish:**
+
+| Claim | Status |
+|---|---|
+| Both sensors, one image, one cycle | **pass** — first time observed |
+| Field image (`FEATURE_SLEEP=1`) runs a complete cycle | **pass** |
+| Sleep reached | **pass** — `sleep : 1800 s` |
+| OTAA join | **not observed.** The node restored a saved session (`restored 0x260CE734`) rather than joining. That is correct behavior and evidence the earlier join persisted, but it is not a join event |
+| Uplink **accepted at TTN** | **NOT VERIFIED — see below** |
+| Downlink handled | **not observed.** None was scheduled; nothing exercised the `radio.cpp` fix on hardware |
+
+**On TTN acceptance.** `radio : sent 35 bytes on port 2` is the SX126x library reporting
+the frame handed to the transceiver. It proves transmit, not acceptance, and must not be
+recorded as acceptance. Acceptance cannot be verified from this bench: `ttn-lw-cli` is
+installed on the build host (`/opt/homebrew/bin/ttn-lw-cli`) but **has no credentials** —
+no `~/.ttn-lw-cli.yml`, no API key in the environment. Per
+[`.cursor/rules/00-agent-liveness.mdc`](../.cursor/rules/00-agent-liveness.mdc) a missing
+credential is a hard stop, not something to work around.
+
+The strongest proof available *without* credentials, in ascending order:
+
+1. **Frame counter continuity** (have it): `counter 1792` restored, `resume at 1824`. This
+   is our own counter, so it evidences nothing about the network's view.
+2. **A downlink arriving** (do not have): only the network can originate one, so receiving
+   one proves the network has the session and is listening to our uplinks.
+3. **A confirmed uplink** (do not have, and the strongest): the encoder currently sends
+   `LMH_UNCONFIRMED_MSG` (`src/radio.cpp`), so the stack never asks for an ACK. A one-off
+   confirmed uplink would yield device-side acceptance proof with no TTN credential at all.
+   Not done here — it is a firmware change and an airtime question, and it was not asked
+   for. Recommended as the next step.
+
+- **Verdict: partial pass.** Sensors and cycle: pass. LoRaWAN acceptance: unproven, and
+  deliberately left unproven rather than inferred from `radio : sent`.
+- **Status unchanged: `🚧 NOT YET DEPLOYED`.** H1-H8, the ≥24 h soak and the ≥7 d field
+  shadow are all untouched by this run.
+
 ### 2026-08-12 — The RAK9154 pack latches and reports. It was never broken; the 1800 s cycle hid cycle 3
 
 - **Commit:** `b436aa9`
