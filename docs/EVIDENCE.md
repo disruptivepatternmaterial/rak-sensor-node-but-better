@@ -114,8 +114,8 @@ add it at the top.
 | Field image (`FEATURE_SLEEP=1`) runs a complete cycle | **pass** |
 | Sleep reached | **pass** — `sleep : 1800 s` |
 | OTAA join | **not observed.** The node restored a saved session (`restored 0x260CE734`) rather than joining. That is correct behavior and evidence the earlier join persisted, but it is not a join event |
-| Uplink **accepted at TTN** | **transmitted, not heard — see below.** The radio path itself is already proven; this is about today's image specifically |
-| Downlink handled | **not observed.** None was scheduled; nothing exercised the `radio.cpp` fix on hardware |
+| Uplink **accepted at TTN** | **pass** — confirmed from the network side at 09:20. See the correction below; an earlier row in this entry claimed the opposite and was wrong |
+| Downlink handled | **delivered to the device** at `16:21:07Z`. Console confirmation of the handler running was not captured — see below |
 
 **On TTN acceptance — read this before re-testing the radio path.**
 
@@ -147,10 +147,53 @@ Those five are the load-bearing part of this observation: they rule out the subs
 the credentials, the CLI invocation and the network path. The stream was working. Our
 device was not heard.
 
-Leading suspect is RF, not firmware — the 2026-07-31 entry records that session as
-"antenna attached", and whether the antenna is currently on the board was not confirmed.
-That is a bench check for the operator, not a code change. **Do not change firmware
-constants on the strength of this entry.** One 110 s window is one window.
+**CORRECTION, 2026-08-12 09:20 — the paragraphs above are wrong, and the error is
+instructive enough to leave in place rather than delete.** The device was being heard the
+whole time. Querying the network's own record of the device settles it:
+
+```
+$ ttn-lw-cli end-devices get my-app-tobi puma-concolor-001 --all
+last_seen_at : 2026-08-12T16:05:59.401582Z
+freq_plan    : US_902_928_FSB_2
+--- NS session ---
+ "dev_addr": "260CE734",
+ "last_f_cnt_up": 1857,
+ "started_at": "2026-07-31T14:33:20.636657834Z"
+```
+
+The network-side `dev_addr` is `260CE734`, byte-identical to the device console's
+`session : restored 0x260CE734`. The session established on 2026-07-31 is still live, and
+its uplink counter is advancing. There is no divergence and no stale session.
+
+The uplink history makes the mistake obvious (times UTC; local is UTC-7):
+
+```
+ t= 2026-08-12T15:04:47Z f_cnt= 1792 port= 2 gw= 3356-gateway-002 snr= 13.5
+ t= 2026-08-12T15:33:12Z f_cnt= 1824 port= 2 gw= 3356-gateway-002 snr= 13.5
+ t= 2026-08-12T15:35:51Z f_cnt= 1856 port= 2 gw= 3356-gateway-002 snr= 13.75
+ t= 2026-08-12T16:05:59Z f_cnt= 1857 port= 2 gw= 3356-gateway-002 snr= 13.75
+```
+
+`f_cnt 1792` at `15:04:47Z` is `08:04:47` local — the exact second of the console line
+`08:04:47  radio : sent 35 bytes on port 2` recorded earlier in this entry. That frame was
+received. So were the rest, all on gateway `3356-gateway-002` at SNR 13–14 dB, which is a
+comfortable link, not a marginal one.
+
+**Why the 110 s window saw nothing: it sat entirely inside the sleep.** The two uplinks
+bracketing it are `15:35:51Z` and `16:05:59Z`; the subscription ran `15:38–15:39:50Z`.
+Nothing was transmitted during it. The gap between those two uplinks is 30 min 8 s, which
+is `sleep : 1800 s` plus a cycle — the node was doing exactly what it was told to.
+
+The counter is the tell that should have caught this sooner. `1824 → 1856` is a jump of 32,
+the reserved block a session restore burns on boot; `1856 → 1857` is a plain increment. So
+the board did **not** reset when that capture's upload reported `SUCCESS`, and the window
+was observing a sleeping node.
+
+**The lesson worth keeping: on a node with a 1800 s duty cycle, a two-minute observation
+window that sees nothing has established nothing.** The five other devices proved the
+subscription worked — they did not, and could not, prove ours was silent. Absence of
+evidence was recorded as evidence of absence. Query `last_seen_at` and the counter first;
+they are cheap, and they are the network's own memory rather than a sample of it.
 
 **Device identity, corrected.** `puma-concolor-001` / DevEUI `42BB96EF76E200F1` lives in
 application **`my-app-tobi`**. The plausible-sounding `middle-fork-area` has **no end
@@ -164,10 +207,32 @@ reasoning from the application name will look in the wrong place.
 "frm_payload": "Aw==",
 ```
 
-`Aw==` is `0x03`, matching the firmware contract at `src/radio.cpp:398`. It could not be
-delivered because **Class A opens receive windows only after an uplink**, and no uplink
-was heard. The downlink path therefore remains compile-verified only; it has never run on
-hardware ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)); the uplink not being heard is [#53](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/53).
+`Aw==` is `0x03`, matching the firmware contract at `src/radio.cpp:398`.
+
+**Delivered at 09:21, once the uplink question was settled.** With the frame queued, the
+board was reset and uplinked at `16:21:07Z` (`f_cnt 1858`, port 2). The queue drained
+across that single uplink:
+
+```
+before:  [{"f_port": 10, "frm_payload": "Aw==", ...}]
+after:   []
+```
+
+That is the network confirming it handed the frame to the device in the RX window that
+uplink opened — the first time anything has come *down* to this node on hardware. It
+exercises the Class A ordering the earlier note described correctly: the uplink is what
+creates the opportunity.
+
+What is still missing is narrower and worth stating plainly: **the console did not capture
+the handler running.** `Radio::take_downlink()` and the `0x03` branch are unverified by
+observation, even though the frame reached the radio. The capture helper gives up looking
+for the USB CDC device after roughly 40 s regardless of the duration it is asked for, and
+after a DFU flash this board takes about two minutes to re-enumerate and run — so every
+attempt stopped watching before the node woke. That is a tooling gap, not a firmware
+finding. Bounds-checking of a malformed downlink is likewise untested on hardware.
+[#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)
+stays open for those two, narrowed from "never run on hardware" to "delivered but not
+observed being handled."
 
 **Working `ttn-lw-cli` harness**, established the hard way and worth keeping:
 
