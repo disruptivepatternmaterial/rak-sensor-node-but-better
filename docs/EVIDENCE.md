@@ -57,6 +57,55 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — The RAK9154 pack latches and reports. It was never broken; the 1800 s cycle hid cycle 3
+
+- **Commit:** `b436aa9`
+- **Host:** Heliotrope Ridge (`130.111.32.200`), RAK4631 on `/dev/cu.usbmodem31101`
+- **Image:** `battdiag` — battery only, ~10 s cycle (`FEATURE_RK900=0 FEATURE_RADIO=0
+  FEATURE_SLEEP=0 FEATURE_BENCH_INTERVAL=1 FEATURE_BATTERY_FAST=1`)
+- **Measured:** whether the all-zero record set that every prior session reported as a
+  provisioning failure was instead the documented boot behavior — `AGENTS.md` records
+  "expect ~2 null cycles after boot while the pack samples" from the 2026-08-05 success.
+  `stage3` runs an 1800 s cycle, so every capture window ever taken held exactly one cycle.
+- **Observation:** 20 consecutive cycles in 210 s. **19 of 20 carried live values, one
+  did not, and the one was cycle 2.** The pack was latched at pid `0x01` throughout; the
+  string `provId FF` does not appear anywhere in the capture.
+
+  ```
+  07:56:08 [cycle 2]
+  07:56:10 battery : pack answered at 0x01 — skipping provisioning
+  07:56:10 battery : raw FF 7E 00 15 02 01 00 01 04 03 10 02 15 BA 00 00 16 B9 00 00 17 B8 00 18 67 00 00 27
+  07:56:10 battery : no data (all-zero records (pack not sampled), 28 bytes)
+  07:56:20 [cycle 3]
+  07:56:20 battery : pack answered at 0x01 — skipping provisioning
+  07:56:20 battery : sampling confirmed — pack is reporting live values
+  07:56:20 battery : 12.12 V  -0.01 A  91%  23.0 C
+  07:56:20 battery : raw v=1212 i=-1 soc=91 t=230 (t scale UNCONFIRMED)
+  ...
+  07:59:26 [cycle 21]
+  07:59:26 battery : pack answered at 0x01 — skipping provisioning
+  07:59:26 battery : 12.12 V  -0.01 A  91%  23.0 C
+  ```
+
+  Values are consistent with the 2026-08-05 reference (12.23 V, +0.00 A, 98%, 23.0 °C) for
+  a pack that has since been sitting: 12.12 V, -0.01 A, 91%, 23.0 °C, stable to the
+  reported digit across all 19 cycles.
+
+  One cycle (8) logged `no announcement — proceeding unprovisioned` and still returned live
+  values, which is correct — the latched pid survives a missed announcement window.
+
+- **Verdict: pass.** The provisioning handshake works. This closes the investigation that
+  the same-day byte-for-byte comparison had already pointed at: our frame matched
+  `onewire_master_protocol.c` on all five checked properties because it *was* correct, and
+  the reference algorithm reproducing the pack's own `0x82` checksum was the tell. The
+  remaining symptom was an observation artifact of the 1800 s cadence, not a defect.
+- **Correction to the record:** prior 2026-08-12 entries describing the pack as "refusing
+  to latch" are wrong. The `provId FF` announcements those entries captured are the pack's
+  pre-latch announcements; no capture window was ever long enough to show what followed.
+- **Does not change project status.** `🚧 NOT YET DEPLOYED` stands — H1-H8 and the ≥24 h
+  soak / ≥7 d shadow are untouched by this. Temperature scale remains UNCONFIRMED
+  (issue #4) and the current-sign conflict in ADR-0002 is still open.
+
 ### 2026-08-12 — Transmit timing is within async tolerance. The 11.4% overshoot is legal inter-character idle, not a stretched bit period
 
 **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31101`, commit **`eb7fff8`**, `owscan`.
