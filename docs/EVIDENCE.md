@@ -57,6 +57,68 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — Transmit timing is within async tolerance. The 11.4% overshoot is legal inter-character idle, not a stretched bit period
+
+**Host:** Heliotrope Ridge, `/dev/cu.usbmodem31101`, commit **`eb7fff8`**, `owscan`.
+
+The provisioning capture's `tx 95 bytes in 110352 us = 1161 us/byte` against 1041.7 us of ten bit
+periods at 9600 raised the hypothesis that our transmit clock is 11.4% slow and the pack is
+discarding our provisioning response as a framing error. **That hypothesis is disproven.**
+
+`owscan` phase 0 measures `write()` cost at three bauds, which over-determines the model
+`T = k * bit_period + F`. Cycles 2 and 3 were identical to the microsecond:
+
+```
+4800  baud  tx 64 x 0x55 : 149414 us total, 2334.59 us/byte (10 bits = 2083.33 us, excess 251.26 us)
+9600  baud  tx 64 x 0x55 :  75195 us total, 1174.92 us/byte (10 bits = 1041.66 us, excess 133.26 us)
+19200 baud  tx 64 x 0x55 :  38086 us total,  595.09 us/byte (10 bits =  520.83 us, excess  74.26 us)
+```
+
+Solving for `k` across all three pairs, using the library's integer-truncated bit delays
+(4800 → 208 us, 9600 → 104 us, 19200 → 52 us):
+
+| Pair | ΔT (us) | Δbit (us) | k |
+|---|---|---|---|
+| 4800 − 19200 | 1739.50 | 156 | **11.151** |
+| 4800 − 9600 | 1159.67 | 104 | **11.151** |
+| 9600 − 19200 | 579.83 | 52 | **11.150** |
+
+`k = 11.15` on all three pairs, and back-substituting gives `F = 15.3 us` at every baud
+(1174.92 − 11.15×104 = 15.3; 595.09 − 11.15×52 = 15.3; 2334.59 − 11.15×208 = 15.4). The model
+fits exactly, so neither term is assumed.
+
+**What that means.** A byte costs 11.15 bit periods, not 10. The extra whole bit period is
+`beginTx()`'s own `delayMicroseconds(_tx_delay)`, spent with the line idle-HIGH *before* the start
+bit is driven. The residual 0.15 spread over 11 `delayMicroseconds()` calls is ~1.4 us of call
+overhead each, so the real on-wire bit period is ≈ **105.4 us against an ideal 104.17 us, an error
+of +1.18%.**
+
++1.18% is inside the few-percent budget an asynchronous receiver has, and the accumulated error at
+the stop-bit sample point is ~0.11 of a bit — the sample lands nowhere near a boundary. The
+remaining excess is inter-character idle, which async framing permits without limit because the
+receiver resynchronises on every start bit.
+
+**Conclusion: the bytes we transmit are individually well-formed and the pack can receive them.
+Transmit timing is not the reason the pack will not latch.** Do not "fix" `_tx_delay`; the
+truncation to 104 us makes bits marginally *short*, not long.
+
+#### Cross-read: the sibling is not authoritative for provisioning
+
+`forest-weather-machines/rak-4-5-wire` @ `8378435` (repo HEAD `efc0e3c`):
+
+- `firmware/nanoc6-rak9154-poll/src/main.cpp` is **0 bytes — an empty file.** The Modbus path
+  (slave `0x6E`, 21 registers from `0x6000`) that `AGENTS.md` cites it as authoritative for is
+  not implemented there.
+- `firmware/nanoc6-onewire-poll/src/onewire_protocol.cpp` (236 lines) implements
+  `send_query_probe01()`, `rx_frame()` and `parse_response()` — **and no provisioning handler at
+  all.** It polls a probe that is already `0x01` and parses the reply.
+
+So the sibling is authoritative for the *poll and parse* of an already-provisioned pack, and has
+nothing to say about the announcement handshake, which is the step actually failing here.
+`AGENTS.md`'s claim of protocol authority overstates what that repo contains. The only
+provisioning references remain the vendored upstream `onewire_master_protocol.c` and Meshtastic,
+both already cited throughout `src/sensors/battery.cpp`.
+
 ### 2026-08-12 — `WB_IO2` rail exonerated; the "no announcement" failure was a stale binary. Current HEAD answers the pack but the pack still will not latch
 
 Two results, both on **Heliotrope Ridge**, board on `/dev/cu.usbmodem31101`, commit
