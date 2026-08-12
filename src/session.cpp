@@ -41,7 +41,21 @@ struct Stored {
 
 // Highest counter value written to flash so far. Held in RAM so the periodic save knows
 // when the next write is due without reading the file back.
+//
+// Only ever assigned after write_file() has actually succeeded. Advancing it on the way to a
+// write that then does not happen is the whole of the H3 regression: the ceiling would claim
+// headroom the stored file does not have, and every uplink taken against that phantom headroom
+// is one a reset would replay.
 uint32_t s_saved_counter_ceiling = 0;
+
+// Whether a stored session exists that a reset would actually resume from.
+//
+// This is what makes the ceiling meaningful. With nothing stored, a reset rejoins and the
+// network issues a fresh address and a fresh counter, so no value this node transmits can
+// collide with anything — the ceiling constrains a node that resumes, and only that node.
+// Without this distinction the headroom check below would refuse the first uplink after a join
+// whose save was withheld, which is precisely the healthy case.
+bool s_have_stored_session = false;
 
 // Null means "allowed". See set_flash_write_gate() — an un-wired gate must not disable
 // persistence, because that failure would be silent and would cost a rejoin every reset.
@@ -205,6 +219,7 @@ bool restore()
     (void)LoRaMacMibSetRequestConfirm(&req);
 
     s_saved_counter_ceiling = s.uplink_counter;
+    s_have_stored_session   = true;
 
     LOGF("   session : restored 0x%08lX, counter %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
@@ -214,8 +229,8 @@ bool restore()
 bool save()
 {
     // H3: no flash writes while the pack is held below cutoff. Both paths into this function
-    // run during a brownout hold — radio.cpp:244 after a join, and maybe_save_counter() below
-    // after an uplink — and the keepalive is by definition a transmit that happens *while*
+    // run during a brownout hold — radio.cpp after a join, and counter_headroom_ok() below
+    // before an uplink — and the keepalive is by definition a transmit that happens *while*
     // holding, so without this the node keeps paying flash-write current on a pack that is
     // already too low to be spending it. Checked here rather than at the two call sites so a
     // third caller cannot reopen the hole.
@@ -238,33 +253,60 @@ bool save()
     // Store a counter deliberately ahead of the live one. After a reset the node resumes
     // from this value, which is guaranteed to be higher than anything it actually sent.
     s.uplink_counter += kCounterMargin;
-    s_saved_counter_ceiling = s.uplink_counter;
 
     if (!write_file(s)) {
         LOGLN(F("   session : write failed"));
         return false;
     }
 
+    // Only now. Both early returns above — the brownout gate and a failed write — leave the
+    // ceiling exactly where the stored file leaves it, so the two can never disagree.
+    s_saved_counter_ceiling = s.uplink_counter;
+    s_have_stored_session   = true;
+
     LOGF("   session : saved 0x%08lX, resume at %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
     return true;
 }
 
-void maybe_save_counter()
+bool counter_headroom_ok()
 {
+    // Nothing stored means a reset joins fresh and the network hands out a new address and
+    // counter. There is no stored value to run past, so there is nothing to protect.
+    if (!s_have_stored_session) {
+        return true;
+    }
+
     MibRequestConfirm_t req;
     if (!mib_get(MIB_UPLINK_COUNTER, req)) {
-        return;
+        // Where the counter actually is cannot be established. Allow the uplink: a MIB read
+        // failing is not evidence that a replay is about to happen, and treating it as one
+        // would silence a healthy node on a transient.
+        return true;
     }
 
-    // Nothing to do until the live counter catches up with what was already promised.
-    // At an hourly interval and a margin of 32 this writes about eleven times a year,
-    // which is nothing against the flash's endurance.
+    // Strictly below, not at. The stored value is the counter a reset resumes *from*, so
+    // transmitting it and then resetting sends it a second time — the same replay, one frame
+    // earlier than the off-by-one version of this test would catch.
     if (req.Param.UpLinkCounter < s_saved_counter_ceiling) {
-        return;
+        return true;
     }
 
-    save();
+    // The wire has caught up with flash. save() is the only thing that moves the ceiling, and
+    // it moves it only when the write landed — so this answers false exactly when the stored
+    // value cannot be advanced, which during a brownout hold is the case issue #51 created.
+    if (save()) {
+        return true;
+    }
+
+    // Refusing costs one interval of data. Not refusing costs every uplink until somebody
+    // walks out there: unconfirmed sends report success (radio.cpp), so m_failures never
+    // increments, the rejoin escape never fires, and the network discards each frame as a
+    // replay in silence. Recovery would be one frame per kCounterMargin resets.
+    LOGF("   session : uplink withheld — counter %lu has reached the stored ceiling %lu and "
+         "the ceiling cannot be advanced\n",
+         (unsigned long)req.Param.UpLinkCounter, (unsigned long)s_saved_counter_ceiling);
+    return false;
 }
 
 void set_flash_write_gate(FlashWriteGateFn gate)
@@ -276,6 +318,7 @@ void forget()
 {
     InternalFS.remove(kPath);
     s_saved_counter_ceiling = 0;
+    s_have_stored_session   = false;
     LOGLN(F("   session : discarded — next boot will join"));
 }
 
@@ -286,7 +329,7 @@ void forget()
 namespace session {
 bool restore() { return false; }
 bool save() { return false; }
-void maybe_save_counter() {}
+bool counter_headroom_ok() { return true; }
 void set_flash_write_gate(FlashWriteGateFn) {}
 void forget() {}
 } // namespace session

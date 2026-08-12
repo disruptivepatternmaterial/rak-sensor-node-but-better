@@ -28,6 +28,15 @@ constexpr uint32_t kWatchdogTicksPerSecond = 32768;
 bool s_reset_was_watchdog = false;
 bool s_watchdog_running   = false;
 
+// Slice length for the sleep wait below. Coarse enough that the per-cycle wakeup count is
+// negligible, short enough that the tick conversion stays far inside a 32-bit tick count at
+// any interval the configuration permits.
+constexpr uint32_t kSleepSliceSeconds = 60;
+
+// Created on first use rather than statically, because a static FreeRTOS object constructed
+// before the scheduler starts is not usable. Never destroyed — it lives as long as the node.
+SemaphoreHandle_t s_sleep_sem = nullptr;
+
 } // namespace
 
 namespace power {
@@ -88,12 +97,17 @@ void sleep_seconds(uint32_t seconds)
 
 #if FEATURE_CONSOLE
     Serial.flush();
-#endif
 
     // Someone with a cable attached is diagnosing the node, and shutting the console down
     // between cycles would disconnect them at the first sleep — leaving the field-repair
     // case worse off than the deployment it is meant to protect. Unattended, there is no
     // host to disconnect, so the saving is taken.
+    //
+    // The whole block is inside FEATURE_CONSOLE now. It was not: the detach below sat outside
+    // the guard while the matching attach and the Adafruit_TinyUSB include sat inside it, so a
+    // FEATURE_CONSOLE=0 build did not compile. Nothing set that flag to 0 until the field
+    // environment below started doing exactly that, which turned a latent break into a live
+    // one. Refs docs/reviews/2026-08-12_adversarial_review.md.
     const bool console_in_use = (bool)Serial;
 
     if (!console_in_use) {
@@ -120,19 +134,63 @@ void sleep_seconds(uint32_t seconds)
         // works is worth more than an unverified microamp claim in the meantime.
         TinyUSBDevice.detach();
     }
+#endif
 
-    // FreeRTOS underlies the Arduino core here, so a delay parks this task and the idle
-    // task drops the CPU into its low-power state until the tick that wakes us. Split into
-    // one-second slices so the interval stays well inside the tick counter's range at any
-    // configured length.
+    // Block on a semaphore with a bounded timeout, in coarse slices.
+    //
+    // RAK's low-power document rejects the delay() loop this replaces — "for most scenarios the
+    // delay is not a good solution," because a task inside delay() cannot be woken by an event
+    // — and both the shipped sketch and WisBlock-API-V2 use xSemaphoreTake() instead.
+    //
+    // What is deliberately NOT copied is their portMAX_DELAY. Our watchdog is configured
+    // WDT_CONFIG_SLEEP_Pause above, so it does not count while the CPU sleeps: an indefinite
+    // wait whose wake source fails to arrive is a node asleep forever with no watchdog left to
+    // rescue it, which is the one outcome that costs a hike. The timeout is the bound, and it
+    // is what makes this safe where the reference is not. A slice, rather than one long wait,
+    // keeps the tick arithmetic small at any configured interval and gives the loop a place to
+    // re-check its own progress.
+    //
+    // Sixty seconds a slice rather than one: same bounded structure, 1/60th of the scheduler
+    // wakeups per cycle — 30 per 1800 s interval instead of 1800, each of which previously woke
+    // the CPU only to find nothing to do. Nothing gives this semaphore yet, so today it behaves
+    // as a coarser bounded wait; the value now is the reduced wakeup count, and the shape is
+    // what lets a sensor interrupt wake the node later without reopening the watchdog question.
+    //
+    // Honest about magnitude: this is unmeasured, and it is the smaller of the two sleep-path
+    // changes in this commit. Whether it matters at all depends on the core's tickless-idle
+    // behavior, which is unverified — see issue #47 and the benchmark's §8.
     //
     // This reaches the chip's lighter sleep state, not its deepest one — the deepest state
     // restarts the chip on wake, which would mean rejoining the network or reconstructing
-    // the session from flash every interval. The difference is a couple of microamps
-    // against a pack measured in amp-hours, so the simpler behavior is worth keeping until
-    // a bench measurement says otherwise.
-    for (uint32_t i = 0; i < seconds; i++) {
-        delay(1000);
+    // the session from flash every interval.
+    //
+    // CITE(prior-art): RAKwireless/WisBlock Low_Power_Example.md:13 rejects delay(); :140-145
+    //   uses `xSemaphoreTake(taskEvent, portMAX_DELAY)`. [CIT-RAK-LOWPOWER] — docs/CITATIONS.md
+    // CITE(prior-art): beegee-tokyo/WisBlock-API-V2 src/api_functions.cpp:110-115 —
+    //   `api_wait_wake()` is the same primitive inside the framework. [CIT-WISBLOCK-API2]
+    // CITE(datasheet): [CIT-NRF-WDT] — CONFIG.SLEEP pauses the counter while the CPU sleeps,
+    //   which is the fact that makes portMAX_DELAY unsafe here and the timeout mandatory.
+    if (s_sleep_sem == nullptr) {
+        s_sleep_sem = xSemaphoreCreateBinary();
+    }
+
+    for (uint32_t remaining = seconds; remaining > 0;) {
+        const uint32_t slice = (remaining > kSleepSliceSeconds) ? kSleepSliceSeconds : remaining;
+
+        if (s_sleep_sem != nullptr) {
+            // pdTRUE means something woke us early and the rest of the interval is forfeit
+            // on purpose — an event worth waking for is worth acting on now.
+            if (xSemaphoreTake(s_sleep_sem, pdMS_TO_TICKS(slice * 1000)) == pdTRUE) {
+                break;
+            }
+        } else {
+            // The semaphore could not be allocated. Falling back keeps the sleep bounded,
+            // which is the property that matters; a node that cannot allocate 80 bytes has a
+            // larger problem and the watchdog will find it once awake.
+            delay(slice * 1000);
+        }
+
+        remaining -= slice;
     }
 
 #if FEATURE_RADIO
@@ -198,6 +256,7 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
                 }
                 if (m_invalid_reads >= kInvalidReadsBeforeInhibit) {
                     m_without_evidence = true;
+                    m_keepalive_armed  = true;
                     m_silent_cycles    = 0;
                     LOGF("   power   : hold no longer backed by a reading after %u silent "
                          "cycles — keepalive in %u cycles\n",
@@ -227,6 +286,7 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
             // Bounded and self-correcting, which the old fail-open behavior was not.
             set_engaged(true, false);
             m_without_evidence = true;
+            m_keepalive_armed  = true;
             m_silent_cycles    = 0;
             LOGF("   power   : pack silent for %u cycles — holding transmissions, no "
                  "voltage evidence (keepalive in %u cycles)\n",
@@ -238,11 +298,47 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
 
     m_invalid_reads = 0;
 
-    // Any valid reading ends the no-evidence condition, whatever it says. If it is low, the
-    // hold is now backed by evidence and the keepalive stops — the pack has told us that
-    // spending energy is the wrong move, which is the one case where staying quiet is right.
+    // Any valid reading ends the no-evidence condition, whatever it says.
     m_without_evidence = false;
-    m_silent_cycles    = 0;
+
+    // Whether the keepalive clock runs now depends on *which* valid reading arrived, and the
+    // three cases genuinely want different answers.
+    //
+    // The reading at or below the inhibit threshold is the #38 case and keeps its behavior: no
+    // keepalive at all. The pack has said spending energy is the wrong move, and it is the one
+    // condition where staying quiet indefinitely is correct.
+    //
+    // The reading *between* the thresholds is the case this branch exists for, and resetting
+    // the clock on it was a hike waiting to happen. A pack answering every cycle from inside
+    // the hysteresis band is not below cutoff — it is simply not recovered — and the only exit
+    // from the hold is a reading at or above kTxResumeCentivolts, which nothing the node does
+    // can cause. Because the hold is persisted and survives every reset, a solar pack hovering
+    // in that band through short winter days parked the node permanently: mute, and being
+    // Class A, uncommandable, with no route left to tell it otherwise. Recoverable only by
+    // walking out there, which AGENTS.md rules out — "never let the pack reach a state it
+    // cannot recover from by itself." So the silence here is bounded exactly as the
+    // no-evidence silence is bounded.
+    //
+    // CITE(policy): docs/POWER_BUDGET.md — the pack must never reach a state it cannot recover
+    //   from unaided, which is the rule that decides this direction.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — the brownout hold protects the pack; it is not
+    //   licensed to end the deployment.
+    // CITE(policy): [CIT-TTN-FUP] — 30 s of uplink airtime per node per 24 h. One keepalive a
+    //   day sits far inside the allowance, which is what makes bounding this affordable.
+    if (!m_engaged || centivolts <= kTxInhibitCentivolts) {
+        m_keepalive_armed = false;
+        m_silent_cycles   = 0;
+    } else if (!m_keepalive_armed) {
+        m_keepalive_armed = true;
+        m_silent_cycles   = 0;
+        LOGF("   power   : %u.%02u V — holding, above the %u.%02u V floor but below the "
+             "%u.%02u V resume point, so a keepalive is armed (in %u cycles)\n",
+             centivolts / 100, centivolts % 100, kTxInhibitCentivolts / 100,
+             kTxInhibitCentivolts % 100, kTxResumeCentivolts / 100, kTxResumeCentivolts % 100,
+             (unsigned)kNoEvidenceKeepaliveCycles);
+    } else if (m_silent_cycles < kNoEvidenceKeepaliveCycles) {
+        ++m_silent_cycles;
+    }
 
     if (!m_engaged && centivolts <= kTxInhibitCentivolts) {
         // Persisted, and this is the write the whole scheme is built around. It happens on
@@ -260,6 +356,8 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
         // silence a recovered node across its next reset, turning a protective measure into
         // the outage it exists to prevent.
         set_engaged(false, true);
+        m_keepalive_armed = false;
+        m_silent_cycles   = 0;
         LOGF("   power   : %u.%02u V — recovered, resuming\n", centivolts / 100,
              centivolts % 100);
     }

@@ -57,9 +57,21 @@ bool restore();
 // Reads the live session out of the MAC and stores it. Call right after a successful join.
 bool save();
 
-// Stores an advanced frame counter if enough uplinks have passed since the last write.
-// Cheap to call after every uplink; it usually does nothing.
-void maybe_save_counter();
+// True when one more uplink can be sent without the frame counter reaching the value held in
+// flash. Call before every transmission and do not transmit on false.
+//
+// The stored counter is the only thing standing between this node and a silent replay. A reset
+// resumes from it, so every value actually put on the air has to stay strictly below it. When
+// the live counter reaches it this advances the stored value and answers true; it answers false
+// only when that write could not happen, which is what the H3 brownout gate does (#51).
+//
+// False must stop the uplink rather than merely be logged. Transmitting past the stored value
+// produces frames a reset replays, and a replay is discarded by the network without any signal
+// reaching the node — unconfirmed uplinks report success, so no failure counter moves and no
+// rejoin is triggered. The node would look healthy and reach nobody for days.
+//
+// Cheap: one MIB read, and a flash write roughly once a month at the default interval.
+bool counter_headroom_ok();
 
 // Discards the stored session, so the next boot joins fresh. Used when the network has
 // clearly stopped honoring the session.

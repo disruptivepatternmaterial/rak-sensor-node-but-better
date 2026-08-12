@@ -20,7 +20,16 @@ today, so this was the last thing blocking a first build.
 
 ## Decision
 
-**Arduino + WisBlock-API-V2**, built with PlatformIO.
+**Arduino + SX126x-Arduino, built with PlatformIO.** This originally read
+"Arduino + WisBlock-API-V2"; the framework half was reversed by
+[ADR-0005](ADR-0005-direct-sx126x.md) and the line is corrected here rather than left
+contradicting the Status above it.
+
+What WisBlock-API-V2 was wanted for was its event-driven sleep, and that turns out to be
+about six lines of FreeRTOS semaphore rather than a framework that also carries a BLE
+stack and an AT-command surface
+[CITE(prior-art): beegee-tokyo/WisBlock-API-V2 `src/api_functions.cpp:114` — `xSemaphoreTake(taskEvent, portMAX_DELAY)`](https://github.com/beegee-tokyo/WisBlock-API-V2/blob/main/src/api_functions.cpp).
+Adopt the pattern, not the dependency.
 
 ## Rationale
 

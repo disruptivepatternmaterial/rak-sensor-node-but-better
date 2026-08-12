@@ -148,11 +148,26 @@ void print_banner()
 
 void setup()
 {
+#if FEATURE_CONSOLE
+    // Gated, because on this core initializing the port is not free even with no host attached:
+    // RAK's low-power document is emphatic that the serial port "MUST NOT be initialized"
+    // because FreeRTOS starts a background task for it that never sleeps and so prevents the
+    // MCU from sleeping. The field environment therefore builds with FEATURE_CONSOLE=0 and
+    // never reaches this line; the soak environment builds with it on and is observable.
+    //
+    // CITE(prior-art): RAKwireless/WisBlock Low_Power_Example.md:45 — "As we want to achieve
+    //   maximum power savings, the Serial port MUST NOT be initialized." The shipped sketch
+    //   wraps every Serial call, Serial.begin() included, in `#ifndef MAX_SAVE`.
+    //   [CIT-RAK-LOWPOWER] — docs/CITATIONS.md
+    // CITE(prior-art): docs/LIBRARIES.md:55 — the same rule from the RAK forum, recorded in
+    //   this repository before the field image honored it: must Serial.end() before sleep or
+    //   current stays in the milliamps.
     Serial.begin(115200);
     const uint32_t start = millis();
     while (!Serial && (millis() - start) < kConsoleWaitMs) {
         delay(10);
     }
+#endif
 
 #if FEATURE_WATCHDOG
     // Started before anything that can hang, so a failure during bring-up is recoverable

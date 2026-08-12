@@ -305,6 +305,18 @@ bool Radio::send(const Payload &p)
     s_rx_len        = 0;
     s_rx_port       = 0;
 
+    // Checked before the frame is handed to the MAC, because lmh_send() consumes the counter
+    // and there is no putting it back. A save withheld by the brownout gate leaves the stored
+    // counter behind the wire, and every uplink past that point is one a reset replays — which
+    // the network discards without telling anybody. Refs #51.
+    //
+    // Deliberately not counted as a failure. m_failures drives the rejoin escape, and a rejoin
+    // is both the most expensive thing this node can do and useless here: the session is fine,
+    // it is the flash write that is unavailable, and only the pack recovering fixes that.
+    if (!session::counter_headroom_ok()) {
+        return false;
+    }
+
     const size_t len = (p.length() > sizeof(s_tx_buf)) ? sizeof(s_tx_buf) : p.length();
     memcpy(s_tx_buf, p.bytes(), len);
     s_tx_data.buffsize = len;
@@ -330,16 +342,29 @@ bool Radio::send(const Payload &p)
                  (unsigned long)m_failures);
             m_joined = false;
             session::forget();
+
+            // Reset the MAC as well as the session. Dropping the session leaves the MAC in
+            // whatever state produced three failures in a row, and RAK's own framework ships
+            // this call specifically because rejoining on top of a wedged MAC was not enough:
+            // re_init_lorawan() is titled "Workaround for bug after NAK" and its whole body is
+            // lmh_reset_mac(). Without it the rejoin can loop against a MAC that cannot
+            // succeed until the watchdog happens to catch it — cheap to avoid, so avoid it.
+            //
+            // CITE(prior-art): beegee-tokyo/WisBlock-API-V2 src/lorawan.cpp:210-216 —
+            //   `re_init_lorawan()` = `lmh_reset_mac()`, documented as the post-NAK MAC bug
+            //   workaround. [CIT-WISBLOCK-API2] — docs/CITATIONS.md
+            // CITE(prior-art): [CIT-SX126X-ARDUINO] — `lmh_reset_mac()` is the library's own
+            //   MAC re-initialisation entry point, so this is its intended use rather than a
+            //   reach into internals.
+            // CITE(bench): docs/reviews/2026-08-12_rak_reference_benchmark.md §2 — the gap
+            //   analysis that found this call absent from the whole tree.
+            lmh_reset_mac();
         }
         return false;
     }
 
     m_failures = 0;
     LOGF("   radio   : sent %u bytes on port %u\n", (unsigned)len, kUplinkPort);
-
-    // Periodically advance the stored frame counter. Almost always a no-op; it writes
-    // roughly once a month at the default interval.
-    session::maybe_save_counter();
 
     // Class A opens two receive windows after each uplink, and those windows are the only
     // downlink opportunity this node ever gets. Sleeping before the second one closes

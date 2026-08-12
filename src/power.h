@@ -172,11 +172,15 @@ class Brownout {
     // pack is low, the other means nobody knows.
     bool engaged_without_evidence() const { return m_engaged && m_without_evidence; }
 
-    // True when the node has been held silent on the no-evidence path long enough that it
-    // should transmit once anyway. Never true for a hold backed by a measured low voltage.
+    // True when the node has been held silent long enough that it should transmit once anyway.
+    //
+    // Armed for the two holds that no action of the node's own can lift: one resting on no
+    // reading at all, and one resting on a reading between the inhibit and resume thresholds.
+    // Never armed for a reading at or below kTxInhibitCentivolts — that pack is genuinely too
+    // low to spend energy, and #38 exists because a keepalive there used to be sent anyway.
     bool keepalive_due() const
     {
-        return engaged_without_evidence() && m_silent_cycles >= kNoEvidenceKeepaliveCycles;
+        return m_engaged && m_keepalive_armed && m_silent_cycles >= kNoEvidenceKeepaliveCycles;
     }
 
     // Called after a keepalive uplink actually reaches the air, so the count restarts. Split
@@ -198,6 +202,12 @@ class Brownout {
     // first time.
     bool     m_without_evidence = false;
     uint16_t m_silent_cycles    = 0;
+
+    // Whether the current hold is one the node cannot lift by itself, and therefore one whose
+    // silence has to be bounded. Separate from m_without_evidence because a hold resting on a
+    // reading inside the hysteresis band is equally inescapable and equally in need of a
+    // keepalive, while reading as perfectly well-evidenced.
+    bool m_keepalive_armed = false;
 };
 
 } // namespace power
