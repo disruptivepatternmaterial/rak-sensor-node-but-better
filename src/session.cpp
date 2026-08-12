@@ -43,6 +43,10 @@ struct Stored {
 // when the next write is due without reading the file back.
 uint32_t s_saved_counter_ceiling = 0;
 
+// Null means "allowed". See set_flash_write_gate() — an un-wired gate must not disable
+// persistence, because that failure would be silent and would cost a rejoin every reset.
+session::FlashWriteGateFn s_flash_write_gate = nullptr;
+
 bool mib_get(Mib_t type, MibRequestConfirm_t &req)
 {
     memset(&req, 0, sizeof(req));
@@ -209,6 +213,22 @@ bool restore()
 
 bool save()
 {
+    // H3: no flash writes while the pack is held below cutoff. Both paths into this function
+    // run during a brownout hold — radio.cpp:244 after a join, and maybe_save_counter() below
+    // after an uplink — and the keepalive is by definition a transmit that happens *while*
+    // holding, so without this the node keeps paying flash-write current on a pack that is
+    // already too low to be spending it. Checked here rather than at the two call sites so a
+    // third caller cannot reopen the hole.
+    //
+    // The cost of skipping is a rejoin after the next reset, and that is the right trade: a
+    // page write interrupted by a supply that sags mid-write corrupts the record we would be
+    // rejoining from anyway. This is the same reasoning power.cpp already applies when it
+    // declines to persist a hold taken on unknown voltage.
+    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+        LOGLN(F("   session : skipping save — brownout hold, flash writes withheld"));
+        return false;
+    }
+
     Stored s = {};
     if (!collect(s)) {
         LOGLN(F("   session : could not read session from the MAC"));
@@ -247,6 +267,11 @@ void maybe_save_counter()
     save();
 }
 
+void set_flash_write_gate(FlashWriteGateFn gate)
+{
+    s_flash_write_gate = gate;
+}
+
 void forget()
 {
     InternalFS.remove(kPath);
@@ -262,6 +287,7 @@ namespace session {
 bool restore() { return false; }
 bool save() { return false; }
 void maybe_save_counter() {}
+void set_flash_write_gate(FlashWriteGateFn) {}
 void forget() {}
 } // namespace session
 
