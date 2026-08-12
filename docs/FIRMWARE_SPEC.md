@@ -240,7 +240,11 @@ Exact channel IDs must match decoder expectations; verify against live decoder b
 
 GNSS, RTC module, Meshtastic field image, RAK13002 (IO breakout; conflicts with RAK5802), fabricating sensor zeros, Class C.
 
-## 9. Verification commands (when code exists)
+## 9. Verification commands
+
+Every item below has now been observed at least once on hardware — see the §9 table in
+[`EVIDENCE.md`](EVIDENCE.md) for which commit closed each. **That is first light, not
+hardening.** §7's H1–H8 is the release gate and none of it has closed.
 
 - Compile: PlatformIO env `rak4631` (board id `rak4630`, from the vendored RAK definition
   in `rakwireless/` — the RAK4631 is not in the PlatformIO board registry)

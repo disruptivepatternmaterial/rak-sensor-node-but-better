@@ -103,16 +103,43 @@ bench operator with a cable, and the deployment case has no cable.
 
 Ranked by consequence:
 
-1. **The console is compiled into the field image and never torn down.** `[REF-LOWPOWER]:45` says
-   this alone prevents the MCU from sleeping, because the background serial task never sleeps.
-   `docs/LIBRARIES.md:55` already records the same rule from the RAK forum — "**must
-   `Serial.end()` before sleep** or current stays ~mA." Our own library notes carry the rule and
-   the field build does not honor it. If the doc is right, the cost is milliamps against a budget
-   in microamps, which is the difference between solar-sustained and slowly losing ground.
-   **What to change:** a `-D FEATURE_CONSOLE=0` field environment, or equivalently gate
-   `Serial.begin()` the way `[REF-DEEPSLEEP]` gates it with `MAX_SAVE`, so the field image never
-   initializes the port. This is a build-configuration change, not a rewrite, and it is separable
-   from the semaphore question below.
+1. ~~**The console is compiled into the field image and never torn down.**~~ **WITHDRAWN
+   2026-08-12 — this is not a gap. We were not behind; the reference document is wrong.**
+
+   The original entry read: `[REF-LOWPOWER]:45` says this alone prevents the MCU from sleeping,
+   because the background serial task never sleeps; `docs/LIBRARIES.md:55` carries the same rule
+   from the RAK forum ("**must `Serial.end()` before sleep** or current stays ~mA"); so the fix is
+   a `-D FEATURE_CONSOLE=0` field environment. That change was made on 2026-08-12 in `094d5f5`
+   **and reverted the same day** once the mechanism was read in the core's source rather than
+   taken from RAK's narrative.
+
+   Why it is withdrawn, in one line each — full derivation with line numbers in
+   [`2026-08-12_console_sleep_question.md`](2026-08-12_console_sleep_question.md), decision in
+   [ADR-0008](../decisions/ADR-0008-console-in-the-field-image.md):
+
+   - `Adafruit_USBD_Device::begin()` calls `SerialTinyUSB.begin(115200)` itself
+     (`Adafruit_USBD_Device.cpp:262`, commented _"Serial is always added by default"_) and creates
+     the `usbd` task at `:265`, from `cores/nRF5/main.cpp:52`, **before `setup()`**. Our
+     `Serial.begin()` therefore hits `if (isValid()) return;` (`Adafruit_USBD_CDC.cpp:95`) and
+     does nothing. There is no "field image that never initializes the port" available to build.
+   - RAK's own BSP defines `-DUSE_TINYUSB` unconditionally (`platform.txt:72`, no `usbstack` menu
+     in `boards.txt`) and their `cores/nRF5/main.cpp` is byte-identical to Adafruit's, so **RAK's
+     own `MAX_SAVE` builds get the task the document warns about.** The reference does not achieve
+     what it claims, which means there was never a gap to be behind on.
+   - The stated mechanism is wrong independently: `tud_task()` blocks on
+     `xQueueReceive(.., portMAX_DELAY)` (`usbd.c:686`, `osal_freertos.h:81`), so it is not a task
+     that "never sleeps", and SOF interrupts are off for a CDC-only device.
+   - What is left of `[REF-LOWPOWER]` is the weaker true claim that the USBD peripheral and its
+     HFXO cost energy. That is a **VBUS** question, not a `Serial.begin()` question:
+     `NRF_USBD->ENABLE` is only ever set from the VBUS power-event handler
+     (`dcd_nrf5x.c:927`), so with no cable the peripheral is not enabled regardless of the build.
+     `src/power.cpp:135` already calls `detach()`, which is the best lever the public API offers.
+
+   **So on this specific point we already exceeded the reference before the change was made.**
+   `docs/LIBRARIES.md:55` and the `[REF-LOWPOWER]` row in `docs/CITATIONS.md` needed the
+   correction attached rather than the firmware needing the change; that is done. What remains is
+   a magnitude question only (#47) — mechanism is settled, and no document here may claim
+   `FEATURE_CONSOLE=0` saves current until a meter says so.
 2. **The `delay()` loop is the mechanism RAK explicitly rejects.** Two costs. The one RAK names is
    that the task cannot be woken by an event. For a Class A node the downlink case does not
    actually apply — Class A only receives in the windows after an uplink, so sleeping blind for
@@ -307,7 +334,7 @@ reopening the framework question.
 
 | # | Gap | Consequence | Fix |
 |---|---|---|---|
-| 1 | Console compiled into the field image; `Serial` never torn down, against `[REF-LOWPOWER]:45` and our own `LIBRARIES.md:55` | **Materially extends battery life if closed.** Possibly mA vs µA | `-D FEATURE_CONSOLE=0` field env, or `MAX_SAVE`-style gating of `Serial.begin()` |
+| 1 | ~~Console compiled into the field image~~ **WITHDRAWN — not a gap.** `[REF-LOWPOWER]:45`'s mechanism is false, and false on RAK's own BSP: the core calls `Serial.begin()` and creates the `usbd` task before `setup()`, so our call is a no-op and RAK's `MAX_SAVE` builds get the same task. See §"Verdict" item 1, [ADR-0008](../decisions/ADR-0008-console-in-the-field-image.md) | **None.** No task, peripheral or clock is removed by the flag | Nothing. `FEATURE_CONSOLE=0` was tried in `094d5f5` and reverted the same day; `detach()` in `power.cpp:135` was already the correct lever. Magnitude-only question tracked in #47 |
 | 2 | `delay(1000)` loop instead of `xSemaphoreTake(..., portMAX_DELAY)` (`power.cpp:134-136`) | Battery life; magnitude unmeasured. **Do not adopt `portMAX_DELAY` without fixing `WDT_CONFIG_SLEEP`** or you trade current for a hike | Semaphore + FreeRTOS timer, bounded timeout |
 | 3 | `lmh_reset_mac()` never called (`[REF-API2-LORA]:210-216`, "Workaround for bug after NAK") | Data loss and wasted energy in a rejoin loop; not a hike (watchdog covers it) | Call it on the `kFailuresBeforeRejoin` path |
 | 4 | ADR-0003 Decision line contradicts its Status line | Documentation only; misleads the next reader | Edit the ADR |

@@ -4,9 +4,9 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 ## Status
 
-🚧 **Not deployed.** The field image now runs end to end. On 2026-08-12 at `4510763` both sensors read in the **same cycle of the `rak4631` image** for the first time — `RK900 : wind 0.00 m/s @ 0 deg, 24.7 C, 58.7 %RH, 1004.4 hPa` and `battery : 12.12 V -0.01 A 91% 23.0 C` — the cycle reached sleep, and the uplink went out. Network side, TTN shows the session live and advancing: `dev_addr 260CE734`, `last_f_cnt_up` climbing, gateway `3356-gateway-002` at 13–14 dB SNR, with `f_cnt 1792` landing the same second as the console's `radio : sent 35 bytes on port 2`. The first downlink ever delivered to this node — a `0x03` status request — drained from the queue across one uplink.
+🚧 **Not deployed.** **One** full cycle of the field image has been observed end to end — one, not a run of them. On 2026-08-12 at `4510763` both sensors read in the **same cycle of the `rak4631` image** for the first time — `RK900 : wind 0.00 m/s @ 0 deg, 24.7 C, 58.7 %RH, 1004.4 hPa` and `battery : 12.12 V -0.01 A 91% 23.0 C` — the cycle reached sleep, and the uplink went out. Network side, TTN shows the session live and advancing: `dev_addr 260CE734`, `last_f_cnt_up` climbing, gateway `3356-gateway-002` at 13–14 dB SNR, with `f_cnt 1792` landing the same second as the console's `radio : sent 35 bytes on port 2`. The first downlink ever delivered to this node — a `0x03` status request — drained from the queue across one uplink.
 
-**Every subsystem answering once is not a deployment.** None of the H1–H8 hardening gates has closed. A 24 h bench soak started 2026-08-12 (`f626698`) and has not finished; the ≥7 d field shadow has not begun; sleep current has never been metered — the pack's own telemetry cannot answer it (10 mA LSB against a ~1 mA question); and the battery-current sign convention is still unresolved ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md)). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records those gates.
+**Every subsystem answering once is not a deployment.** None of the H1–H8 hardening gates has closed. **Zero soak hours exist** — the harness and procedure are built ([`docs/SOAK.md`](docs/SOAK.md), `scripts/soak.sh`, `env:soak`), but the one attempt on 2026-08-12 never attached to the board and logged nothing, so the ≥24 h bench soak has not started and the ≥7 d field shadow has not begun; sleep current has never been metered — the pack's own telemetry cannot answer it (10 mA LSB against a ~1 mA question); and the battery-current sign convention is still unresolved ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md)). Status changes only when [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records those gates.
 
 Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
@@ -47,7 +47,7 @@ scripts/flash.sh --env stage1 # flash one bring-up stage instead of the full ima
 
 ## Build stages
 
-Four images, so a subsystem can be brought up alone and a failure has one candidate cause rather than six. Tests for the payload encoder and the Modbus checksum run on the build host with no board attached (`pio test -e native`).
+Staged images, so a subsystem can be brought up alone and a failure has one candidate cause rather than six. Tests for the payload encoder and the Modbus checksum run on the build host with no board attached (`pio test -e native`).
 
 | Environment | Contains |
 |---|---|
@@ -55,7 +55,16 @@ Four images, so a subsystem can be brought up alone and a failure has one candid
 | `stage2` | Adds the battery reader |
 | `stage3` | Adds the radio — still awake, so the join is watchable |
 | `rak4631` | Full image: sleep and watchdog on |
+| `soak` | The field image made observable — byte-for-byte `rak4631` except `FEATURE_CONSOLE=1`. Every bench observation of the field cycle is taken here, because `rak4631` initializes no console and prints nothing ([`docs/SOAK.md`](docs/SOAK.md)) |
 | `native` | Off-target tests, no hardware |
+
+Diagnostics, not bring-up stages — each answers one question fast:
+
+| Environment | Answers |
+|---|---|
+| `battdiag` | Anything about the RAK9154 pack. **~10 s per cycle — use this, never `stage3`**, whose full-interval sleep puts exactly one cycle in a capture window and has repeatedly been misread as a dead pack |
+| `owscan` | One-wire line behaviour below the protocol |
+| `busscan` | RS-485 sweep across baud rates and slave addresses — the tool that established the RK900's real baud and register map for [ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md) |
 
 ## Working discipline
 

@@ -8,6 +8,99 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Documentation
+
+- **Every document now agrees with the evidence ledger, and the ledger is what changed today.**
+  Five docs were asserting things the bench had already disproved, and each one was pointed at
+  work that did not need doing:
+
+  - **`README.md` listed "RAK9154 provisioning" as a known blocker** — "22 correct-looking
+    answers, still `0xFF`". The pack was never broken. On 2026-08-12 at `b436aa9`, `battdiag`
+    gave 19 of 20 cycles with live values, latched at pid `0x01` throughout, with `provId FF`
+    absent from the whole capture. The blocker is deleted. The reason it survived so long is
+    now recorded where it will be read: `stage3` sleeps for its whole interval, so one capture
+    window holds exactly one cycle, and the pack's normal post-boot settling null was the cycle
+    everyone kept catching. **Use `battdiag` for any question about the pack, never `stage3`.**
+  - **`docs/decisions/ADR-0004`'s verification section said "Not yet verified on hardware"**,
+    a week after `docs/EVIDENCE.md` recorded the one-wire read it asked for. It now separates
+    what is verified — one good BMS frame, and both sensors on their separate buses in one
+    field-image cycle at `4510763` — from what is still owed, which is the H6/H7 unplug test.
+    The risk it carried was a redundant bench run.
+  - **`docs/EVIDENCE.md`'s 2026-08-04 audit row claimed `Serial.end()` and
+    `NRF_USBD->ENABLE = 0` were "present on the sleep path."** Those two calls were the two
+    independent causes of the dead USB console, removed in `7dfc26f`, and
+    `docs/FIRMWARE_SPEC.md:200` now forbids both. The log is append-only, so the row stands with
+    a correction attached rather than being edited away — but it was the exact string a future
+    reader would grep for when re-checking H2.
+  - **`docs/HARDWARE.md` and `docs/FIRST_FLASH.md` still wired the RK900 at 4800.** This unit
+    answers only at 9600 and returns zero bytes at 4800 across four sweeps
+    ([ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md)). Anyone wiring from
+    those docs would have debugged a bus that was silent by configuration — a failure this
+    project has already paid a bench session for once.
+  - **`plans/P0_HARDENED_NODE.md` said "planning + specs only, parts on order, no firmware
+    in-tree"** and listed five open decisions, three of which had been closed by ADRs or by
+    observation. Re-scoped as a work-package and open-decision page, with the status pointing
+    at `README.md` and `docs/EVIDENCE.md`.
+
+- **The H1–H8 gate table now distinguishes "implemented in source" from "gate closed."**
+  Conflating the two is how a project talks itself into a deployment. Every gate gains a source
+  column drawn from the read-only audit in `docs/reviews/2026-08-12_spec_drift.md`, and **no
+  status changed**: H4 is fully implemented and still `⬜ none`, because only a measurement
+  closes a gate. H2's entry now says outright that the "deep" half of deep sleep is a `delay()`
+  loop rather than the chip's deepest state, and that pack telemetry cannot size it — a 10 mA
+  LSB against a ~1 mA question. H8 records that **zero soak hours exist** — see below.
+
+- **Corrected: no soak ever ran.** An earlier revision of this changelog, `README.md`,
+  `AGENTS.md`, and `docs/EVIDENCE.md` all said a 24 h bench soak had **started** on 2026-08-12.
+  It had not. The harness waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up;
+  the log is 140 bytes and two lines, and no process was left running. **Zero soak hours
+  exist and H8 has not started.**
+
+  The mechanism is worth keeping, because it is the failure mode this whole pass was meant to
+  catch: **the evidence entry was committed at 09:41:23, ninety-two seconds before the harness
+  gave up at 09:42:53.** It described a launch as though it were a run, because the outcome did
+  not exist yet when it was written — and three other documents then inherited the claim. An
+  entry for something still in flight is not evidence, it is a prediction.
+
+  The obvious explanation was checked and **does not apply.** `env:rak4631` now builds
+  `FEATURE_CONSOLE=0` and never calls `Serial.begin()`, so the field image enumerates no USB CDC
+  device — which would make "device never appeared" correct behaviour rather than a fault. But
+  that change and `env:soak` both landed in `094d5f5` at 11:26:50, **1 h 44 m after the attempt
+  ended**; at `f626698` the field image still compiled the console in. The cause is
+  **unestablished**, and the repo cannot establish it — nothing records what was actually
+  flashed and running at 09:39. Said plainly in `docs/EVIDENCE.md` so the next reader neither
+  hunts a hardware fault that may not exist nor writes it off as the console change.
+
+  What is real and is genuine progress: the soak **harness** — `scripts/soak.sh`,
+  [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, the console-bearing twin of the field image.
+  It has simply never produced a soak hour, and `scripts/soak.sh selftest 90` should prove it
+  with no board attached before it is trusted with 24 h.
+
+- **The `FIRMWARE_SPEC.md` §9 first-light list is recorded as closed** — RK900 frame, BMS
+  frame, TTN uplink, and one downlink applied — with the explicit note that first light is not
+  hardening and the deployment gate is unmoved. The downlink item is annotated as half-covered:
+  a `0x03` status request was delivered and drained, but `take_downlink()` has never been seen
+  on the console and malformed-downlink bounds checking is untested
+  ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)).
+
+- **Status wording across `README.md` and `AGENTS.md` updated to today's results**, which are
+  materially further along than yesterday's: both sensors reading in the same cycle of the
+  `rak4631` field image, network-side confirmation that uplinks have been landing at TTN the
+  whole time (`dev_addr 260CE734`, gateway `3356-gateway-002`, 13–14 dB SNR, `f_cnt 1792`
+  timestamped to the same second as the console's send line), and the first downlink ever
+  delivered to this node. **Status stays `🚧 NOT YET DEPLOYED`** — `AGENTS.md` is explicit that
+  every subsystem answering once is not a deployment, and the ≥24 h bench soak and ≥7 d field
+  shadow are the gates that govern.
+
+- **The five 2026-08-12 review reports are linked from the docs that matter** rather than left
+  orphaned in `docs/reviews/`: the spec-drift audit from the gate table and from `AGENTS.md`,
+  the ADR-0002 dependency analysis from both blocker lists, and the folder itself from the
+  `README.md` doc index.
+
+- No version bump. Per [`docs/RELEASE.md`](docs/RELEASE.md) a release needs a clean tree, a
+  build, and evidence for anything claimed; this is a documentation correction pass and belongs
+  in `[Unreleased]` until those close.
+
 ### Fixed
 
 - **The stored frame counter can no longer fall behind what was transmitted**

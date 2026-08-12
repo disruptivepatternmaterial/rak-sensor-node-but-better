@@ -24,6 +24,13 @@ automatically; this is the index and the short version.
  for them.
 - Never commit secrets, `*.env`, keys, or live OTAA AppKeys.
 - No aspirational "deployed" claims without bench/TTN evidence — see [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+- **Record outcomes, never launches.** Do not write an evidence entry for something still in
+  flight. On 2026-08-12 a "24 h bench soak started" entry was committed **92 seconds before the
+  harness gave up**, having never attached to the board; three other documents inherited the
+  claim before it was caught. A thing that was started and immediately died is not a thing in
+  progress — it is a failed attempt, and the honest record is the attempt plus its outcome.
+  Wait for the outcome, then write it. **Verify before you propagate:** the false claim
+  travelled because each document trusted the last one instead of the log.
 - Null sensor readings stay null — never fabricate zeros.
 - **Either solve it or file it.** Anything noticed and not fixed becomes a GitHub issue in
   the same pass, with a number a comment can cite. Caveats delivered in chat and "one more
@@ -71,7 +78,7 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   plus network-side confirmation that the uplinks are landing at TTN and the first delivered
   downlink). **That does not change the status.** Deployment stays blocked until the H1-H8 gates
   and the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close — not merely on "every subsystem
-  answered once." A soak that has been *started* is not a soak that has *closed*.
+  answered once." **Zero soak hours exist** — see the H8 row below before repeating otherwise.
 - **The RAK4631 board definition is vendored** in [`rakwireless/`](rakwireless/) because it
   does not exist in the PlatformIO registry. Do not edit it, and do not "fix" the build by
   copying files into `~/.platformio` — see [`rakwireless/README.md`](rakwireless/README.md).
@@ -87,7 +94,7 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 2 | OTAA join + first uplink | done 2026-07-31 — join + accepted uplink, `puma-concolor-001`, session restore across reset ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | 3 | RAK9154 battery telemetry over one-wire | **working on hardware 2026-08-05 (`1a203d3`, re-verified `b6bbf31`)** — pack latches pid `0x01` and reports `12.23 V, +0.00 A, 98%, 23.0 °C` across seven consecutive cycles ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Root cause of the long stall was reply turnaround timing, not framing: answer no sooner than 2 ms after the pack's last byte (`kTurnaroundMs`) and lead every frame with four wake bytes. **Expect ~2 null cycles after boot while the pack samples — this line is load-bearing.** Re-confirmed 2026-08-12 (`b436aa9`): 20 consecutive `battdiag` cycles, 19 live, the one null being cycle 2, latched at `0x01` throughout with no `provId FF` anywhere in the capture. Several sessions read that null cycle as a provisioning failure because `stage3`'s 1800 s cycle means one capture window holds exactly one cycle — **use `battdiag` (~10 s) for any pack question, never `stage3`.** Open: [#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36), [#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) |
 | 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **Started, not closed.** 24 h bench soak launched 2026-08-12 (`f626698`), log `~/soak_rak4631.log` on the build host; procedure in [`docs/SOAK.md`](docs/SOAK.md). Interval is **900 s**, not the 1800 s the console line printed — established from network uplink timestamps. This is the gate the status depends on; do not read it as closed until [`docs/EVIDENCE.md`](docs/EVIDENCE.md) says so |
+| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **Not started. Zero soak hours exist.** The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, the console-bearing twin of the field image. It has never produced a soak hour: the one attempt, 2026-08-12 at `f626698`, waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
 
 ## Open blockers
 
