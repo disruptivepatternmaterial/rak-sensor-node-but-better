@@ -182,14 +182,14 @@ CITE(prior-art): `src/portable/nordic/nrf5x/dcd_nrf5x.c:295-302`, `:611-643`.
 **What costs current is not the task — it is the peripheral.** `NRF_USBD->ENABLE` and the
 HFXO request are driven from the VBUS power-event handler, not from any user call:
 
-CITE(prior-art): `dcd_nrf5x.c:927-1000` (`tusb_hal_nrf_power_event`, the
+CITE(prior-art): [CIT-TINYUSB-CORE] `dcd_nrf5x.c:927-1000` (`tusb_hal_nrf_power_event`, the
 `USB_EVT_DETECTED` → errata 171/187/166 → `ENABLE` → `READY` → `hfclk_enable()` chain) and
 `:847-895` (`hfclk_enable`/`hfclk_running`, which go through `sd_clock_hfclk_request()` when
-the SoftDevice is enabled — it is, `-DSOFTDEVICE_PRESENT`). [CIT-TINYUSB-CORE]
+the SoftDevice is enabled — it is, `-DSOFTDEVICE_PRESENT`).
 
-CITE(datasheet): nRF52840 Product Specification — USBD requires the 64 MHz crystal
-oscillator; the HFXO is the dominant standing cost of an enabled, attached USB device, not
-the FreeRTOS task. [CIT-NRF-USBD]
+CITE(datasheet): [CIT-NRF-USBD] nRF52840 Product Specification — USBD requires the 64 MHz
+crystal oscillator; the HFXO is the dominant standing cost of an enabled, attached USB
+device, not the FreeRTOS task.
 
 ## 4. Does RAK's guidance survive?
 

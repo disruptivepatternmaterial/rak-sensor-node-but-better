@@ -156,5 +156,6 @@ here.
   <https://github.com/RAKWireless/RAK-nRF52-Arduino/blob/master/platform.txt>
 - CITE(prior-art): RAKWireless/WisBlock — `Low_Power_Example.md:39-45`, the guidance this ADR
   contradicts [CIT-RAK-LOWPOWER]
-- CITE(datasheet): nRF52840 Product Specification — USBD requires the 64 MHz crystal oscillator,
-  which is the standing cost VBUS controls [CIT-NRF-USBD]
+- CITE(datasheet): [CIT-NRF-USBD] nRF52840 Product Specification — the USBD peripheral, whose
+  standing cost is what VBUS controls and what `detach()` cannot remove
+  <https://docs.nordicsemi.com/bundle/ps_nrf52840/page/usbd.html>
