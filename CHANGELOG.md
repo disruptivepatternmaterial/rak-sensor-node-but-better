@@ -62,19 +62,39 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   not exist yet when it was written — and three other documents then inherited the claim. An
   entry for something still in flight is not evidence, it is a prediction.
 
-  The obvious explanation was checked and **does not apply.** `env:rak4631` now builds
-  `FEATURE_CONSOLE=0` and never calls `Serial.begin()`, so the field image enumerates no USB CDC
-  device — which would make "device never appeared" correct behaviour rather than a fault. But
-  that change and `env:soak` both landed in `094d5f5` at 11:26:50, **1 h 44 m after the attempt
-  ended**; at `f626698` the field image still compiled the console in. The cause is
+  The obvious explanation was checked and **does not apply.** `FEATURE_CONSOLE=0` looked like it
+  would make "device never appeared" correct behaviour rather than a fault. But that change and
+  `env:soak` both landed in `094d5f5` at 11:26:50, **1 h 44 m after the attempt ended**; at
+  `f626698` the field image still compiled the console in. It was then reverted entirely in
+  `636e421`, and the mechanism refutes it independently of the timeline — the core creates the
+  USB task before `setup()`, so the flag could never have suppressed enumeration. The cause is
   **unestablished**, and the repo cannot establish it — nothing records what was actually
   flashed and running at 09:39. Said plainly in `docs/EVIDENCE.md` so the next reader neither
   hunts a hardware fault that may not exist nor writes it off as the console change.
 
   What is real and is genuine progress: the soak **harness** — `scripts/soak.sh`,
-  [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, the console-bearing twin of the field image.
-  It has simply never produced a soak hour, and `scripts/soak.sh selftest 90` should prove it
-  with no board attached before it is trusted with 24 h.
+  [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now byte-identical to `env:rak4631`. It has
+  simply never produced a soak hour, and `scripts/soak.sh selftest 90` should prove it with no
+  board attached before it is trusted with 24 h.
+
+- **`docs/FIRMWARE_SPEC.md` §5 no longer states the withdrawn console rationale as fact.** It
+  asserted RAK's mechanism — the serial port "**MUST NOT** be initialized" because FreeRTOS
+  starts a background task that "never sleeps" — as settled contract. That is how the mistake
+  reproduced: the spec is the authority an agent reads before changing sleep behaviour, and
+  reading it today would re-derive the same `FEATURE_CONSOLE=0` change that was made in
+  `094d5f5` and reverted in `636e421`. §5 now states what is established — the USB device task
+  is created before `setup()` regardless of application code, RAK's own `MAX_SAVE` builds carry
+  it too, the lever is VBUS and `detach()`, and omitting `Serial.begin()` saves nothing — and
+  cites [ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md) plus the
+  `CIT-RAK-NRF52-CORE` / `CIT-TINYUSB-CORE` counter-citations rather than restating the
+  analysis. The `Serial.end()` / `NRF_USBD->ENABLE` prohibition in the preceding paragraph is
+  untouched and still stands.
+
+- **Corrected in this repo's own docs: `env:soak` no longer described as differing from the
+  field image.** `README.md`, `AGENTS.md`, `CHANGELOG.md` and the soak-failure entry in
+  `docs/EVIDENCE.md` all called it "the console-bearing twin." The two environments now build
+  byte-identical, which strengthens H8 — a soak is evidence about the shipped image without
+  needing an argument that one differing flag was harmless.
 
 - **The `FIRMWARE_SPEC.md` §9 first-light list is recorded as closed** — RK900 frame, BMS
   frame, TTN uplink, and one downlink applied — with the explicit note that first light is not
@@ -147,8 +167,15 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Changed
 
-- **The field image no longer initializes the serial console; `env:soak` is the observable
-  twin.** RAK's own low-power document is unambiguous — "As we want to achieve maximum power
+- ~~**The field image no longer initializes the serial console; `env:soak` is the observable
+  twin.**~~ **WITHDRAWN AND REVERTED the same day in `636e421`** — the RAK guidance quoted below
+  is refuted by the Adafruit core's own source, which creates the USB task before `setup()` runs
+  regardless of application code, and by RAK's own BSP, which builds `-DUSE_TINYUSB`
+  unconditionally so their `MAX_SAVE` builds carry the same task. `env:rak4631` builds
+  `FEATURE_CONSOLE=1` and `env:soak` is byte-identical to it. See
+  [ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md). The original entry is kept
+  below rather than deleted, because the reasoning that looked convincing is the useful part.
+  RAK's own low-power document is unambiguous — "As we want to achieve maximum power
   savings, the Serial port **MUST NOT** be initialized… FreeRTOS is as well starting a task
   running in the background (and never sleeps), that prevents the MCU from sleeping"
   ([`Low_Power_Example.md:45`](https://github.com/RAKWireless/WisBlock/blob/master/examples/RAK4630/communications/LoRa/LoRaWAN/Low_Power_Example.md))

@@ -55,7 +55,7 @@ Staged images, so a subsystem can be brought up alone and a failure has one cand
 | `stage2` | Adds the battery reader |
 | `stage3` | Adds the radio — still awake, so the join is watchable |
 | `rak4631` | Full image: sleep and watchdog on |
-| `soak` | The field image made observable — byte-for-byte `rak4631` except `FEATURE_CONSOLE=1`. Every bench observation of the field cycle is taken here, because `rak4631` initializes no console and prints nothing ([`docs/SOAK.md`](docs/SOAK.md)) |
+| `soak` | **Byte-identical to `rak4631`** — a named entry point for `scripts/soak.sh` and the docs that reference it, deliberately carrying no build difference so a soak is evidence about the shipped image ([`docs/SOAK.md`](docs/SOAK.md), [ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)) |
 | `native` | Off-target tests, no hardware |
 
 Diagnostics, not bring-up stages — each answers one question fast:

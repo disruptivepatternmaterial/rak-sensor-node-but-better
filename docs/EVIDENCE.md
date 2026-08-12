@@ -99,13 +99,21 @@ add it at the top.
 - **Verdict: fail. Zero soak hours.** **H8 has not started, let alone closed.** No pass, no
   partial, no "in progress." The serial device never appeared, so nothing was ever captured.
 
-**The tempting explanation is wrong, and checking it matters.** `env:rak4631` now builds
-`FEATURE_CONSOLE=0` and never calls `Serial.begin()`, so the field image does not enumerate a
-USB CDC device at all — which would explain "device never appeared" perfectly, as the console
-change working exactly as designed rather than a fault. **It does not apply here.** Both
+**The tempting explanation is wrong, and checking it matters.** At the time this was written
+`env:rak4631` built `FEATURE_CONSOLE=0` and did not call `Serial.begin()`, which looked like it
+would explain "device never appeared" perfectly — the console change working as designed rather
+than a fault. **It does not apply here, and it never could have.** Both
 `FEATURE_CONSOLE=0` and `env:soak` landed in `094d5f5`, committed at **11:26:50** — one hour
 forty-four minutes *after* this attempt ended. At `f626698` the `rak4631` image still compiled
 the console in, so the board should have enumerated.
+
+> **Doubly refuted, appended later the same day.** `FEATURE_CONSOLE=0` was itself reverted in
+> `636e421` ([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)): the Adafruit core
+> calls `SerialTinyUSB.begin()` and creates the `usbd` task before `setup()` runs, so USB
+> enumeration never depended on the sketch calling `Serial.begin()` at all. The flag could not
+> have suppressed enumeration even had it been on the board. The timeline above already ruled
+> it out; the mechanism rules it out independently. `env:soak` is now byte-identical to
+> `env:rak4631`.
 
 **So the cause is unestablished**, and this repo cannot establish it. Nothing here records
 what was actually flashed and running at 09:39 — and this project has been caught by a stale
@@ -116,8 +124,9 @@ this up should establish what is on the board before theorising**, and should no
 hardware fault on the strength of this entry alone.
 
 **What actually exists, and it is real progress:** the soak *harness* — `scripts/soak.sh`,
-[`SOAK.md`](SOAK.md), and `env:soak`, the console-bearing twin of the field image. That is
-the machinery a soak needs, and it did not exist yesterday. It has never produced a soak hour.
+[`SOAK.md`](SOAK.md), and `env:soak` — now byte-identical to `env:rak4631`, so a soak is
+evidence about the shipped image. That is the machinery a soak needs, and it did not exist
+yesterday. It has never produced a soak hour.
 
 **Prove the harness before trusting it with 24 h.** `scripts/soak.sh selftest 90`
 ([`SOAK.md`](SOAK.md)) runs it with no board attached. A harness that has only ever been
