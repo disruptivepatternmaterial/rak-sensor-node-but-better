@@ -21,6 +21,7 @@
 #include "build_features.h"
 #include "payload.h"
 #include "power.h"
+#include "session.h"
 #include "radio.h"
 #include "reading.h"
 #include "sensors/battery.h"
@@ -68,6 +69,14 @@ uint32_t cycle = 0;
 void persist_brownout_engaged(bool engaged)
 {
     config.set_brownout_engaged(engaged);
+}
+
+// The other direction of the same coupling: session persistence has to be able to ask
+// whether a flash write is affordable right now, and only the brownout gate knows. Free
+// function for the same reason as above — session.h stays ignorant of power.h.
+bool session_flash_write_allowed()
+{
+    return brownout.flash_write_allowed();
 }
 
 // Consecutive cycles in which neither sensor produced a single field.
@@ -167,6 +176,14 @@ void setup()
     // ladder — read() issues its direct SENDAT query before consulting it — so wiring this in
     // cannot stop the battery being read, which is what detects the pack coming back.
     battery_sensor.set_brownout(&brownout);
+
+#if FEATURE_RADIO
+    // Close the H3 hole in session persistence (issue #51). Wired only alongside the battery,
+    // because without the pack there is no voltage evidence, the hold can never engage, and a
+    // gate that always answers "allowed" is worse than none — it reads as protection that is
+    // not there. Must be installed before radio.begin() below, which can join and save.
+    session::set_flash_write_gate(&session_flash_write_allowed);
+#endif
 #endif
 
 #if FEATURE_RADIO

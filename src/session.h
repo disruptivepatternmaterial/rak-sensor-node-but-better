@@ -40,6 +40,15 @@ namespace session {
 // fewer flash writes and a bigger gap after a reset; smaller means the opposite.
 constexpr uint32_t kCounterMargin = 32;
 
+// Returns true when writing flash is currently safe. Injected rather than queried directly
+// because the answer lives in power::Brownout, which this module has no business knowing
+// about — the same reason Brownout takes its persist callback instead of calling config.
+using FlashWriteGateFn = bool (*)();
+
+// Installs the gate. Until this is called, and in any build that never calls it, writes are
+// allowed — an un-wired gate must not silently disable session persistence.
+void set_flash_write_gate(FlashWriteGateFn gate);
+
 // Pushes a stored session into the MAC and marks it joined. Returns false when there is
 // nothing stored, when it is unreadable, or when it belongs to different firmware — in
 // every case the caller should just join normally.
