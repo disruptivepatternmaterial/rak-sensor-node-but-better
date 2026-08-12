@@ -2016,6 +2016,97 @@ joined as `puma-concolor-001` / `260CE734`, uplinking hourly. **It presents no U
 asleep** — that is normal for this firmware per §3, not a fault. A port appears for a few seconds
 around each wake, roughly hourly. All background capture and polling processes were killed.
 
+### 2026-08-12 (later still) — #60 fix written and built; flash blocked by the very bug it fixes
+
+Appended at the end per the operator's append-only instruction; nothing above is edited. Times
+are **build-host local**, which ran ~13 minutes behind the workstation clock.
+
+- **Commit:** `23604cf` (built, **not** confirmed on the board — see below)
+- **Host:** Heliotrope Ridge
+- **Measured:** whether the #60 boot-grace fix reaches the board and produces an observable
+  console. **It did not.** This entry records that outcome, not the intent.
+
+#### What was built — PASS
+
+`scripts/build.sh -e soak` at `23604cf`:
+
+      1 succeeded in 00:00:01.456
+      === BUILD OK ===
+      commit: 23604cf0bb5627f8983c7ae9de6e5678a63c7e57
+
+`scripts/preflight.sh` passes. The change keeps USB attached for 180 s after boot when nothing
+has opened the console, then resumes the previous detach behavior unchanged.
+
+#### What happened on the board — FAIL, and the failure is informative
+
+The flash was attempted while the node was **asleep and detached**, which is the #60 condition
+itself. `scripts/flash.sh` reported failure, and afterwards the board was absent from the bus
+entirely:
+
+      13:19:25
+      PORTS
+      none
+      IOREG
+        | |     "idProduct" = 32779      (USB2 Hub)
+        |       "idProduct" = 32780      (USB3 Gen2 Hub)
+        |       "idProduct" = 5376       (SuperDrive)
+                                          — no WisCore RAK4631 Board, no 239A of any kind
+
+and the capture, run immediately after, could not attach:
+
+      2026-08-12 13:18:19 === CAPTURE WAITING /dev/cu.usbmodem* ===
+      2026-08-12 13:19:05 === CAPTURE GAVE UP after 45s, device never appeared ===
+
+**The board is very probably fine, and this is the reasoning rather than a hope.** A board whose
+application is invalid stays in its bootloader and enumerates as `239A:0029` or `002A` —
+*visibly*. Nothing at all on the bus is the signature of a **running application that has
+detached itself**, which is what `src/power.cpp` does before every sleep when no host holds the
+console open. The absence is therefore evidence of health, not of a brick.
+
+**Which image is on the board is unknown**, and no claim is made either way. Either the upload
+never transferred and `6933114` is still resident, or it landed and `23604cf` is. Both are
+consistent with what was observed. It will be answerable at the next wake.
+
+#### The finding this produced: #60 blocks flashing, not just observation
+
+This was scoped as an observability bug. It is worse than that — **the same detach makes the
+board unflashable for the whole interval**, because a DFU upload needs a serial port too. At the
+3600 s stored interval that is up to an hour of unreachability per attempt, and the only ways in
+are to catch a wake window or to double-tap RESET by hand.
+
+That also makes the fix a chicken-and-egg: the grace window solves this permanently, but getting
+the image carrying it onto the board requires a window that does not exist yet. #60 updated.
+
+A second, cheaper defect was fixed as a consequence. `scripts/flash.sh` printed
+`THE BOARD HAS NO VALID APPLICATION ON IT. NOTHING IS RUNNING.` for this case, which is wrong
+and actively harmful — it is the message that would send the next session hunting a brick that
+is not there. It now distinguishes "no 239A device at all" (probably asleep, per #60, with wait
+or double-tap as the options) from "enumerated in its bootloader" (genuinely no valid app).
+
+#### Interval reconciliation — code and docs agree; one off-limits file does not
+
+Checked because a wrong figure here has already misled two sessions. `src/config.h` is the single
+source: `kFupFloorSeconds = 900` (the fair-use floor, explicitly lowered from 1800 s),
+`kIntervalMinSeconds = 900`, `kIntervalDefaultSeconds = 3600`. `platformio.ini` agrees after the
+earlier correction. The device has **3600 s** stored, which is the default, not the floor.
+
+So: **900 s is the floor, 3600 s is the default, and the node is running the default.** The
+earlier inference that "the network says 900 s" was reading a stored value that is no longer
+current. `AGENTS.md` still states 900 s as the operating interval; it is owned by another agent
+today and was left alone.
+
+#### Not observed — no claim made
+
+`take_downlink()` and the malformed-downlink rejections (#54), `lmh_reset_mac()` on the rejoin
+path, and both sensors in one cycle all still require a console. All three remain blocked on #60
+reaching the board.
+
+**Board left in this state:** absent from USB, running an application of **unknown version**
+(`6933114` or `23604cf`), asleep on a 3600 s cycle, last confirmed joined as `260CE734` with
+`last_f_cnt_up 1920`. It will re-present a port at its next wake, roughly hourly. A double-tap
+RESET on the RAK19007 brings it back immediately and is the fastest route to getting `23604cf`
+on it. No background processes were left running.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary

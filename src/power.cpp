@@ -37,6 +37,62 @@ constexpr uint32_t kSleepSliceSeconds = 60;
 // before the scheduler starts is not usable. Never destroyed — it lives as long as the node.
 SemaphoreHandle_t s_sleep_sem = nullptr;
 
+#if FEATURE_CONSOLE
+// How long after boot the node stays attached to USB even when nothing has opened the port.
+//
+// Without this the node is unobservable on a bench, which is issue #60 and which cost most of
+// 2026-08-12. The detach below removes the D+ pull-up, so the device leaves the USB bus
+// entirely — and `(bool)Serial` is only true once a host has opened the port and asserted DTR.
+// Nothing has the port open in the seconds after a flash, so the node detached at the end of
+// its first cycle and the port could not exist again until the next wake, an interval later.
+// A capture started after the flash therefore waited for a device that could not appear. Three
+// captures that day reproduced it, and the same shape killed the H8 soak attempt and was read
+// as a hardware fault for hours (#58).
+//
+// 180 s because it has to cover the whole path from "flash finished" to "a human or a script
+// has the port open": scripts/flash.sh itself waits up to 30 s for re-enumeration before it
+// even returns, macOS then takes a second or two to publish the tty node, and an operator who
+// walks over to the bench is the slow case this exists for. Three minutes once per boot is not
+// a number worth optimising.
+//
+// WHY THIS CANNOT COST FIELD CURRENT, which is the only reason it is allowed to be
+// unconditional. In the field there is no cable, so there is no VBUS, and NRF_USBD->ENABLE is
+// only ever set from the VBUS power-event handler — the peripheral is never enabled at all, so
+// there is nothing for detach() to switch off and skipping it changes nothing. The saving that
+// ADR-0008 established detach() as the real lever for is a saving that only exists while a
+// cable is attached, which is the bench case, and on the bench three minutes of USB is not a
+// power question. After the window the previous behavior resumes exactly: detach() is NOT
+// weakened, only deferred, and only once per boot.
+//
+// CITE(prior-art): [CIT-TINYUSB-CORE] dcd_nrf5x.c:280 — dcd_disconnect() clears
+//   NRF_USBD->USBPULLUP, which is why detach() removes the device from the bus rather than
+//   merely dropping its tty node.
+// CITE(prior-art): [CIT-TINYUSB-CORE] dcd_nrf5x.c:927 — tusb_hal_nrf_power_event() is the only
+//   writer of NRF_USBD->ENABLE, and it runs from the VBUS event. This is the fact that makes
+//   the grace window free in the field.
+// CITE(bench): docs/EVIDENCE.md 2026-08-12 (later) — the three captures that never attached,
+//   and the ioreg showing the whole device gone rather than just the port.
+constexpr uint32_t kBootGraceMs = 180UL * 1000UL;
+
+// Latched rather than recomputed, because millis() wraps at ~49 days and `millis() <
+// kBootGraceMs` would silently become true again on the far side of the wrap — handing a
+// deployed node a second grace window a month and a half in, for no reason and with nobody
+// there to use it. Once the window has closed it stays closed until the next reset.
+bool s_boot_grace_expired = false;
+
+bool in_boot_grace()
+{
+    if (s_boot_grace_expired) {
+        return false;
+    }
+    if (millis() >= kBootGraceMs) {
+        s_boot_grace_expired = true;
+        return false;
+    }
+    return true;
+}
+#endif
+
 } // namespace
 
 namespace power {
@@ -110,7 +166,20 @@ void sleep_seconds(uint32_t seconds)
     // one. Refs docs/reviews/2026-08-12_adversarial_review.md.
     const bool console_in_use = (bool)Serial;
 
-    if (!console_in_use) {
+    // The grace window is checked here rather than folded into console_in_use because the two
+    // say different things and the log line below has to be able to tell them apart: one is
+    // "somebody is watching", the other is "nobody is watching yet, but they still might".
+    const bool grace = in_boot_grace();
+
+    if (grace && !console_in_use) {
+        // Announced, because a silent deferral is indistinguishable from the bug it fixes. An
+        // operator who sees no port and no explanation goes looking for a hardware fault, which
+        // is exactly what happened before this existed.
+        LOGF("   power   : USB kept attached for the first %lu s so a console can attach (#60)\n",
+             (unsigned long)(kBootGraceMs / 1000));
+    }
+
+    if (!console_in_use && !grace) {
         // Detaching releases the D+ pull-up and tells the device stack it is unplugged, so
         // the host stops polling and the endpoints stop being serviced across the sleep.
         //
