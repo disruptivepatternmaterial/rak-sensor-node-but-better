@@ -57,6 +57,56 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — 24 h bench soak started (H8). Where to find it, and how to restart it
+
+- **Commit:** `f626698` · **Host:** Heliotrope Ridge, RAK4631 on `/dev/cu.usbmodem31101`
+- **Started:** 2026-08-12 09:39:53 local (16:39:53Z) · **Image:** `rak4631` field image
+- **Capture pid:** `47297` · **Log:** `~/soak_rak4631.log` on the build host
+
+**Finding it later.** The log is on the build host, not in this repo, and it is the only
+record of the soak:
+
+```
+$ pgrep -f "capture.py --duration 93600"        # is it still running?
+$ tail -40 ~/soak_rak4631.log                   # what has it seen?
+$ grep -c "CAPTURE ATTACHED" ~/soak_rak4631.log # one per wake — a cycle counter
+```
+
+The capture is `scripts/capture.py` running detached under `nohup`, appending. It is set
+for 93600 s (26 h) rather than 86400 so the window survives a restart or two without
+needing to be re-armed. **`setsid` does not exist on macOS** — the first attempt to start
+this died on that and captured nothing; `nohup ... & disown` is what works here.
+
+**Why every wake shows up as an attach.** The field image sleeps with system-off, which
+drops the USB CDC device, so the port disappears and reappears on each cycle.
+`=== CAPTURE ATTACHED ===` therefore marks a wake and the sentinel doubles as the
+heartbeat H8 wants. The old helper treated that disconnect as the end of the capture,
+which is half of why nothing was ever observed past the first cycle.
+
+**Interval is 900 s, not the 1800 s an earlier entry recorded.** From the network's uplink
+timestamps: `16:21:07Z → 16:36:14Z` is 15 min 7 s, and `16:05:59Z → 16:21:07Z` is 15 min
+8 s. The `sleep : 1800 s` console line predates the reflash. At 900 s the node is at the
+fair-use floor (`kFupFloorSeconds`, `src/config.h:62`), which is compliant, and it yields
+96 cycles a day — a denser soak than planned, not a thinner one.
+
+**This clock will be interrupted tonight** when the operator pulls the board to meter
+current. That is expected and the harness is built for it: the log **appends**, so the
+hours before the interruption are not lost, and the capture can be restarted with the same
+command. **State it plainly: if the interruption breaks continuity, the 24 h H8 clock
+restarts from the restart, not from 09:39.** Hours either side of a power cycle do not sum
+to a soak. What the pre-interruption hours are good for is catching an early fault, which
+is worth having on its own.
+
+Restart after the board comes back:
+
+```
+nohup python3 scripts/capture.py --duration 93600 --log ~/soak_rak4631.log \
+  > /tmp/soak_stdout.log 2>&1 < /dev/null & disown
+```
+
+- **Status is unchanged: `🚧 NOT YET DEPLOYED`.** A soak that has been running for minutes
+  is not a soak. H8 needs ≥24 h bench and ≥7 d field shadow, and neither has closed.
+
 ### 2026-08-12 — Sleep current is not measurable from pack telemetry. Resolution floor 10 mA against a ~1 mA question
 
 - **Commit:** `4510763` · **Host:** Heliotrope Ridge, RAK4631 on `/dev/cu.usbmodem31101`
