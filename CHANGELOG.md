@@ -10,6 +10,30 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The battery driver rebooted the pack on every attempt to re-latch it.** `acquire_pid()`
+  opened each provisioning window with a BOOT broadcast. In the reference master
+  (`forest-weather-machines` @ `efc0e3c`,
+  `rak-4-5-wire/firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c`)
+  BOOT is sent from exactly two places — `api_init()` at :906 and `api_set_provision()` at
+  :1063, which the API table exports as `.reboot` at :1076 — so it is a reboot request, not a
+  provisioning retry. A pack sitting at `PID_UNKNOW` fails the fast probe every cycle, so the
+  node restarted it on every full ladder and the id could never stick. BOOT is now sent at
+  most once per power cycle, and only when the pack has stopped answering its assigned id; the
+  re-latch itself is done by answering the pack's unprompted announcement, which is the only
+  thing that assigns a pid (same file :398-474, pid = slot index + 1 at :458). Best available
+  code-level explanation for the pack never returning from `0xFF`. (#62)
+- **A failed re-latch no longer prints as a success, and no longer claims an address the pack
+  is not listening on.** `m_pack_latched` was write-once, so after any single good latch the
+  "pack still reports pid 0xFF" summary was skipped forever and every later failure logged as
+  if it had worked. It is now cleared whenever an answered announcement still carries
+  `provId == 0xFF`. `acquire_pid()` also used to return true — and set `m_pid = 0x01` — on the
+  strength of having answered an announcement at all, so the next SENDAT went to `0x01` while
+  the pack was still listening on `0xFF`, clobbering the fallback that would have reached it.
+  It now returns false and leaves `m_pid` at `0xFF` until the pack itself reports another id.
+  (#62)
+
+### Fixed
+
 - **Two small honesty fixes in the uplink path.** `Radio::send()` refused on "not joined"
   without a console line, unlike every other refusal in the function, so the most ordinary
   reason for a quiet cycle was the one that looked like nothing at all. And the

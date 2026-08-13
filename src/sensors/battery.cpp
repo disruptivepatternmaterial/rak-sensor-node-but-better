@@ -595,6 +595,42 @@ void Battery::send_boot()
     send_frame(kBroadcastId, kHubTypeProvision, kPldBoot);
 }
 
+// BOOT, at most once per power cycle, and only when the pack has stopped answering its id.
+//
+// The reference treats BOOT as a reboot verb and nothing else: api_init() sends one at
+// startup, and the only other sender is api_set_provision(), which the API table exports as
+// `.reboot`. Nothing in that path latches a probe — the latch is written by the master's reply
+// to an announcement (pid = slot index + 1). This driver used to send BOOT at the top of every
+// provisioning window, so every attempt to re-latch a pack sitting at PID_UNKNOW began by
+// restarting the pack it was trying to latch, and the id never stuck. That is the best
+// code-level explanation available for issue #62.
+//
+// Kept as a one-shot rather than deleted: a pack that has gone silent altogether has no other
+// nudge available, and one reboot at the point the id first fails is what the reference's own
+// startup does. Never sent while the pack is answering — a working pack is not rebooted.
+//
+// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3c,
+//   rak-4-5-wire/firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c
+//   :906 api_init() and :1063 api_set_provision() are the only two senders of
+//   PLD_PROVI_TYPE_BOOT, and :1076 binds api_set_provision as `.reboot` in
+//   RakSNHub_Protocl_API. BOOT is a reboot request; it is not a provisioning retry.
+// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3c, same file :398-474 — the
+//   pid a probe ends up holding is written by the master's provisioning *reply* (pid = slot
+//   index + 1, :458). No BOOT path assigns one.
+// CITE(bench): docs/EVIDENCE.md 2026-08-12 — battdiag on b436aa9 held pid 0x01 across 20
+//   consecutive cycles with no provId FF anywhere in the capture, so the handshake completes
+//   when nothing interrupts it.
+void Battery::boot_once()
+{
+    if (m_booted) {
+        return;
+    }
+    m_booted = true;
+    LOGLN(F("   battery : pack silent at its id — one BOOT this power cycle"));
+    send_boot();
+    delay(kTurnaroundMs); // let the probe turn the line around
+}
+
 // "Send your latest sensor data", then collect the reply.
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
 //   snhub_snsrdat_command() with SNHUB_TYPE_SENDAT + PLD_SDATA_TPYE_SENDAT.
@@ -835,12 +871,10 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 // were.
 //
 // Structure:
-//   * BOOT once, at the top, and never again inside the window. Its documented effect is to
-//     make probes re-announce; the pack already re-announces on its own, and repeating a
-//     command whose purpose is to restart announcement is a plausible way to reset whatever
-//     state is accumulating across answered announcements. Nothing in the reference repeats
-//     it either — api_init() sends it at startup and api_set_provision() on an explicit
-//     request, never on a timer.
+//   * No BOOT, at all. It used to be sent at the top of every window, which meant this
+//     driver rebooted the pack on every attempt to re-latch it — see boot_once() and issue
+//     #62. BOOT is the reference's reboot verb, not its re-latch verb. The pack announces
+//     itself unprompted anyway, so this window has nothing to prompt for.
 //   * Then drain-and-answer until the deadline, with the same early-exit drain and the same
 //     mutate-and-transmit response as before. Nothing about the frame changes.
 //   * Break the moment the pack proves it latched (see below), because at that point the
@@ -865,8 +899,6 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 bool Battery::acquire_pid(uint8_t *buf, size_t cap)
 {
     link_for(m_pin).flush(); // anything queued predates this window
-    send_boot();
-    delay(2); // let the probe turn the line around
 
     const uint32_t started_ms = millis();
     bool           answered   = false;
@@ -929,7 +961,13 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
             break;
         }
 
-        m_pid = kProbeId;
+        // The pack answered and still calls itself PID_UNKNOW, so nothing latched. Record
+        // that in the state as well as the log: m_pid stays where the pack is demonstrably
+        // listening, and a latch observed on some earlier cycle is no longer true. Leaving
+        // m_pack_latched set through a failed re-latch is what made every subsequent failure
+        // print as a success — issue #62.
+        m_pack_latched = false;
+        m_pid          = kBroadcastId;
     }
 
     if (!answered) {
@@ -947,7 +985,12 @@ bool Battery::acquire_pid(uint8_t *buf, size_t cap)
     }
 
     delay(50); // the reference's tick interval — the only timing guidance available
-    return true;
+
+    // Answering is not latching. The caller decides on the strength of this return whether the
+    // pack holds kProbeId, so returning true for "an announcement was answered" sent the next
+    // SENDAT to an address nothing was listening on and clobbered phase 2's 0xFF fallback.
+    // Only the pack's own provId settles it.
+    return m_pack_latched;
 }
 
 // Drain whatever the GPIOTE receiver has buffered. Bytes are assembled in the interrupt
@@ -1242,9 +1285,13 @@ BatteryReading Battery::read()
     // remaining energy on hunting for the pack.
     bool provisioned = answered_direct;
     if (!answered_direct && full_ladder) {
+        boot_once();
         provisioned = acquire_pid(rx, sizeof(rx));
         if (!provisioned) {
-            LOGLN(F("   battery : no announcement — proceeding unprovisioned"));
+            // "Not provisioned" now covers both silence and an answered announcement that
+            // still reports 0xFF. Phase 2 falls back to 0xFF, which is where an unlatched
+            // pack is listening.
+            LOGLN(F("   battery : no confirmed latch — proceeding unprovisioned"));
         }
         link.flush(); // anything still queued from phase 1 is not part of the data reply
     }

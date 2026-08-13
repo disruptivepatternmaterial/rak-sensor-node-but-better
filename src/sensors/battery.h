@@ -134,6 +134,11 @@ class Battery {
                       const uint8_t *payload = nullptr, size_t payload_len = 0);
     void send_boot();
 
+    // One BOOT per power cycle, sent only when the pack has stopped answering its assigned
+    // id. BOOT is the reference's reboot verb; sending it on every re-latch attempt rebooted
+    // the pack mid-handshake. See boot_once() in battery.cpp and issue #62.
+    void boot_once();
+
     // Drain the RX queue into `buf`. With `stop_on_provision` the drain returns the instant a
     // complete, checksum-verified PROVISION request is buffered instead of waiting out the
     // inter-byte gap — the pack's provisioning window is short and that gap is spent inside it.
@@ -150,10 +155,12 @@ class Battery {
     void dump(const char *what, const uint8_t *buf, size_t len);
 
     // BOOT once, then keep answering every announcement until a wall-clock deadline — the
-    // reference master's steady state, approximated. Exits early the moment the pack proves it
-    // latched the assigned id. Returns true when at least one announcement was answered this
-    // cycle, which is a weaker claim than "the pack is provisioned": ask m_pack_latched for
-    // that.
+    // Keep answering every announcement until a wall-clock deadline — the reference master's
+    // steady state, approximated. Sends nothing to start the window: the pack announces itself
+    // unprompted, and the BOOT that used to open the window rebooted it instead (issue #62).
+    // Exits early the moment the pack proves it latched the assigned id, and returns true only
+    // in that case. "We answered an announcement" is not provisioning and no longer reads as
+    // it.
     bool acquire_pid(uint8_t *buf, size_t cap);
 
     // One "send SENDAT to `dest`, collect whatever comes back" round trip.
@@ -207,7 +214,14 @@ class Battery {
     // pack went on reporting 0xFF forever. Nothing depends on it yet beyond ending the
     // provisioning window early and choosing the data-poll address; it exists so the one fact
     // that has cost the most bench time is held explicitly instead of re-derived from hex.
+    //
+    // Cleared again whenever an answered announcement still carries provId 0xFF. It used to be
+    // write-once, so one good latch made every later failure print as a success for the rest
+    // of the deployment — issue #62.
     bool m_pack_latched = false;
+
+    // Whether this power cycle has already sent its one BOOT. See boot_once().
+    bool m_booted = false;
 
     // Set once the pack has produced a genuine measurement, and used for exactly one thing:
     // announcing that fact to the console a single time instead of on every wake for months.
