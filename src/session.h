@@ -85,9 +85,22 @@ bool counter_headroom_ok();
 // is then also uncommandable, which is the state AGENTS.md says the node must never reach.
 //
 // Granted only for a keepalive the brownout gate itself armed — never for an ordinary uplink, and
-// never for a hold backed by a measured low voltage, where staying quiet is the correct answer
-// (#38). One write per kCounterMargin keepalives is roughly one a month at the default cadence,
-// which is the same write rate the healthy path already pays.
+// never on a pack measured at or below the transmit-inhibit floor. That last one is what #38 is
+// about, and it is enforced where the arming happens rather than here: power.cpp disarms the
+// keepalive outright for any reading at or below kTxInhibitCentivolts, so such a pack transmits
+// nothing and therefore takes no write. Two holds can arm a keepalive, and both take this write:
+// a hold resting on no reading at all, and a hold resting on a pack answering from inside the
+// 9.60-10.20 V hysteresis band — above the floor, simply not recovered yet. Excluding the second
+// would be worse than pointless: it is the hold that can last a whole winter, so the reserve
+// would empty about eight days in and the node would go mute in exactly the scenario the in-band
+// keepalive was added to prevent.
+//
+// Write frequency, since the earlier "roughly monthly" here was wrong at the cadence this node
+// actually runs: one write per kCounterMargin = 32 keepalives, and during a hold a keepalive is
+// one per kNoEvidenceKeepaliveCycles = 24 cycles, so 32 × 24 = 768 cycles — about 8 days at the
+// 900 s field cadence and about 32 days at the 3600 s default. That is not the healthy path's
+// rate but roughly a twenty-fourth of it: healthy, every uplink advances the counter, so a write
+// falls every 32 cycles — about 8 hours at 900 s.
 //
 // CITE(spec): [CIT-LW-LINK] the frame counter rules that make a repeated value unacceptable, and
 //   Class A's rule that a downlink can only follow an uplink — the two together are why a node

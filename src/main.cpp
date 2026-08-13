@@ -385,6 +385,15 @@ void loop()
             // Without this the reserve empties after session::kCounterMargin keepalives and every
             // later uplink is refused — a mute node, and being Class A therefore an uncommandable
             // one, in exactly the hold that no action of its own can lift. See session.h.
+            //
+            // Granted for either hold that can arm a keepalive, deliberately including the pack
+            // answering from inside the 9.60-10.20 V hysteresis band. Restricting it to the
+            // no-evidence hold was considered and rejected: that would permit only the write
+            // taken with no reading at all — the blind one power.h names as the unbounded risk —
+            // while refusing the one taken on a pack measured above the transmit-inhibit floor,
+            // and it would re-strand the winter band-hover that power.cpp:380 exists to prevent,
+            // about eight days into it. A pack at or below the floor never reaches this line:
+            // power.cpp disarms its keepalive, which is what #38 asked for.
             session::permit_counter_checkpoint();
         }
 

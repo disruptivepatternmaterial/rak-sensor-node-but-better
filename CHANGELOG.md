@@ -36,6 +36,24 @@ any image in this repository has identified its own commit on hardware.
 
 ### Fixed
 
+- **The frame-counter checkpoint permit and its contract now describe the same firmware, and the
+  write-frequency figure is corrected.** `session.h` said the permit was "never for a hold backed
+  by a measured low voltage", while `main.cpp` granted it on any armed keepalive — including the
+  hold on a pack answering from inside the 9.60–10.20 V hysteresis band. The code is correct and
+  the comment was stale: `power.cpp` disarms the keepalive outright at or below the 9.60 V
+  transmit-inhibit floor, so the pack #38 is about transmits nothing and takes no write, and the
+  in-band pack is above that floor and merely unrecovered. Narrowing the grant to the no-evidence
+  hold was considered and rejected — it would have permitted only the blind write `power.h` calls
+  the unbounded risk while refusing the measured one, and would have emptied the counter reserve
+  about eight days into the winter band-hover that the in-band keepalive exists to survive.
+  `session.h`, `session.cpp`, `power.h` and `main.cpp` now agree, and `power.h` names the one
+  documented exception to its own gate instead of implying there is none. The "roughly monthly"
+  figure was wrong: one write per 32 keepalives at one keepalive per 24 cycles is 768 cycles —
+  about **8 days** at the 900 s field cadence, about 32 days at the 3600 s default, against every
+  32 cycles on the healthy path. Comment-only; no behavior change. Refs
+  [#38](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/38),
+  [#51](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/51).
+
 - **The downlink matrix harness can no longer record PASS with no answering uplink.** In
   `case_a`, `wait_for` was called for the FPort 2 uplink and its exit status discarded, so a
   timeout still recorded PASS — with the literal string `<no uplink observed>` pasted into the

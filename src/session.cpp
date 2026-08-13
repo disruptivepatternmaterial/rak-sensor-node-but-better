@@ -253,8 +253,11 @@ static bool write_session(bool checkpoint_permitted)
     // The one exception is the counter checkpoint behind an authorized keepalive. Withholding
     // that write does not protect the node, it silences it permanently — the reserve is finite,
     // the hold need not end, and a mute Class A node cannot be told anything. The write is safe
-    // to take here for three reasons: it happens at most once per kCounterMargin keepalives, so
-    // roughly monthly rather than per cycle; it rides on a cycle that is already transmitting,
+    // to take here for three reasons: it happens at most once per kCounterMargin keepalives — 32
+    // keepalives at one per 24 cycles is 768 cycles, about 8 days at the 900 s field cadence and
+    // about a month at the 3600 s default, against every 32 cycles on the healthy path, so this
+    // is a small fraction of a write rate the node already pays; it rides on a cycle that is
+    // already transmitting,
     // and a LoRa transmit burst is the largest current this node ever draws, so the marginal
     // charge of one page write is small against a decision already made; and a supply that
     // collapses mid-write cannot leave a plausible-looking wrong record, because LittleFS

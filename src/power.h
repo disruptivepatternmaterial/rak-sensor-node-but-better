@@ -163,6 +163,17 @@ class Brownout {
     // Stays false on the no-evidence path even on a keepalive cycle. Transmitting blind for
     // the sake of being heard from is a bounded risk; writing flash blind is not, and the
     // failure it produces survives every reset afterwards.
+    //
+    // One documented exception exists outside this gate, and it is not a leak in it: the frame
+    // counter checkpoint behind an armed keepalive, authorized explicitly per uplink by
+    // session::permit_counter_checkpoint() and refused for everything else. It is allowed
+    // because the alternative is not a safer node but a permanently mute one — the counter
+    // reserve is finite and neither hold that arms a keepalive can be lifted by anything the
+    // node does. It is affordable because the checkpoint rides a cycle that is already
+    // transmitting, and a LoRa burst is the largest current this node ever draws, so a page
+    // write beside it is small against a decision already taken. A pack at or below
+    // kTxInhibitCentivolts never reaches it at all, because power.cpp disarms the keepalive
+    // there (#38). See session.h for the full contract.
     bool flash_write_allowed() const { return !m_engaged; }
 
     bool engaged() const { return m_engaged; }
