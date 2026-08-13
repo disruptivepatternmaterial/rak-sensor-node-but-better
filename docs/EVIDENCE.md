@@ -2437,11 +2437,30 @@ on it. No background processes were left running.
     printed, and the port stayed up. Once the reader is released the port goes away at the next
     sleep. Press RESET once to get a flashable window back.
   - **Still not a soak.** Two cycles are not 24 h. Zero soak hours exist.
+  - **Third observation — `detach()` fires and the node leaves the USB bus.** The serial reader was
+    released at 10:46:03. At the end of the next cycle, with no host holding the CDC open and the
+    180 s boot grace long expired, the node detached. At **10:59:57** on the build host:
+
+    ```
+    $ ls /dev/cu.usbmodem*
+    zsh:1: no matches found: /dev/cu.usbmodem*
+    $ ioreg -p IOUSB -w0 -l | grep -c "WisCore RAK4631"
+    0
+    $ ioreg -p IOUSB -w0 -l | grep -c 32809
+    0
+    ```
+
+    This is the first hardware observation of the [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)
+    / [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md) detach path on the field image.
+    It is **half** of [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
+    item 1: the detach is observed, the matching `attach()` and a successful host re-enumeration at
+    the next wake are not. Absence from `ioreg` is by design and is not a dead board.
   - **Board left in this state:** running `env:soak` at `d568574`, asleep on a 900 s cycle, session
-    `0x260CE734`. The serial reader was released at 10:46:03, so the *next* sleep is the first one
-    with no host attached and `detach()` will fire — the port will disappear by design. That is the
-    unattended field configuration, and it is the configuration a sleep-current measurement has to
-    be taken in.
+    `0x260CE734`, **absent from USB**. That is the unattended field configuration, and it is the
+    configuration a sleep-current measurement has to be taken in (rule 50 trap 5 — a
+    USB-attached measurement is meaningless). A single RESET brings the console and a flashable
+    window back; a double-tap re-enters DFU. No background processes were left running on the
+    build host.
   - Sleep current remains unmeasured, and cannot be measured over USB (rule 50 trap 5) or from
     pack telemetry, whose LSB is 10 mA.
 
