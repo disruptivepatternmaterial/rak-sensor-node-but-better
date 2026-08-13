@@ -176,7 +176,20 @@ bool Config::save()
 
     const size_t written = f.write((const uint8_t *)&s, sizeof(s));
     f.close();
-    return written == sizeof(s);
+    if (written != sizeof(s)) {
+        return false;
+    }
+
+    // Every save writes m_boots along with everything else, so a save taken for any other
+    // reason has already discharged whatever the boot counter owed. Without clearing this,
+    // set_interval_seconds() or set_brownout_engaged() followed by the deferred boot write
+    // erased and rewrote the same page twice in one run — in a change whose whole purpose was
+    // to write it less often.
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — "no flash thrash"; two writes of one page for
+    //   one record is the thrash, whatever the two callers thought they were doing.
+    m_boot_write_pending = false;
+    return true;
 }
 
 bool Config::set_interval_seconds(uint32_t seconds)
