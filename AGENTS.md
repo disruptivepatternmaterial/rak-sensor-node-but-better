@@ -96,6 +96,41 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **Not started. Zero soak hours exist.** The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. It has never produced a soak hour: the one attempt, 2026-08-12 at `f626698`, waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
 
+## Where v0.4.1 leaves things
+
+`v0.4.1` (2026-08-12) is **ten fixes, compile-verified only.** No hardware ran any of them — the
+board was asleep with USB detached all session. `env:rak4631`, `env:soak` and `env:battdiag` build
+`SUCCESS` on Heliotrope Ridge and that is the whole claim
+([`docs/EVIDENCE.md`](docs/EVIDENCE.md), 2026-08-12 night).
+
+What changed: the no-evidence brownout hold that disabled its own exit ([#61](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/61), **closed**),
+keepalive frame-counter starvation, an ungated boot-counter flash write, sub-band re-selection
+after the rejoin escape, downlink length checking ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63),
+[#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)), a
+set-interval downlink applied during a brownout hold ([#65](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/65)),
+the backoff first step raised to the fair-use floor, the pack no longer rebooted on every re-latch
+attempt ([#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62)
+root cause — **#62 stays open**, the re-latch is unproven), empty pack records no longer counted as
+silence, an all-zero RK900 span refused instead of encoded as weather, and a bounded Modbus drain
+that feeds the watchdog.
+
+**Treat every one as *believed correct, unobserved*.** Several sit on the sleep, brownout and
+rejoin paths, which are exactly what compiling cannot exercise. Do not describe any of them as
+working until a bench capture says so.
+
+**Bench fact you will otherwise lose twenty minutes to:** the field image detaches USB 180 s after
+boot ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)). A board left running past
+that grace has no serial port and **cannot be flashed — press RESET once**, then flash inside the
+fresh window.
+
+Open issues from this pass: [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62),
+[#66](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/66),
+[#67](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/67),
+[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68),
+[#69](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/69),
+[#70](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/70),
+[#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71).
+
 ## Open blockers
 
 - [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — battery current sign
@@ -117,6 +152,16 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
   [adversarial review](docs/reviews/2026-08-12_adversarial_review.md) and
   [round 3](docs/reviews/2026-08-12_adversarial_review_round3.md),
   [deferred cruft pass](docs/reviews/2026-08-12_cruft_plan.md) ([#52](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/52)).
+- **`scripts/preflight.sh` no longer prints `PREFLIGHT OK` over an unresolved payload field.**
+  A `BLOCKED` entry in `payload/schema.yaml` — today `batt_current`, per ADR-0002 — now ends the
+  run with `=== PREFLIGHT BLOCKED ===`. Exit stays 0 so routine CI is not red for a deliberately
+  open conflict; `--strict` exits 2 for the release checklist. Two scans (secrets, null policy)
+  were also *never executing* — `xargs` aborts with `sysconf(_SC_ARG_MAX) failed` here and empty
+  output was read as clean. They use `git grep` now, and the null-policy heuristic is too broad
+  on first real execution — six counter resets flagged as fabricated zeros, `radio.h:98` among
+  them, all benign ([#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72)).
+  The ADR-0006 sibling-SHA warning ([#57](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/57))
+  was a checker false positive — the SHA was on the citation's continuation line — and is closed.
 - Remaining open decisions are in [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
   Decision #1 (BMS bus) is closed by [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md);
   decision #4 (framework) by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).
