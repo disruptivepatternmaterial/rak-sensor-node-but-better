@@ -27,6 +27,40 @@ Measurement traps that invalidate an entry:
 - A decoded TTN payload proves the formatter matches *that* build, not the schema —
   the parity gate proves the schema ([`.cursor/rules/60-decoder-parity.mdc`](../.cursor/rules/60-decoder-parity.mdc)).
 
+## Getting the commit SHA off a running board
+
+Every entry needs a SHA, and the firmware now supplies one. Since
+[`033b584`](../CHANGELOG.md) the boot banner prints it, injected at build time by
+`scripts/pio_git_rev.py`:
+
+```
+=== rak-sensor-node ===
+firmware : 0.4.1
+commit   : a7381e7
+built    : Aug 13 2026 08:12:44
+```
+
+Read the `commit` line and record it verbatim. Three forms and what each means:
+
+| Banner says | Means | What to record |
+|---|---|---|
+| `a7381e7` | built from that commit, working tree clean | the SHA, asserted |
+| `a7381e7-dirty` | built from that commit **plus uncommitted work** | the SHA **and** `-dirty` — the tree is not recoverable from the SHA, so treat the build as unreproducible and say so |
+| `unknown` | no git history was available at build time (tarball export, checkout without history) | `unknown`, and whatever else identifies the build — never substitute a guess |
+
+**Reading an older capture, whose banner predates `033b584`:** those banners carry only
+`firmware :` and `built :`, and a version plus a timestamp does not identify a commit — two
+builds of the same version are byte-different and read identically. Do not resolve it by
+picking the newest commit older than the build stamp. That is an inference, and it is wrong
+whenever the build came from a tree that was dirty, from a branch, or from a checkout that was
+not `main`.
+
+Record the build timestamp verbatim, then mark the SHA **inferred** and name what the inference
+rests on — as the 2026-08-13 `stage3` entry below does. A SHA that is inferred and labelled is
+useful; a SHA that is inferred and asserted quietly poisons every later document that copies it,
+which is exactly how a soak claim propagated through four documents on 2026-08-12. **Never
+assert a SHA the board did not print.**
+
 ## Release gates awaiting evidence
 
 From [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §7. **None of these can be closed by inspection.**
@@ -2226,6 +2260,8 @@ on it. No background processes were left running.
   `f15a983` (2026-08-12 21:16:45 -0700), which is also current `main`; that is consistent with
   the banner and is **not** the same as confirmed. Recorded this way deliberately rather than
   asserting `f15a983` ran.
+  This is an **inferred** SHA, labelled as one per the section above. Builds from `033b584`
+  onward print the commit on the banner, so a future entry will not need the inference.
 - **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`, console captured to
   `/tmp/stage3_cap.txt` by a single attached reader.
 - **Measured:** an unattended `stage3` run — RK900 weather read, RAK9154 pack telemetry and an
