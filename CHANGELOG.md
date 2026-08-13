@@ -8,6 +8,28 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A brownout keepalive no longer runs out of frame counter and silences the node for good.**
+  The stored counter is written ahead of the live one by `session::kCounterMargin` (32) uplinks,
+  and H3 forbids advancing it while the brownout gate holds (#51). A hold that rests on a pack
+  which has stopped answering is lifted only by a valid reading at or above the resume threshold,
+  so the keepalive uplinks that keep the node reachable spend that reserve without ever being able
+  to replenish it. On the 33rd, `session::counter_headroom_ok()` returned false and
+  `Radio::send()` refused every uplink from then on — permanently mute, and being Class A
+  therefore permanently uncommandable, with no route left for a downlink to fix it. That is the
+  state `AGENTS.md` says the node must never reach, and it is the second instance of the shape
+  behind #61: a safety hold disabling its own only exit.
+
+  A keepalive the brownout gate itself armed now authorizes exactly one counter checkpoint write
+  (`session::permit_counter_checkpoint()`), consumed by the next headroom check whether or not it
+  was needed. Ordinary uplinks and joins still obey the gate unchanged, and a hold backed by a
+  measured low voltage never arms a keepalive at all (#38), so nothing writes flash on a pack that
+  is genuinely too low. The write lands about once a month at the default cadence — one per 32
+  keepalives — on a cycle that has already committed to a transmit burst far larger than a page
+  write, and LittleFS commits it atomically, so a supply that collapses mid-write leaves the
+  previous record rather than a plausible-looking wrong one.
+
 ### Documentation
 
 - **Every document now agrees with the evidence ledger, and the ledger is what changed today.**

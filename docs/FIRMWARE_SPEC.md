@@ -211,6 +211,8 @@ Failing one sensor does not skip the other or skip uplink (uplink may be battery
 
 An uplink is also withheld when the persisted frame counter cannot be kept ahead of the counter actually transmitted — see H3 below. That is a refusal to transmit, not a failure: the alternative is a frame the network discards as a replay while `lmh_send()` reports success, which is indistinguishable from health from every vantage point the node has.
 
+The reserve that makes those withheld writes affordable is finite, and the hold that consumes it need not end. A hold resting on a pack that has stopped answering is lifted only by a valid reading at or above the resume threshold, and the keepalive uplink is the only thing keeping the node reachable in the meantime — so once the reserve is spent, refusing the keepalive too would leave a permanently mute node, and being Class A ([CITE(spec): LoRaWAN L2 1.0.4 §3, Class A — `CIT-LW-LINK`](CITATIONS.md)) a permanently uncommandable one. **A keepalive the brownout gate itself armed is therefore allowed exactly one counter checkpoint write, gate or no gate.** Never an ordinary uplink, and never a hold backed by a measured low voltage, where staying quiet is the correct answer. The write rate is one per `session::kCounterMargin` keepalives — about monthly at the default cadence — and a supply that collapses mid-write cannot produce a plausible-looking wrong record, because the filesystem commits atomically ([CITE(prior-art): littlefs README, "atomic, even in event of power-loss" — `CIT-LITTLEFS-DESIGN`](CITATIONS.md)) and the in-RAM ceiling advances only after the write has returned.
+
 ## 6. Payload (draft — freeze before soak)
 
 Prefer **RAK Standardized / Cayenne LPP–style** types already decoded by `forest-weather-machines` `rak-wx-station-default.js` so ingest stays unchanged:
@@ -235,7 +237,7 @@ Exact channel IDs must match decoder expectations; verify against live decoder b
 |---|---|
 | H1 | Hardware WDT; Modbus/BMS hang → reset |
 | H2 | Deep sleep between cycles; Class A radio sleep |
-| H3 | Brownout: no flash thrash; skip TX if V critically low |
+| H3 | Brownout: no flash thrash; skip TX if V critically low. **One exception, by design:** an authorized keepalive may take a single frame-counter checkpoint write while the gate is engaged — see §5 below. |
 | H4 | Join/TX fail: bounded backoff; survive multi-day no-GW |
 | H5 | Interval + keys path survives power loss |
 | H6 | RK900 absent → no livelock |

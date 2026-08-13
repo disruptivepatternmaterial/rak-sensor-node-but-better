@@ -57,6 +57,11 @@ uint32_t s_saved_counter_ceiling = 0;
 // whose save was withheld, which is precisely the healthy case.
 bool s_have_stored_session = false;
 
+// One-shot authorization to write the counter checkpoint despite a withheld flash-write gate.
+// Set by main.cpp immediately before a keepalive uplink and consumed by the next headroom check.
+// See session::permit_counter_checkpoint() for why the reserve alone is not enough.
+bool s_checkpoint_permit = false;
+
 // Null means "allowed". See set_flash_write_gate() — an un-wired gate must not disable
 // persistence, because that failure would be silent and would cost a rejoin every reset.
 session::FlashWriteGateFn s_flash_write_gate = nullptr;
@@ -226,7 +231,12 @@ bool restore()
     return true;
 }
 
-bool save()
+// The whole of save(), plus the one way past the H3 gate. File-local: nothing outside this
+// translation unit may choose to bypass the gate.
+//
+// checkpoint_permitted is granted only for an authorized keepalive, and only for the write that
+// keeps the frame counter ahead of the wire. Everything else still obeys the gate.
+static bool write_session(bool checkpoint_permitted)
 {
     // H3: no flash writes while the pack is held below cutoff. Both paths into this function
     // run during a brownout hold — radio.cpp after a join, and counter_headroom_ok() below
@@ -239,7 +249,17 @@ bool save()
     // page write interrupted by a supply that sags mid-write corrupts the record we would be
     // rejoining from anyway. This is the same reasoning power.cpp already applies when it
     // declines to persist a hold taken on unknown voltage.
-    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+    //
+    // The one exception is the counter checkpoint behind an authorized keepalive. Withholding
+    // that write does not protect the node, it silences it permanently — the reserve is finite,
+    // the hold need not end, and a mute Class A node cannot be told anything. The write is safe
+    // to take here for three reasons: it happens at most once per kCounterMargin keepalives, so
+    // roughly monthly rather than per cycle; it rides on a cycle that is already transmitting,
+    // and a LoRa transmit burst is the largest current this node ever draws, so the marginal
+    // charge of one page write is small against a decision already made; and a supply that
+    // collapses mid-write cannot leave a plausible-looking wrong record, because LittleFS
+    // commits atomically and the RAM ceiling below advances only after the write returned.
+    if (!checkpoint_permitted && s_flash_write_gate != nullptr && !s_flash_write_gate()) {
         LOGLN(F("   session : skipping save — brownout hold, flash writes withheld"));
         return false;
     }
@@ -252,7 +272,7 @@ bool save()
 
     // Store a counter deliberately ahead of the live one. After a reset the node resumes
     // from this value, which is guaranteed to be higher than anything it actually sent.
-    s.uplink_counter += kCounterMargin;
+    s.uplink_counter += session::kCounterMargin;
 
     if (!write_file(s)) {
         LOGLN(F("   session : write failed"));
@@ -269,8 +289,24 @@ bool save()
     return true;
 }
 
+bool save()
+{
+    return write_session(false);
+}
+
+void permit_counter_checkpoint()
+{
+    s_checkpoint_permit = true;
+}
+
 bool counter_headroom_ok()
 {
+    // Consumed on every check, used or not. A permit that outlived the send it was granted for
+    // would sooner or later let an ordinary uplink write flash during a hold, which is the thing
+    // H3 exists to stop.
+    const bool permitted = s_checkpoint_permit;
+    s_checkpoint_permit  = false;
+
     // Nothing stored means a reset joins fresh and the network hands out a new address and
     // counter. There is no stored value to run past, so there is nothing to protect.
     if (!s_have_stored_session) {
@@ -295,7 +331,7 @@ bool counter_headroom_ok()
     // The wire has caught up with flash. save() is the only thing that moves the ceiling, and
     // it moves it only when the write landed — so this answers false exactly when the stored
     // value cannot be advanced, which during a brownout hold is the case issue #51 created.
-    if (save()) {
+    if (write_session(permitted)) {
         return true;
     }
 
@@ -330,6 +366,7 @@ namespace session {
 bool restore() { return false; }
 bool save() { return false; }
 bool counter_headroom_ok() { return true; }
+void permit_counter_checkpoint() {}
 void set_flash_write_gate(FlashWriteGateFn) {}
 void forget() {}
 } // namespace session

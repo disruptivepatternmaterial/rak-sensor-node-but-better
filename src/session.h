@@ -73,6 +73,33 @@ bool save();
 // Cheap: one MIB read, and a flash write roughly once a month at the default interval.
 bool counter_headroom_ok();
 
+// Authorizes exactly one counter checkpoint write on the next headroom check, even while the
+// brownout gate is withholding flash writes. Consumed by that check whether or not it needed it,
+// so it can never carry over to a later uplink.
+//
+// This exists because the reserve is finite and the hold that consumes it need not end. A hold
+// resting on a pack that has stopped answering is lifted only by a valid reading at or above the
+// resume threshold, and the keepalive uplink is the only thing that keeps the node reachable
+// meanwhile. Without this the reserve runs out after kCounterMargin keepalives and
+// counter_headroom_ok() refuses every uplink afterwards: the node goes mute, and being Class A it
+// is then also uncommandable, which is the state AGENTS.md says the node must never reach.
+//
+// Granted only for a keepalive the brownout gate itself armed — never for an ordinary uplink, and
+// never for a hold backed by a measured low voltage, where staying quiet is the correct answer
+// (#38). One write per kCounterMargin keepalives is roughly one a month at the default cadence,
+// which is the same write rate the healthy path already pays.
+//
+// CITE(spec): [CIT-LW-LINK] the frame counter rules that make a repeated value unacceptable, and
+//   Class A's rule that a downlink can only follow an uplink — the two together are why a node
+//   that stops transmitting to protect its counter can never be told to start again.
+// CITE(prior-art): [CIT-LITTLEFS-DESIGN] "All POSIX operations, such as remove and rename, are
+//   atomic, even in event of power-loss" — the property that makes this write safe to take on a
+//   sagging supply: it commits or it does not, and a half-written record cannot be read back as
+//   a valid one.
+// CITE(policy): docs/POWER_BUDGET.md — never let the pack, or the node, reach a state it cannot
+//   recover from by itself.
+void permit_counter_checkpoint();
+
 // Discards the stored session, so the next boot joins fresh. Used when the network has
 // clearly stopped honoring the session.
 void forget();

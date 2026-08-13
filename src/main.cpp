@@ -324,6 +324,15 @@ void loop()
             LOGF("   uplink  : proof of life — no sensor data for %lu cycle(s)\n",
                  (unsigned long)empty_cycles);
         }
+        if (keepalive) {
+            // The keepalive is the only route back to reachable, so it is also the one uplink
+            // allowed to advance the stored frame counter while the gate withholds flash writes.
+            // Without this the reserve empties after session::kCounterMargin keepalives and every
+            // later uplink is refused — a mute node, and being Class A therefore an uncommandable
+            // one, in exactly the hold that no action of its own can lift. See session.h.
+            session::permit_counter_checkpoint();
+        }
+
         if (radio.send(payload)) {
             if (keepalive) {
                 // Only once it is actually on the air. A failed send leaves the count where it
