@@ -123,6 +123,23 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The brownout hold no longer disables the provisioning handshake that is its only exit.**
+  Four unreadable pack cycles engage the hold with no voltage evidence at all, and
+  `Battery::ladder_allowed()` then skipped the fallback ladder for as long as the hold stood.
+  A pack that loses its latched pid answers as unprovisioned with empty records — which is an
+  unreadable cycle — so the hold engaged, the ladder that re-latches the pid was switched off,
+  and the valid reading that is the hold's only exit could never arrive. Observed on the bench
+  for fifteen consecutive cycles at 12.07 V: a healthy pack, a node locked out by its own gate.
+  In the woods there is no reflash to break that loop, and battery telemetry would have been
+  gone for good. The gate now consults `Brownout::engaged_without_evidence()`, which already
+  existed: a hold resting on a measured low voltage still suppresses the ladder, so the #39
+  power saving is intact, while a hold resting on nothing runs the handshake that can clear it.
+  The ladder stays bounded either way — after `kSilentCyclesBeforeProbeOnly` (3) unproductive
+  cycles the expensive phases run only once every `kFullLadderRetryCycles` (24 in the field
+  image, ~once a day at the hourly interval), so an absent pack cannot cost meaningful energy.
+  ([#61](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/61),
+  refs [#39](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/39))
+
 - **The stored frame counter can no longer fall behind what was transmitted**
   ([#51](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/51)).
   Two ways in, one outcome. `session::save()` advanced `s_saved_counter_ceiling` *before*

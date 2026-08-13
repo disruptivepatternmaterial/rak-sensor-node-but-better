@@ -1071,11 +1071,42 @@ bool Battery::ladder_allowed()
     // A node that has correctly stopped transmitting to save the pack must not then burn ~28 s
     // per cycle hunting for a pack that is not talking. Issue #39.
     //
+    // Only a hold resting on a *measured* low voltage earns that saving, though. A hold engaged
+    // purely because the pack could not be read is the #61 deadlock, and it closes on itself: a
+    // pack that has lost its latched pid answers as unprovisioned with empty records, which is
+    // not a valid reading, which engages the no-evidence hold, which switched off the
+    // provisioning ladder — and the ladder is the only thing that can re-latch the pid and so
+    // produce the valid reading that is the hold's only exit. Observed on the bench for fifteen
+    // consecutive cycles with the pack sitting at 12.07 V, so the pack was healthy and the
+    // firmware had locked itself out. In the field there is no reflash to break the loop.
+    //
+    // Running the ladder under a no-evidence hold does not give back what #39 bought. The hold
+    // still suppresses the ladder whenever the pack has actually reported a low voltage — that
+    // pack has said spending energy is wrong, and it is believed. And the silent-cycle bound
+    // below still applies on both paths, so a genuinely absent pack pays for the expensive
+    // phases at most once every kFullLadderRetryCycles cycles, not every cycle.
+    //
+    // CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3c,
+    //   firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c:398-474 —
+    //   the pack's pid is latched only by the master's provisioning reply (pid = slot index
+    //   + 1, :458). Nothing else re-latches a pack that has dropped back to announcing, which
+    //   is precisely why suppressing that handshake is what makes the state unrecoverable.
+    // CITE(policy): docs/POWER_BUDGET.md — never let the pack reach a state it cannot recover
+    //   from by itself. A permanent loss of battery telemetry on an unattended node is that.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — the brownout hold exists to protect the pack;
+    //   it is not licensed to end the deployment.
+    //
     // Null when nothing has wired the gate in, which is read as "not engaged": a missing gate
     // must never silently stop the battery from being read. See set_brownout().
-    if (m_brownout != nullptr && m_brownout->engaged()) {
-        LOGLN(F("   battery : brownout engaged — probe only, skipping the fallback ladder"));
+    if (m_brownout != nullptr && m_brownout->engaged() &&
+        !m_brownout->engaged_without_evidence()) {
+        LOGLN(F("   battery : brownout engaged on a measured low voltage — probe only, "
+                "skipping the fallback ladder"));
         return false;
+    }
+    if (m_brownout != nullptr && m_brownout->engaged_without_evidence()) {
+        LOGLN(F("   battery : brownout held with no voltage evidence — running the ladder "
+                "anyway, it is the only thing that can clear the hold"));
     }
 
     if (m_silent_cycles < kSilentCyclesBeforeProbeOnly) {

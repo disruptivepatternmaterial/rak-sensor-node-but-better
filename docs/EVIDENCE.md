@@ -74,6 +74,76 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 — #61 brownout/ladder deadlock: gate fix runs the ladder; pack re-latch still unproven
+
+- **Commit:** working tree on `f6a897d` + the #61 fix (committed as the SHA in the same change)
+  · **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`
+- **Measured:** (a) whether a brownout hold engaged with no voltage evidence still suppresses
+  `Battery::ladder_allowed()`, and (b) whether the shipped path regresses.
+- **Verdict:** **pass on the gate, inconclusive on the pack re-latch.** Stated separately on
+  purpose — the firmware lockout is gone, the pack-side recovery is not demonstrated.
+
+**Scratch build (never committed).** `src/main.cpp:253` was temporarily changed to
+`brownout.update(false, 0)` so every cycle counts as unreadable and the no-evidence hold
+engages through the production path. Flashed `env:battdiag`, `Device programmed.`, no
+`Target is not in DFU mode`. Reverted before the commit; `git diff --stat` afterwards showed
+only `CHANGELOG.md` and `src/sensors/battery.cpp`.
+
+The hold engaged exactly as designed, and the ladder then ran instead of being skipped:
+
+```
+   power   : pack silent for 4 cycles — holding transmissions, no voltage evidence (keepalive in 24 cycles)
+   battery : brownout held with no voltage evidence — running the ladder anyway, it is the only thing that can clear the hold
+   battery : 4 silent cycles — retrying the full ladder
+```
+
+Before this change that same state printed `brownout engaged — probe only, skipping the
+fallback ladder`, which is the deadlock #61 describes. The bound held too: the next cycle
+printed `5 silent cycles — probe only until cycle 7`, i.e. the expensive phases ran once and
+then stood down for `kFullLadderRetryCycles`.
+
+**The pack was genuinely unlatched during that capture — this was not a simulation of #61's
+precondition, it was the precondition.** The pack answered as unprovisioned and did not take
+the pid the master offered:
+
+```
+   battery : answered probe 0xFF (announced pid 0xFF) with pid 0x01
+   battery : answered 1 announcement(s) in 3036 ms — pack still reports pid 0xFF
+   battery : raw FF 7E 00 15 02 01 00 FF 0E 03 10 02 15 BA 00 00 16 B9 00 00 17 B8 00 18 67 00 00 30
+   battery : no data (all-zero records (pack not sampled), 28 bytes)
+```
+
+**So what is proven is the gate, not the cure.** The provisioning ladder now runs under a
+no-evidence hold — that is observed verbatim above, and it is the firmware defect #61 filed.
+Whether running it re-latches a pack sitting at `0xFF` is **not** shown: across four full
+ladder attempts the pack kept announcing `0xFF`. It recovered its latch across the reset that
+came with the next reflash, as it did on the two earlier occasions today. That is a
+**pack-side** behaviour and it needs its own investigation; do not read this entry as saying
+#61's field scenario is closed end to end.
+
+**Clean build, no regression.** `env:battdiag` rebuilt with the scratch forcing removed,
+flashed the same way, 130 s capture, cycles 2 through 9 — **8 of 8 cycles live**:
+
+```
+[cycle 2]
+   battery : 12.07 V  -0.01 A  89%  25.0 C
+...
+[cycle 9]
+   battery : 12.07 V  -0.01 A  89%  25.0 C
+```
+
+No brownout line anywhere in the clean capture, which is correct: the pack is answering, so
+no hold engages.
+
+**Also observed today, same bench, recorded here because it was measured and not written
+down:** `env:soak` and `env:battdiag` at `f6a897d` both boot into application mode (ioreg
+`idProduct 32809`, no `nRF UF2` MSC interface), and the pack read `12.07 V  -0.01 A  89%
+25.0 C` for 5 of 5 cycles at `b436aa9` and again for 5 of 5 at `f6a897d`. The earlier
+15-cycle episode of all-zero records with `source = 0xFF` is the observation that #61 was
+filed from; its root cause is the gate fixed above.
+
+**No soak hours were accumulated. Zero still exist.** Nothing in this entry is a soak.
+
 ### 2026-08-12 — H8 soak attempt FAILED to attach. Zero soak hours exist. Cause unestablished
 
 > **This entry replaces one titled "24 h bench soak started (H8)."** That title was wrong and
