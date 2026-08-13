@@ -8,6 +8,40 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.4.1] — 2026-08-12
+
+**A hardening pass. Nothing in it has run on hardware.** Ten defects fixed, every one of them
+reasoned from code and from the reference master and **compile-verified only** — `env:rak4631`,
+`env:soak` and `env:battdiag` each build `SUCCESS` on Heliotrope Ridge, and that is the entire
+extent of the verification ([`docs/EVIDENCE.md`](docs/EVIDENCE.md), 2026-08-12 night). The board
+was asleep with USB detached for the whole session; no image was flashed and no serial port was
+opened.
+
+PATCH per [`docs/RELEASE.md`](docs/RELEASE.md): all ten are bug fixes, hardening and timing
+corrections. No payload channel or type changed, so the TTN formatter needs no paired change, and
+no new capability was added.
+
+**This release is further from deployable than the last one, not closer.** Several of the fixes
+sit on the sleep, brownout and rejoin paths — precisely the paths a compiler cannot exercise — so
+the code is now *believed* correct in places where it was previously *known* wrong, and belief is
+not evidence. Each fix needs its own bench observation before it may be described as working.
+
+Status remains **`🚧 NOT YET DEPLOYED`**, and nothing here moves it:
+
+- **No H1–H8 gate closed.** H8 has not started — **zero soak hours exist.** The harness is built
+  (`scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), `env:soak`); the single attempt on
+  2026-08-12 never attached to the board.
+- **Sleep current is still unmeasured** and cannot be measured from the pack (10 mA LSB against a
+  ~1 mA question).
+- **The battery-current sign is still unresolved** —
+  [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md). `batt_current` remains
+  `BLOCKED` in [`payload/schema.yaml`](payload/schema.yaml), and as of this release
+  `scripts/preflight.sh` says so out loud instead of printing `PREFLIGHT OK` over it.
+
+Do not read this changelog as a readiness signal. It is a list of things that were wrong.
+
 ### Changed
 
 - **The one-wire receive timeouts carry their reasoning, and the SENDAT turnaround uses the

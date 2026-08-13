@@ -144,4 +144,4 @@
 // the C library uses F as a parameter name in its own macros. That mistake turned into a
 // wall of errors inside stdio.h and cmath that pointed nowhere near this file.
 
-#define FIRMWARE_VERSION "0.4.0"
+#define FIRMWARE_VERSION "0.4.1"
