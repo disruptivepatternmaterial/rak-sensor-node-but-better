@@ -134,10 +134,13 @@ class Battery {
                       const uint8_t *payload = nullptr, size_t payload_len = 0);
     void send_boot();
 
-    // One BOOT per power cycle, sent only when the pack has stopped answering its assigned
-    // id. BOOT is the reference's reboot verb; sending it on every re-latch attempt rebooted
-    // the pack mid-handshake. See boot_once() in battery.cpp and issue #62.
-    void boot_once();
+    // One BOOT per *failure episode*, sent only once the pack has been silent at its assigned
+    // id for kSilentCyclesBeforeBoot consecutive cycles, and never twice inside
+    // kBootMinSpacingCycles. BOOT is the reference's reboot verb; sending it on every re-latch
+    // attempt rebooted the pack mid-handshake. An episode ends at the next genuine reading,
+    // which re-arms the allowance. See boot_if_warranted() in battery.cpp and issues #62, #71
+    // and #75.
+    void boot_if_warranted();
 
     // Drain the RX queue into `buf`. With `stop_on_provision` the drain returns the instant a
     // complete, checksum-verified PROVISION request is buffered instead of waiting out the
@@ -220,8 +223,24 @@ class Battery {
     // of the deployment — issue #62.
     bool m_pack_latched = false;
 
-    // Whether this power cycle has already sent its one BOOT. See boot_once().
-    bool m_booted = false;
+    // Whether the current failure episode has already spent its one BOOT.
+    //
+    // Cleared by a genuine reading, because an answering pack ends the episode: a later failure
+    // is a new one and deserves its own nudge. It used to be per *power cycle*, which on the
+    // field image is months — so the first transient probe miss spent the deployment's only
+    // BOOT on a pack that was never in trouble (issue #75), and a pack that went mute later had
+    // no nudge left (issue #71). m_next_boot_cycle is the bound that keeps "per episode" from
+    // becoming "often". See boot_if_warranted().
+    bool m_boot_spent = false;
+
+    // Earliest cycle at which another BOOT may be sent, whatever the episode bookkeeping says.
+    //
+    // Deliberately *not* cleared by a reading. m_boot_spent alone would let a pack that
+    // alternates a short silence streak with one good reading draw a BOOT every few cycles, and
+    // a periodic reboot of a nearly-working pack is the failure #62 is about. This is the hard
+    // floor underneath the episode rule. Compared against m_cycles rather than millis() so it
+    // does not depend on the wall clock surviving sleep.
+    uint32_t m_next_boot_cycle = 0;
 
     // Set once the pack has produced a genuine measurement, and used for exactly one thing:
     // announcing that fact to the console a single time instead of on every wake for months.

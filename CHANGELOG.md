@@ -8,6 +8,33 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A transient probe miss no longer spends the pack's only BOOT, and a genuine failure now gets
+  one again.** `boot_once()` fired on the first cycle whose direct probe went unanswered and then
+  latched for the rest of the *power cycle*, which on the field image is months. On `65f8615` a
+  healthy pack — live in all twenty cycles of a `battdiag` capture — missed exactly one probe and
+  answered the push listen in that same cycle with `11.92 V`, and that one miss both sent the
+  vendor protocol's reboot verb to a working pack and consumed the deployment's only nudge
+  ([#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75)). The
+  mirror-image residual was that a pack going mute weeks later had nothing left to nudge it with
+  ([#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71)).
+  Renamed `boot_if_warranted()`, and now three gates must agree: three consecutive cycles with no
+  reading of any kind (`kSilentCyclesBeforeBoot`), one BOOT per *failure episode* rather than per
+  power cycle — re-armed by the next genuine reading — and a hard rate floor of one BOOT per 96
+  cycles (`kBootMinSpacingCycles`, 24 h at the 900 s interval) that no reading clears. Worst case
+  at 900 s: a pack answering normally sends zero BOOTs ever; a pack absent since power-on sends
+  exactly one, ~45 min in; a pack flapping three-silent-then-one-reading is capped at one per
+  24 h. The one-shot behavior from `342d994` that this replaces was there for
+  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) — that
+  reasoning is kept, not undone: BOOT is still never sent to a pack that is answering, and is now
+  rate-limited on top. Both thresholds are **chosen engineering margins sourced to the 20-cycle
+  bench capture**, not specified values — nothing in the vendor protocol says how many missed
+  probes mean a wedged pack.
+  **Unflashed and unobserved:** compile-verified only, on a board that must not be touched while
+  a soak runs. The check that would prove it is a `battdiag` capture in which a transient miss
+  produces *no* BOOT, plus one in which sustained silence produces exactly one BOOT per episode.
+
 ## [0.4.2] — 2026-08-13
 
 **Release candidate, not a deployment.** This tag exists so a soaking board can be traced to an

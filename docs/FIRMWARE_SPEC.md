@@ -90,6 +90,17 @@ below is retained only so a future 4-pin harness does not have to rediscover it.
 | 0x6002 | SoC | ×1 % |
 | 0x6009 | Batt T | ×1 °C |
 
+**Recovery when the pack stops answering its latched id.** The expensive half of the ladder (the
+5 s announcement window, the 20 s push listen) is paid for while the failure is new and then
+rate-limited, and the vendor protocol's `BOOT` — which is a *reboot* verb, not a re-latch verb —
+is sent at most once per failure episode: only after three consecutive cycles with no reading of
+any kind, re-armed by the next genuine reading rather than by an MCU reset, and never twice
+inside 96 cycles (24 h at 900 s). A pack that is answering is never rebooted, and a single missed
+probe is not treated as silence. Both thresholds are chosen engineering margins sourced to bench
+observation, not specified values.
+[CITE(bench): one transient probe miss in 20 live cycles, `65f8615`](EVIDENCE.md)
+[CITE(policy): never let the pack reach a state it cannot recover from by itself](POWER_BUDGET.md)
+
 **Power:** P+/P− from 4-pin or 5-pin → **12 V→5 V buck** → WisBlock 5 V. Never feed P+ to `BAT`.
 
 **Bus conflict note — HISTORICAL, resolved.** An earlier draft proposed sharing one RAK5802

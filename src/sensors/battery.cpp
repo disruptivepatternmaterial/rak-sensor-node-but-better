@@ -464,6 +464,57 @@ constexpr uint16_t kUnsampledCyclesBeforeProbeOnly = 6;
 // CITE(spec): docs/FIRMWARE_SPEC.md §7 H7 — "BMS silent → no livelock". Recovery attempts
 //   are bounded, not abandoned; this is the bound.
 constexpr uint16_t kStalledCyclesBeforeProbeOnly = kUnsampledCyclesBeforeProbeOnly;
+
+// How many consecutive fully silent cycles — no reading of any kind, and the current cycle's
+// direct probe unanswered too — before the pack is judged mute enough to be worth a BOOT.
+//
+// Three is a chosen engineering margin, not a specified value: nothing in the vendor protocol
+// or the reference master says how many missed probes mean a wedged pack. It is set from the
+// only measurement available. On 65f8615 a healthy, latched pack missed exactly one probe in
+// twenty consecutive cycles and answered the push listen in that same cycle with a live
+// reading, so a threshold of one fires on a pack that is fine — which is issue #75. Two would
+// leave no margin at all above the observed miss rate; three tolerates a pair of adjacent
+// misses, and because m_silent_cycles resets on any reading (including the same-cycle push
+// listen that saved cycle 10 of that capture), reaching three means three whole cycles produced
+// no number at all.
+//
+// CITE(bench): docs/EVIDENCE.md 2026-08-13 — battdiag on 65f8615, 20 cycles, pack live in all
+//   20; cycle 10's probe went unanswered (sequence 09 -> 0C) and the push listen still returned
+//   11.92 V. One transient miss is normal traffic on this bus, not a mute pack.
+// CITE(policy): docs/POWER_BUDGET.md — never let the pack reach a state it cannot recover from
+//   by itself, and do not spend energy, or the reference's reboot verb, on a pack that is
+//   answering.
+constexpr uint16_t kSilentCyclesBeforeBoot = 3;
+
+// The BOOT must stay reachable inside the streak the ladder is still willing to pay for,
+// otherwise it could only ever fire on a kFullLadderRetryCycles retry cycle.
+static_assert(kSilentCyclesBeforeBoot <= kSilentCyclesBeforeProbeOnly,
+              "BOOT would be unreachable until a full-ladder retry cycle");
+
+#if FEATURE_BATTERY_FAST
+// A bench build must be able to observe a second episode inside a ~20-cycle battdiag capture,
+// which is the whole point of that build. Four cycles is ~40 s there.
+constexpr uint32_t kBootMinSpacingCycles = 4;
+#else
+// Hard floor on the BOOT rate, independent of how the failures are shaped.
+//
+// 96 cycles is 24 h at the 900 s field interval and 48 h at 1800 s — the error is deliberately
+// on the long side, because BOOT is a reboot request and the cost of sending it too often
+// (restarting a pack mid-handshake, issue #62) is worse than the cost of sending it too late
+// (one more cycle of null battery telemetry, which the payload encodes honestly as null).
+// Chosen margin, not a specified value: issue #71 proposed "bounded to, say, one per 24 h" as
+// the shape of an acceptable nudge, and this is that number expressed in cycles so it survives
+// sleep without the wall clock.
+//
+// CITE(spec): docs/FIRMWARE_SPEC.md §7 H7 — "BMS silent → no livelock". Recovery attempts stay
+//   bounded rather than abandoned; this is the bound on the most invasive one.
+// CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
+//   rak-4-5-wire/firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c
+//   :906 api_init() sends exactly one BOOT for the life of the master. Any repetition at all is
+//   already a deviation from the reference, so it is rate-limited rather than merely counted.
+constexpr uint32_t kBootMinSpacingCycles = 96;
+#endif
+
 #if FEATURE_BATTERY_FAST
 // A bench build must not lock itself out of the path it is there to exercise.
 constexpr uint32_t kFullLadderRetryCycles = 2;
@@ -654,7 +705,8 @@ void Battery::send_boot()
     send_frame(kBroadcastId, kHubTypeProvision, kPldBoot);
 }
 
-// BOOT, at most once per power cycle, and only when the pack has stopped answering its id.
+// BOOT, at most once per failure episode, and only once the pack has been silent for several
+// consecutive cycles.
 //
 // The reference treats BOOT as a reboot verb and nothing else: api_init() sends one at
 // startup, and the only other sender is api_set_provision(), which the API table exports as
@@ -664,9 +716,30 @@ void Battery::send_boot()
 // restarting the pack it was trying to latch, and the id never stuck. That is the best
 // code-level explanation available for issue #62.
 //
-// Kept as a one-shot rather than deleted: a pack that has gone silent altogether has no other
-// nudge available, and one reboot at the point the id first fails is what the reference's own
-// startup does. Never sent while the pack is answering — a working pack is not rebooted.
+// Kept, rather than deleted: a pack that has gone silent altogether has no other nudge
+// available, and one reboot is what the reference's own startup does. Never sent while the pack
+// is answering — a working pack is not rebooted.
+//
+// The allowance was previously one BOOT per *power cycle*, which was wrong in both directions
+// and both were observed. Too eager: it fired on the first cycle whose direct probe went
+// unanswered, and on 65f8615 one transient miss out of twenty cycles did exactly that on a pack
+// that returned a live reading in the same cycle (issue #75). Too scarce: on the field image a
+// power cycle lasts months, so that single miss also consumed the only nudge available for a
+// genuine failure weeks later (issue #71). Three gates now stand between a missed probe and a
+// reboot request, and all three must agree:
+//
+//   1. sustained silence — kSilentCyclesBeforeBoot consecutive cycles with no reading of any
+//      kind, so one miss, or a miss rescued by the same cycle's push listen, does not qualify;
+//   2. one per episode — m_boot_spent, cleared by the next genuine reading, so recovery re-arms
+//      the nudge instead of a reset being the only thing that can;
+//   3. a rate floor — m_next_boot_cycle, never cleared by a reading, so no pattern of failures
+//      can turn this into a periodic reboot of a nearly-working pack.
+//
+// Worst case at the 900 s field interval: a pack answering normally sends zero BOOTs ever,
+// because the streak never reaches three. A pack absent since power-on sends exactly one, about
+// 45 min in, and then none for the rest of the power cycle. A pathological pack that flaps —
+// three silent cycles, one reading, repeat — is capped by gate 3 at one BOOT per 96 cycles,
+// which is one per 24 h.
 //
 // CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @ efc0e3c,
 //   rak-4-5-wire/firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c
@@ -679,13 +752,37 @@ void Battery::send_boot()
 // CITE(bench): docs/EVIDENCE.md 2026-08-12 — battdiag on b436aa9 held pid 0x01 across 20
 //   consecutive cycles with no provId FF anywhere in the capture, so the handshake completes
 //   when nothing interrupts it.
-void Battery::boot_once()
+void Battery::boot_if_warranted()
 {
-    if (m_booted) {
+    // m_silent_cycles counts the cycles *before* this one that produced no reading at all, and
+    // the caller only reaches here when this cycle's direct probe also went unanswered — so the
+    // run of silence is one longer than the counter. Saturates rather than wrapping.
+    const uint16_t silent_now =
+        (m_silent_cycles < UINT16_MAX) ? (uint16_t)(m_silent_cycles + 1) : m_silent_cycles;
+
+    if (silent_now < kSilentCyclesBeforeBoot) {
+        LOGF("   battery : silent at its id %u of %u consecutive cycles — no BOOT yet\n",
+             (unsigned)silent_now, (unsigned)kSilentCyclesBeforeBoot);
         return;
     }
-    m_booted = true;
-    LOGLN(F("   battery : pack silent at its id — one BOOT this power cycle"));
+    if (m_boot_spent) {
+        LOGF("   battery : silent at its id %u consecutive cycles — BOOT already spent this "
+             "failure episode\n",
+             (unsigned)silent_now);
+        return;
+    }
+    if (m_cycles < m_next_boot_cycle) {
+        LOGF("   battery : silent at its id %u consecutive cycles — BOOT withheld until cycle "
+             "%lu\n",
+             (unsigned)silent_now, (unsigned long)m_next_boot_cycle);
+        return;
+    }
+
+    m_boot_spent      = true;
+    m_next_boot_cycle = m_cycles + kBootMinSpacingCycles;
+    LOGF("   battery : silent at its id %u consecutive cycles — one BOOT for this failure "
+         "episode, next no sooner than cycle %lu\n",
+         (unsigned)silent_now, (unsigned long)m_next_boot_cycle);
     send_boot();
     delay(kTurnaroundMs); // let the probe turn the line around
 }
@@ -934,9 +1031,9 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 //
 // Structure:
 //   * No BOOT, at all. It used to be sent at the top of every window, which meant this
-//     driver rebooted the pack on every attempt to re-latch it — see boot_once() and issue
-//     #62. BOOT is the reference's reboot verb, not its re-latch verb. The pack announces
-//     itself unprompted anyway, so this window has nothing to prompt for.
+//     driver rebooted the pack on every attempt to re-latch it — see boot_if_warranted()
+//     and issue #62. BOOT is the reference's reboot verb, not its re-latch verb. The pack
+//     announces itself unprompted anyway, so this window has nothing to prompt for.
 //   * Then drain-and-answer until the deadline, with the same early-exit drain and the same
 //     mutate-and-transmit response as before. Nothing about the frame changes.
 //   * Break the moment the pack proves it latched (see below), because at that point the
@@ -1280,9 +1377,9 @@ BatteryReading Battery::read()
     // reported placeholder zeros.
     //
     // Nothing is transmitted to open this phase. The BOOT that used to lead it is now a
-    // once-per-power-cycle nudge sent by the caller (boot_once()), because BOOT is the
-    // reference's reboot verb and sending it on every attempt restarted the pack being
-    // latched — issue #62.
+    // once-per-failure-episode nudge sent by the caller (boot_if_warranted()), and only after
+    // sustained silence, because BOOT is the reference's reboot verb and sending it on every
+    // attempt restarted the pack being latched — issue #62.
     //
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c — the master
     //   has no provision *poll*: protocol_list[SNHUB_TYPE_PROVISION] defines only `.req`
@@ -1369,10 +1466,12 @@ BatteryReading Battery::read()
                 // wrong in the one case that happens on every boot. m_pack_latched starts
                 // false after every MCU reset, and the pack needs a couple of cycles to
                 // sample before it fills the record, so the routine post-boot Unsampled reply
-                // from 0x01 fell through to the !answered_direct branch below and called
-                // boot_once() — rebooting a pack that had just answered correctly, and
-                // spending the single BOOT this power cycle is allowed before any genuine
-                // failure could ask for it. Issues #62 and #71.
+                // from 0x01 fell through to the !answered_direct branch below and called the
+                // BOOT path — rebooting a pack that had just answered correctly, and spending
+                // the episode's BOOT before any genuine failure could ask for it. Issues #62
+                // and #71. That branch is now gated on sustained silence as well
+                // (boot_if_warranted()), so this fix and that gate are belt and braces on the
+                // same mistake rather than duplicates of it.
                 //
                 // Nothing is lost by trusting it. The announcement window this skips exists
                 // to re-latch a pack that has dropped back to 0xFF, and a pack that has
@@ -1411,7 +1510,7 @@ BatteryReading Battery::read()
     // remaining energy on hunting for the pack.
     bool provisioned = answered_direct;
     if (!answered_direct && full_ladder) {
-        boot_once();
+        boot_if_warranted();
         provisioned = acquire_pid(rx, sizeof(rx));
         if (!provisioned) {
             // "Not provisioned" now covers both silence and an answered announcement that
@@ -1575,6 +1674,13 @@ BatteryReading Battery::read()
         m_unsampled_cycles = 0;
         m_stalled_cycles   = 0;
         m_next_full_cycle  = 0;
+
+        // A reading ends the failure episode, so the BOOT allowance is re-armed. The rate floor
+        // in m_next_boot_cycle is deliberately left standing: recovery re-arms *which* failure
+        // may be nudged, never how often. Without this a pack that went mute after months of
+        // working had no nudge left, because the allowance had been spent at power-on — issues
+        // #71 and #75.
+        m_boot_spent = false;
     } else {
         // Each streak counter resets when the *other* kind of failure occurs. They used to
         // run independently and only ever reset on a reading, so the console called six
