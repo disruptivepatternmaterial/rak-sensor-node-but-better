@@ -311,9 +311,19 @@ Do not read this changelog as a readiness signal. It is a list of things that we
   about arriving at the exact moment the node has already given up three times. The sub-band
   is now re-selected immediately after the reset, and a refusal is logged.
 
+  **Provenance note (added later).** This entry's commit, `d90963f`, contains no code — only
+  this CHANGELOG text. The 18-line `src/radio.cpp` hunk it describes is inside `01a09d9`, whose
+  own message is entirely about the boot counter. So reverting `d90963f` is a silent no-op,
+  reverting `01a09d9` silently removes this sub-band re-selection as well as the boot-counter
+  change, and `git bisect` on a channel-mask symptom lands on a commit about flash writes.
+  History is not being rewritten to fix this; read the two commits together.
+
 ### Fixed
 
-- **The boot counter no longer writes flash before the brownout gate exists.** `Config::begin()`
+- **The boot counter no longer writes flash before the brownout gate exists.** *(Provenance note,
+  added later: this entry's commit `01a09d9` also carries the 18-line `src/radio.cpp` sub-band
+  re-selection hunk described one entry above, whose own commit `d90963f` contains only CHANGELOG
+  text. Reverting `01a09d9` removes both changes. See the note above.)* `Config::begin()`
   incremented the count and, every eighth boot, called `save()` — an erase and rewrite of the
   configuration page. It runs at `main.cpp` setup before `brownout.begin()`, so nothing could
   refuse it, and the count comes due exactly when the node is resetting in a loop, which is when
