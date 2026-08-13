@@ -22,7 +22,10 @@
 #   === SOAK TTN START ===     run header, carries the firmware version and banner SHA
 #   === SOAK HEARTBEAT n ===   fixed interval, whether or not anything happened
 #   SOAK UPLINK                frame counter advanced
-#   SOAK ANOMALY               silence past the expected cadence, or a counter that went backwards
+#   SOAK ANOMALY               silence past the expected cadence, a counter that went backwards,
+#                              or a counter step this harness cannot account for as transmissions
+#   SOAK NOTE  counter-step    a step of 2..kCounterMargin, which a reset explains without any
+#                              extra transmission -- see the reserve discussion below
 #   SOAK WARN                  the TTN query failed -- says nothing about the node
 #   === SOAK TTN DONE ===      the run reached its full duration
 
@@ -34,6 +37,18 @@ POLL="${SOAK_POLL:-120}"
 HEARTBEAT="${SOAK_HEARTBEAT:-300}"
 EXPECT="${SOAK_EXPECT:-900}"          # the node's uplink cadence, seconds
 SILENT_LIMIT=$(( EXPECT * 3 ))        # three missed cycles before crying wolf
+
+# A counter step is not an uplink count. session.cpp:278 stores uplink_counter + kCounterMargin,
+# so a reset resumes past anything that was actually sent and the counter arrives up to
+# kCounterMargin higher having transmitted nothing. Observed 2026-08-13: steps of 23, 26 and 31-32
+# every time the board was reset, each with a sub-cadence gap, and TTN's storage integration held
+# exactly one message per step -- frames that were never sent cannot be stored. So a step in
+# 2..MARGIN is reported as a reset, a step above MARGIN is the one shape this harness cannot
+# explain away and is the airtime question worth waking somebody for.
+#   CITE(prior-art): src/session.h:41 kCounterMargin = 32 -- the reserve size this mirrors
+#   CITE(policy): CIT-TTN-FUP, docs/CITATIONS.md -- 30 s uplink airtime per node per 24 h is what
+#                 a genuine burst would breach, which is why the two cases must not read alike
+MARGIN="${SOAK_COUNTER_MARGIN:-32}"
 
 dur="${1:-24h}"
 label="${2:-bench}"
@@ -80,7 +95,7 @@ ev "    expectation: one uplink every ${EXPECT}s; silence past ${SILENT_LIMIT}s 
 BASE=$(fcnt); LAST="${BASE:-}"
 ev "    baseline   : last_f_cnt_up=${BASE:-QUERY FAILED}"
 LAST_MOVE=$START
-BEAT=0; UPLINKS=0; ANOM=0; FAILS=0
+BEAT=0; UPLINKS=0; ANOM=0; FAILS=0; RESETS=0
 
 while :; do
   now=$(date +%s); elapsed=$(( now - START ))
@@ -92,8 +107,18 @@ while :; do
     ev "SOAK WARN ttn query failed (${FAILS} so far) -- no statement about the node"
   else
     if [[ -n "$LAST" && "$c" -gt "$LAST" ]]; then
+      d=$(( c - LAST )); gap=$(( now - LAST_MOVE ))
       UPLINKS=$(( UPLINKS + 1 ))
-      ev "SOAK UPLINK f_cnt=$c delta=$(( c - LAST )) gap=$(( now - LAST_MOVE ))s total=$UPLINKS"
+      ev "SOAK UPLINK f_cnt=$c delta=$d gap=${gap}s total=$UPLINKS"
+      if [[ "$d" -gt "$MARGIN" ]]; then
+        ANOM=$(( ANOM + 1 ))
+        ev "SOAK ANOMALY counter-burst +$d in ${gap}s exceeds the ${MARGIN}-frame reset reserve --"
+        ev "    a reset cannot account for this; suspect transmissions and check the airtime budget"
+      elif [[ "$d" -gt 1 ]]; then
+        RESETS=$(( RESETS + 1 ))
+        ev "SOAK NOTE  counter-step +$d in ${gap}s within the ${MARGIN}-frame reset reserve --"
+        ev "    one uplink after a reset, not $d transmissions (session.cpp:278); resets=$RESETS"
+      fi
       LAST_MOVE=$now
     elif [[ -n "$LAST" && "$c" -lt "$LAST" ]]; then
       ANOM=$(( ANOM + 1 ))
@@ -111,12 +136,12 @@ while :; do
 
   if [[ $(( elapsed / HEARTBEAT )) -gt "$BEAT" ]]; then
     BEAT=$(( elapsed / HEARTBEAT ))
-    ev "=== SOAK HEARTBEAT $BEAT === elapsed=${elapsed}s of ${SECS}s uplinks=$UPLINKS f_cnt=${LAST:-none} anomalies=$ANOM query_failures=$FAILS"
+    ev "=== SOAK HEARTBEAT $BEAT === elapsed=${elapsed}s of ${SECS}s uplinks=$UPLINKS f_cnt=${LAST:-none} resets=$RESETS anomalies=$ANOM query_failures=$FAILS"
   fi
   sleep "$POLL"
 done
 
-ev "=== SOAK TTN DONE === elapsed=$(( $(date +%s) - START ))s uplinks=$UPLINKS anomalies=$ANOM query_failures=$FAILS f_cnt=${BASE:-?}->${LAST:-?}"
+ev "=== SOAK TTN DONE === elapsed=$(( $(date +%s) - START ))s uplinks=$UPLINKS resets=$RESETS anomalies=$ANOM query_failures=$FAILS f_cnt=${BASE:-?}->${LAST:-?}"
 {
   echo "### Soak (network side) — $label"
   echo
@@ -125,8 +150,13 @@ ev "=== SOAK TTN DONE === elapsed=$(( $(date +%s) - START ))s uplinks=$UPLINKS a
   echo "- Image: firmware \`${BANNER_FW:-UNKNOWN}\`, banner commit \`${BANNER_SHA:-NOT OBSERVED}\`."
   echo "- Duration: $(( $(date +%s) - START )) s of ${SECS} s requested."
   echo "- Uplinks observed: $UPLINKS · frame counter ${BASE:-?} → ${LAST:-?}"
+  echo "- Counter steps explained by a reset (≤ ${MARGIN}, the stored reserve): $RESETS"
   echo "- Anomalies: $ANOM · TTN query failures: $FAILS"
   echo
   echo "This counts uplinks. It does not measure sleep current, and it cannot see a"
   echo "console line, so it proves delivery and cadence and nothing further."
+  echo
+  echo "A counter step is not an uplink count: \`session.cpp:278\` stores the counter plus"
+  echo "\`kCounterMargin\` = ${MARGIN}, so a reset arrives up to ${MARGIN} frames higher having sent"
+  echo "nothing. Steps in that range are counted as resets above, not as airtime."
 } > "$OUT/summary.md"
