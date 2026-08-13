@@ -34,6 +34,23 @@ any image in this repository has identified its own commit on hardware.
   between, so the node woke from sleep instead of resetting through it. Still two cycles, not a
   soak — [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records zero soak hours and that is unchanged.
 
+### Fixed
+
+- **A routine empty battery reply no longer reboots a healthy pack, or burns the one BOOT this
+  power cycle is allowed.** Phase 0 required `Ok || m_pack_latched` to call the direct probe
+  answered, and `m_pack_latched` is false after every MCU reset — so the `Unsampled` reply the
+  pack sends for roughly its first two cycles while it samples was treated as no answer at all.
+  That path calls `boot_once()`, which prints `pack silent at its id — one BOOT this power
+  cycle` and sends the reference's reboot verb to a pack that had just answered a matched SENDAT
+  from `0x01`, and spends the single allowed BOOT before any real failure can ask for it. A
+  matched response settles the address whether or not the record carries a measurement: an
+  unprovisioned pack answers `0xFF` and returns zero bytes from `0x01`. The push listen, which
+  is where the placeholder record actually gets resolved, is gated on `m_last != Ok` and is
+  unaffected. Interaction between `342d994` and `955fc01`; bears on
+  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) and
+  [#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71).
+  **Compile-verified only — unflashed and unobserved.**
+
 ### Added
 
 - **The boot banner names the commit it was built from** — `commit   : a7381e7`, with `-dirty`

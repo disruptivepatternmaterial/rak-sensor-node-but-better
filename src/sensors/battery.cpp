@@ -1330,18 +1330,47 @@ BatteryReading Battery::read()
                 n      = got;
                 out    = candidate;
 
-                // An Unsampled reply proves the address and nothing else. Treating it as
-                // "provisioned" skipped the announcement window, and the announcement window
-                // is the only thing that can turn a pack reporting 0xFF back into a latched
-                // one — so a pack answering the template at 0x01 was never re-latched and
-                // never sampled. Skip provisioning only when this cycle carried a real
-                // reading, or when the pack has itself confirmed a pid other than 0xFF.
-                answered_direct = (r == BatteryResult::Ok) || m_pack_latched;
-                if (answered_direct) {
+                // A matched reply settles the address, and that is the only question this
+                // phase asks. Ok and Unsampled differ in whether the record carries a
+                // measurement, not in whether the pack holds kProbeId — both are SENDAT
+                // frames flagged RSP, carrying this cycle's sequence number, sent back from
+                // the destination we addressed.
+                //
+                // The previous revision required `Ok || m_pack_latched` here, and that was
+                // wrong in the one case that happens on every boot. m_pack_latched starts
+                // false after every MCU reset, and the pack needs a couple of cycles to
+                // sample before it fills the record, so the routine post-boot Unsampled reply
+                // from 0x01 fell through to the !answered_direct branch below and called
+                // boot_once() — rebooting a pack that had just answered correctly, and
+                // spending the single BOOT this power cycle is allowed before any genuine
+                // failure could ask for it. Issues #62 and #71.
+                //
+                // Nothing is lost by trusting it. The announcement window this skips exists
+                // to re-latch a pack that has dropped back to 0xFF, and a pack that has
+                // dropped back to 0xFF does not answer 0x01 at all — the bench sweep below
+                // measured exactly zero bytes from 0x01/0x02/0x03 on an unprovisioned pack.
+                // The push listen, which is where the reference reads every real value from,
+                // is gated on m_last != Ok rather than on this flag, so an empty record still
+                // gets the listen that resolves it.
+                //
+                // CITE(bench): docs/EVIDENCE.md — dest sweep on 3d3425d: an unprovisioned
+                //   pack returned 0 bytes for 0x01, 0x02 and 0x03 and answered only 0xFF. A
+                //   matched response *from* 0x01 is therefore proof the pid is latched.
+                // CITE(sibling): [CIT-RAK45WIRE] forest-weather-machines @
+                //   efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32,
+                //   rak-4-5-wire/firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c
+                //   :450-460 — the provisioning reply swaps dest/source and writes
+                //   `U8 pid = aid + 1` into provId (:458). Only that reply assigns a pid, so
+                //   a pack answering at 0x01 has already been through it.
+                // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp —
+                //   after ADD_PID the reference polls SENDAT at the known id and never
+                //   re-provisions; it does not reboot the pack when a poll comes back empty.
+                answered_direct = true;
+                if (r == BatteryResult::Ok) {
                     LOGLN(F("   battery : pack answered at 0x01 — skipping provisioning"));
                 } else {
                     LOGLN(F("   battery : pack answered at 0x01 with an empty record — "
-                            "running the ladder anyway"));
+                            "address confirmed, waiting on the push listen"));
                 }
             }
         }
