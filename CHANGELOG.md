@@ -8,7 +8,32 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
-_Nothing yet._
+**Unflashed and unobserved.** Compile-verified only; no image from this section has run on
+hardware.
+
+### Added
+
+- **The boot banner names the commit it was built from** — `commit   : a7381e7`, with `-dirty`
+  appended when the tree carried anything uncommitted, and `unknown` when there is no git
+  history to read. Injected at build time by `scripts/pio_git_rev.py`, a PlatformIO `pre:`
+  extra script that appends one `-D FIRMWARE_COMMIT="…"`; every environment carries it,
+  `native` included. `docs/EVIDENCE.md` cannot accept a result without a SHA, and until now the
+  firmware could not state one: the banner printed a version and a `__DATE__`/`__TIME__` stamp,
+  so two builds of `0.4.1` read identically on the console and a board already in the field
+  could not be matched to a commit at all. Today's `stage3` entry had to record its SHA as
+  *inferred* from a build timestamp; the next one will not.
+  Costs nothing when `FEATURE_CONSOLE=0` — the `LOGF` macro discards its arguments without
+  expanding them, so the string never reaches the image — and touches neither the sleep nor the
+  USB path, so the field image's power behaviour is unchanged (rule 50,
+  [ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)).
+  Deliberately **not** in the uplink: that is a payload contract change needing a paired TTN
+  formatter change (rule 60), and `batt_current` already blocks the payload freeze.
+
+### Documentation
+
+- [`docs/EVIDENCE.md`](docs/EVIDENCE.md) states how to obtain the SHA from a running board now
+  that the banner carries it, and what to do with an older capture whose banner predates the
+  change: record the build timestamp and mark the SHA **inferred**, never assert it.
 
 ## [0.4.1] — 2026-08-12
 

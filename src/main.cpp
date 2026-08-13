@@ -120,6 +120,7 @@ void print_banner()
     LOGLN();
     LOGLN(F("=== rak-sensor-node ==="));
     LOGF("firmware : %s\n", FIRMWARE_VERSION);
+    LOGF("commit   : %s\n", FIRMWARE_COMMIT);
     LOGF("built    : %s %s\n", __DATE__, __TIME__);
     LOGF("features : rk900=%d battery=%d radio=%d sleep=%d wdt=%d\n", FEATURE_RK900,
          FEATURE_BATTERY, FEATURE_RADIO, FEATURE_SLEEP, FEATURE_WATCHDOG);

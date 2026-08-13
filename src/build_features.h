@@ -145,3 +145,19 @@
 // wall of errors inside stdio.h and cmath that pointed nowhere near this file.
 
 #define FIRMWARE_VERSION "0.4.1"
+
+// The commit this image was built from, injected by scripts/pio_git_rev.py -- a platformio.ini
+// `pre:` extra script -- as -D FIRMWARE_COMMIT="a7381e7", with `-dirty` appended when the tree
+// carried anything uncommitted. Two builds of the same FIRMWARE_VERSION are otherwise
+// indistinguishable on the console, and docs/EVIDENCE.md cannot accept a result without a SHA.
+//
+// The fallback keeps a build with no git information compiling -- a tarball export, a checkout
+// without history, an off-target compile of this header on its own -- and makes it say so. A
+// banner that asserts the wrong SHA is worse than one that admits it does not know.
+//
+// Costs nothing when the console is compiled out: with FEATURE_CONSOLE=0 the LOGF macro above
+// discards its arguments without expanding them, so the literal is never referenced and never
+// reaches the image.
+#ifndef FIRMWARE_COMMIT
+#define FIRMWARE_COMMIT "unknown"
+#endif
