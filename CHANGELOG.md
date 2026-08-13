@@ -8,8 +8,30 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
-**Unflashed and unobserved.** Compile-verified only; no image from this section has run on
-hardware.
+**Now partly hardware-verified.** `d568574` was flashed to the board as `env:soak` — the field
+image — on 2026-08-13 and its boot banner read back `commit   : d568574`, which is the first time
+any image in this repository has identified its own commit on hardware.
+
+### Verified on hardware
+
+- **The downlink command matrix passes 8 of 8 on the physical node.** `scripts/downlink_matrix.sh`
+  drove valid set-interval and request-status, both malformed-length rejections, an unknown opcode,
+  a valid command on the wrong FPort, and two commands queued at once, then checked the node had
+  not reset. Every case matched a console line emitted from inside `Radio::take_downlink()`, so
+  **`take_downlink()` is observed on hardware for the first time** — the acceptance criterion that
+  kept [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)
+  open. The applied interval is visible changing from 1800 s to 900 s and persisting across a
+  reflash and power cycle. Ran on a `stage3` bench image with `FEATURE_SLEEP=0`, so this is
+  evidence about the shared downlink path and **not** about the sleep path. Raw log, per-case
+  console quotes and the caveats are in
+  [`docs/EVIDENCE.md`](docs/EVIDENCE.md). The length-checking fixes shipped in `0.4.1` on compile
+  evidence alone ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63),
+  [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)) are
+  now confirmed on hardware.
+- **The field image reaches sleep.** One cycle of `env:soak` at `d568574`: both sensors read, an
+  uplink went out, and the cycle ended `sleep   : 900 s` rather than
+  `wait    : N s (sleep disabled)`. Still one cycle, not a soak —
+  [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records zero soak hours and that is unchanged.
 
 ### Added
 

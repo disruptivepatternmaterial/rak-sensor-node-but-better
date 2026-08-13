@@ -2289,12 +2289,140 @@ on it. No background processes were left running.
 - **Notes and what this is *not*:**
   - **Not a soak.** `FEATURE_SLEEP=0`, so the sleep path — the whole point of H8 — is never
     entered. Zero soak hours still exist.
-  - **Not proof of [#62].** The pack was already latched at `0x01` for every cycle, so the
+  - **Not proof of [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62).** The pack was already latched at `0x01` for every cycle, so the
     re-latch path was never exercised. Two cycle markers are missing from the capture
     (`[cycle 2]`, and 14 uplink lines against 16 markers); the reader attached after boot, so
     absence here is a gap in the capture, not an observed failure. It is recorded as a gap.
   - **Nothing was flashed and nothing was reset.** The board was left running, the reader left
     attached.
+
+### 2026-08-13 — downlink command matrix: all eight cases PASS on hardware ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54))
+
+- **Commit on the board:** **inferred `f15a983`**, not asserted. The banner on this image predates
+  the commit stamp added in `033b584`, so it reports only `firmware : 0.4.1` and
+  `built    : Aug 12 2026 23:32:15`. `f15a983` (2026-08-12 21:16:45 -0700) is the newest commit
+  older than that build stamp, which is *consistent with* the banner and is not the same as
+  confirmed. Recorded per the inference convention `d568574` established.
+- **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`. Driver `scripts/downlink_matrix.sh` at
+  `a7381e7`, run unattended; log `/tmp/downlink_matrix.log`, console `/tmp/stage3_cap.txt`,
+  TTN event stream `/tmp/downlink_matrix_events.log`.
+- **Image:** `stage3` bench image — `features : rk900=1 battery=1 radio=1 sleep=0 wdt=1`. **The
+  sleep path was not exercised by this run.** The downlink handling code is shared with the field
+  image; the power path is not.
+- **Measured:** eight downlink cases pushed through TTN (`app=my-app-tobi`,
+  `dev=puma-concolor-001`) and matched against the console. Each case waited a full cycle for the
+  Class A RX window, so the run took 2 h 31 m (07:50:38 → 10:21:30).
+- **Observation:** every PASS rests on a console line emitted from inside
+  `Radio::take_downlink()` (`src/radio.cpp:441-498`) — so **`take_downlink()` itself is now
+  observed on hardware, on all five of its branches**, which is the [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54) acceptance criterion
+  that had never been seen before. Verbatim, in cycle order:
+
+  ```
+  [cycle 18]  case b — valid 0x01 set-interval to 900 s
+     radio   : sent 35 bytes on port 2
+     radio   : downlink — set interval 900 s
+     config  : interval now 900 s
+     wait    : 1800 s (sleep disabled)
+  [cycle 19]
+     wait    : 900 s (sleep disabled)
+  [cycle 20]  case a — valid 0x03 request-status
+     radio   : downlink — status requested
+  [cycle 21]  case c — wrong-length 0x01, 3 bytes (#64)
+     radio   : downlink — opcode 0x01 with wrong length 3, ignored
+  [cycle 22]  case d — wrong-length 0x03, 4 bytes (#63)
+     radio   : downlink — opcode 0x03 with wrong length 4, ignored
+  [cycle 23]  case e — unknown opcode 0x7F
+     radio   : downlink — unknown opcode 0x7F, ignored
+  [cycle 24]  case f — valid 0x03 on FPort 1 (wrong port)
+     radio   : ignoring 1 bytes on port 1
+  [cycle 25]  case g — first of two 0x03 queued together
+     radio   : downlink — status requested
+  [cycle 26]  case g — second of the pair, next cycle
+     radio   : downlink — status requested
+  ```
+
+- **Verdict:** PASS, 8 of 8, re-verified line by line against `/tmp/stage3_cap.txt` rather than
+  trusting the harness grep.
+  - **b** is the strongest single result: the applied interval is visible twice — `config  :
+    interval now 900 s` in cycle 18 and the `wait` line dropping 1800 s → 900 s in cycle 19.
+  - **c** discriminates exactly what [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64) was about: a known opcode with a bad length reports
+    *wrong length*, not *unknown opcode*.
+  - **f** shows the port filter running before any opcode parsing.
+  - **g** shows two queued commands drained one per cycle, not merged or dropped.
+  - **h** (harness self-assessment) holds up under inspection: cycle markers 18–26 are strictly
+    increasing, exactly one boot banner exists in the whole capture and it precedes cycle 1, and
+    the session was restored (`session : restored 0x260CE734, counter 2080`) rather than rejoined.
+    No reset occurred during the matrix.
+- **Notes and what this is *not*:**
+  - **Not proof of [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62).** The pack reported `pack answered at 0x01 — skipping provisioning` in
+    every matrix cycle, so the re-latch path was never entered. [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) stays open.
+  - **Not a soak, and not field-image power behaviour.** `FEATURE_SLEEP=0`. Zero soak hours still
+    exist.
+  - `[cycle 2]` is absent from the capture (the reader attached after boot). Outside the matrix
+    window, and a gap in the capture rather than an observed failure.
+  - Pack drift across the whole night-and-morning capture, raw and uninterpreted: 12.02 V / 87%
+    (cycle 1) → 11.94 V / 84% (cycle 26), on USB power with no charge source, reported current
+    `-0.01 A` throughout. −0.01 A is the 10 mA telemetry LSB, so it is a resolution floor and
+    **not** a current measurement. `kTxInhibitCentivolts` is 960 (9.60 V) and remains an
+    unmeasured inference ([#67](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/67)); nothing here was changed.
+
+### 2026-08-13 — field image (`env:soak`) flashed at `d568574`; the sleep path is reached
+
+- **Commit:** `d568574`, **asserted from the board itself** — the banner now carries it. This is
+  the first hardware confirmation of the `033b584` banner change and the first evidence entry that
+  did not have to infer a SHA.
+- **Host:** Heliotrope Ridge, `pio run -e soak -t upload --upload-port /dev/cu.usbmodem31201`.
+  `env:soak` is byte-identical to `env:rak4631` per [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md).
+- **Measured:** the DFU transfer and the first cycle of the field image.
+- **Observation:** the transfer was real, not a bare `[SUCCESS]` (#59) — eleven rows of `#` progress marks,
+  `Activating new firmware`, `Device programmed.`, and zero occurrences of
+  `Target is not in DFU mode`. Application mode confirmed by `ioreg`: `idProduct = 32809`
+  (0x8029), `USB Product Name = "WisCore RAK4631 Board"`, zero `nRF UF2` matches and zero
+  `bInterfaceClass = 8` interfaces. Boot capture verbatim:
+
+  ```
+  === rak-sensor-node ===
+  firmware : 0.4.1
+  commit   : d568574
+  built    : Aug 13 2026 10:28:41
+  features : rk900=1 battery=1 radio=1 sleep=1 wdt=1
+  interval : bench=0, bounds 900-86400 s, default 3600 s
+  deveui   : 42BB96EF76E200F1
+  appeui   : 0000000000000000
+  region   : US915 sub-band 2
+     config  : interval 900 s, boot #3
+     session : restored 0x260CE734, counter 2112
+
+  [cycle 1]
+     RK900   : raw 0x0000-0x0004 = 0000 0000 00FF 024B 2712
+     RK900   : wind 0.00 m/s @ 0 deg, 25.5 C, 58.7 %RH, 1000.2 hPa
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sampling confirmed — pack is reporting live values
+     battery : sendat FF 7E 00 15 02 01 00 01 01 03 10 02 15 BA AA 04 16 B9 FF FF 17 B8 54 18 67 F0 00 43
+     battery : 11.94 V  -0.01 A  84%  24.0 C
+     battery : raw v=1194 i=-1 soc=84 t=240 (t scale UNCONFIRMED — 230 means tenths, 23 means whole degrees)
+     session : saved 0x260CE734, resume at 2144
+     radio   : sent 35 bytes on port 2
+     sleep   : 900 s
+  ```
+
+- **Verdict:** PASS for what it covers. `features : … sleep=1` and the closing line reads
+  **`sleep   : 900 s`**, not `wait    : N s (sleep disabled)` — the sleep path is entered on the
+  field image, which is the state the node will be measured in. Both sensors read in the same
+  cycle and an uplink went out on the first cycle after flashing.
+- **Notes:**
+  - **The 900 s interval survived the flash and the power cycle.** It was set by case b's downlink
+    and came back as `config  : interval 900 s, boot #3` on a freshly flashed image — incidental
+    but real evidence for H5.
+  - **USB will disappear by design, and that is not a fault.** `Power::sleep()` calls
+    `TinyUSBDevice.detach()` before sleeping whenever no host has the CDC open and the 180 s boot
+    grace has expired (`src/power.cpp:182-205`, [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60), `23604cf`). During this capture a reader
+    *was* attached, so `console_in_use` was true, the `power   : USB kept attached …` line never
+    printed, and the port stayed up. Once the reader is released the port goes away at the next
+    sleep. Press RESET once to get a flashable window back.
+  - **Still not a soak.** One cycle is not 24 h. Zero soak hours exist.
+  - Sleep current remains unmeasured, and cannot be measured over USB (rule 50 trap 5) or from
+    pack telemetry, whose LSB is 10 mA.
 
 <!-- Template:
 
