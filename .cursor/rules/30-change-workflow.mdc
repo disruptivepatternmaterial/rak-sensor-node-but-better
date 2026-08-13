@@ -66,8 +66,9 @@ Docs ship **with** the code, never "later." If behavior, wiring, payload, or set
 changed, the matching file in `docs/` changes in the same commit. `README.md` status must
 reflect reality.
 
-Version per `docs/RELEASE.md` (SemVer; the firmware version is also emitted in the
-uplink). Add a `CHANGELOG.md` entry. Then commit, push, and open a PR with
+Version per `docs/RELEASE.md` (SemVer; the firmware version is emitted in the boot serial
+banner — carrying it in the uplink needs a paired TTN formatter change and is still open
+in `payload/schema.yaml`). Add a `CHANGELOG.md` entry. Then commit, push, and open a PR with
 `.github/PULL_REQUEST_TEMPLATE.md` filled in — including the citation list. Never push
 directly to `main` for a firmware behavior change.
 
