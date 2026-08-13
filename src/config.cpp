@@ -181,7 +181,7 @@ bool Config::save()
 
 bool Config::set_interval_seconds(uint32_t seconds)
 {
-    if (seconds < kIntervalMinSeconds || seconds > kIntervalMaxSeconds) {
+    if (!interval_in_range(seconds)) {
         LOGF("   config  : rejected interval %lu s (allowed %lu-%lu)\n",
              (unsigned long)seconds, (unsigned long)kIntervalMinSeconds,
              (unsigned long)kIntervalMaxSeconds);

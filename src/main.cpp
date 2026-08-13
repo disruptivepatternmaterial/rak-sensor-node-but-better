@@ -370,8 +370,7 @@ void loop()
                 if (cmd.set_interval) {
                     if (brownout.flash_write_allowed()) {
                         config.set_interval_seconds(cmd.interval_value);
-                    } else if (cmd.interval_value >= kIntervalMinSeconds &&
-                               cmd.interval_value <= kIntervalMaxSeconds) {
+                    } else if (Config::interval_in_range(cmd.interval_value)) {
                         // The gate refuses the flash write, not the command. Dropping it here
                         // was silent and unrecoverable: take_downlink() has already consumed
                         // the frame and the network has already drained its queue, so there is

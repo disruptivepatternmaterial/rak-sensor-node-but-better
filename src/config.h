@@ -160,6 +160,25 @@ class Config {
 
     uint32_t interval_seconds() const { return m_interval; }
 
+    // The one bounds test for a requested interval. Public and static because main.cpp has to
+    // make the same judgement on a path that never reaches set_interval_seconds(): a
+    // set-interval downlink taken during a brownout hold is applied in RAM and written to
+    // flash cycles later, so Config never sees the value at the moment it has to be accepted
+    // or refused. Two copies of a range check drift, and the copy that drifts is the one that
+    // lets an out-of-range cadence onto a node nobody can walk up to.
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §4 — allowed interval 900-86400 s inclusive; this
+    //   predicate is now the single implementation of that range.
+    // CITE(policy): [CIT-TTN-FUP] 30 s of uplink airtime per node per 24 h — the allowance the
+    //   lower bound defends, which makes a second drifting copy of the check a compliance
+    //   defect rather than a tidiness one.
+    // CITE(spec): [CIT-LW-LINK] Class A opens receive windows only after an uplink, so a
+    //   cadence accepted wrongly cannot be corrected by asking the node to change it.
+    static bool interval_in_range(uint32_t seconds)
+    {
+        return seconds >= kIntervalMinSeconds && seconds <= kIntervalMaxSeconds;
+    }
+
     // Validates, stores, and persists. Returns false for an out-of-range value, which is
     // then ignored entirely rather than clamped: a downlink asking for something
     // impossible is more likely a corrupted message than a real instruction.
