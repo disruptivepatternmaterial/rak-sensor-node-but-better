@@ -257,6 +257,14 @@ class Battery {
     // phases forever.
     uint16_t m_unsampled_cycles = 0;
 
+    // Every cycle since the last real reading that produced no reading, of either kind.
+    //
+    // The two counters above are streaks and each resets when the other kind of failure
+    // occurs, so neither bounds a pack that alternates between them. This one resets only on
+    // a genuine measurement and is what stops the ~28 s expensive phases running every cycle
+    // forever in that case. See kStalledCyclesBeforeProbeOnly in battery.cpp.
+    uint16_t m_stalled_cycles = 0;
+
     // Cycle count at which the full ladder is next allowed to run again, once the driver has
     // dropped back to probe-only. Compared against m_cycles rather than millis() so it does
     // not depend on the wall clock surviving sleep.

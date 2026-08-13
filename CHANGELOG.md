@@ -36,6 +36,20 @@ any image in this repository has identified its own commit on hardware.
 
 ### Fixed
 
+- **A second kind of battery failure no longer postpones an already-scheduled recovery
+  retry.** Both threshold branches assigned `m_next_full_cycle` unconditionally, so crossing
+  the second threshold moved a retry that was already pending: three silent cycles schedule
+  the full ladder for cycle 27, six empty records crossing at cycle 26 push it to cycle 50 —
+  nearly six more hours at the 900 s field interval in which the only path that can recover
+  the pack does not run. The deadline is now armed once and never moved, re-armed only after
+  it fires, and cleared by a real reading. The two streak counters also reset when the other
+  kind of failure occurs, so the console's "consecutive" is now true and the gate no longer
+  sums two streaks that were never concurrent; a new total-stalled counter carries the hard
+  power bound that the streaks alone cannot. The bound is unchanged in size: at most six
+  expensive cycles after the last good reading, then one every 24 cycles — six hours at
+  900 s. An absent pack costs exactly what it did before.
+  **Compile-verified only — unflashed and unobserved.**
+
 - **A routine empty battery reply no longer reboots a healthy pack, or burns the one BOOT this
   power cycle is allowed.** Phase 0 required `Ok || m_pack_latched` to call the direct probe
   answered, and `m_pack_latched` is false after every MCU reset — so the `Unsampled` reply the

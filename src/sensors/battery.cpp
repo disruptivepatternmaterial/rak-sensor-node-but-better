@@ -446,6 +446,24 @@ constexpr uint16_t kSilentCyclesBeforeProbeOnly = 3;
 //   budget item with no upside; the bound is what keeps a present-but-mute pack from costing
 //   ~25 s every cycle forever.
 constexpr uint16_t kUnsampledCyclesBeforeProbeOnly = 6;
+
+// The bound that holds when the two kinds of failure alternate.
+//
+// The two allowances above are *streaks*, and a streak resets when the other kind of failure
+// occurs — that is what makes the console's "consecutive" true. But it means a pack that
+// alternates silence and empty records holds both streaks at 1 forever, and with only those
+// two bounds it would run the ~28 s expensive phases every cycle for the life of the
+// deployment: exactly the cost issue #39 exists to stop. This counter never resets except on
+// a real reading.
+//
+// Deliberately the larger of the two allowances rather than a number of its own, so no mix of
+// failures can buy more full ladders than the most generous single kind already does.
+// CITE(policy): docs/POWER_BUDGET.md — the node runs unattended indefinitely on a
+//   solar-recharged pack; wake time that has repeatedly bought nothing is the budget item
+//   with no upside.
+// CITE(spec): docs/FIRMWARE_SPEC.md §7 H7 — "BMS silent → no livelock". Recovery attempts
+//   are bounded, not abandoned; this is the bound.
+constexpr uint16_t kStalledCyclesBeforeProbeOnly = kUnsampledCyclesBeforeProbeOnly;
 #if FEATURE_BATTERY_FAST
 // A bench build must not lock itself out of the path it is there to exercise.
 constexpr uint32_t kFullLadderRetryCycles = 2;
@@ -1199,21 +1217,32 @@ bool Battery::ladder_allowed()
     // Silence and a placeholder template are different evidence and get different allowances.
     // A pack that answers with an empty record is present and needs the push listen; a pack
     // that says nothing needs it far less, having already failed to say anything.
-    const uint32_t stalled   = (uint32_t)m_silent_cycles + (uint32_t)m_unsampled_cycles;
-    const uint32_t allowance = (m_last == BatteryResult::Unsampled)
+    // Two bounds, and deliberately not one sum.
+    //
+    // The allowance is a claim about a streak — "this kind of failure has repeatedly bought
+    // nothing" — so it is measured against the streak of the kind that actually happened.
+    // Adding the two counters together instead let a run of one kind spend the other kind's
+    // allowance, and let the total cross a threshold on a cycle where neither streak had.
+    //
+    // m_stalled_cycles is the hard bound underneath, because a streak alone is not one: a
+    // pack alternating silence and empty records keeps both streaks at 1 forever. See
+    // kStalledCyclesBeforeProbeOnly.
+    const uint16_t streak    = (m_last == BatteryResult::Unsampled) ? m_unsampled_cycles
+                                                                   : m_silent_cycles;
+    const uint16_t allowance = (m_last == BatteryResult::Unsampled)
                                    ? kUnsampledCyclesBeforeProbeOnly
                                    : kSilentCyclesBeforeProbeOnly;
-    if (stalled < allowance) {
+    if (streak < allowance && m_stalled_cycles < kStalledCyclesBeforeProbeOnly) {
         return true;
     }
     if (m_cycles >= m_next_full_cycle) {
-        LOGF("   battery : %lu stalled cycles — retrying the full ladder\n",
-             (unsigned long)stalled);
+        LOGF("   battery : %u stalled cycles — retrying the full ladder\n",
+             (unsigned)m_stalled_cycles);
         m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
         return true;
     }
-    LOGF("   battery : %lu stalled cycles — probe only until cycle %lu\n",
-         (unsigned long)stalled, (unsigned long)m_next_full_cycle);
+    LOGF("   battery : %u stalled cycles — probe only until cycle %lu\n",
+         (unsigned)m_stalled_cycles, (unsigned long)m_next_full_cycle);
     return false;
 }
 
@@ -1544,28 +1573,56 @@ BatteryReading Battery::read()
     if (m_last == BatteryResult::Ok) {
         m_silent_cycles    = 0;
         m_unsampled_cycles = 0;
+        m_stalled_cycles   = 0;
         m_next_full_cycle  = 0;
-    } else if (m_last == BatteryResult::Unsampled) {
-        // Counted separately, because it is not silence: the pack answered. It still counts
-        // towards the same bound, so a pack that answers templates forever costs the expensive
-        // phases six times and then once every kFullLadderRetryCycles cycles — not every cycle
-        // forever, and not never.
-        if (m_unsampled_cycles < UINT16_MAX) {
-            m_unsampled_cycles++;
-            if (m_unsampled_cycles == kUnsampledCyclesBeforeProbeOnly) {
-                m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
-                LOGF("   battery : %u consecutive empty records — dropping to the direct probe "
-                     "alone, full retry at cycle %lu\n",
-                     (unsigned)m_unsampled_cycles, (unsigned long)m_next_full_cycle);
+    } else {
+        // Each streak counter resets when the *other* kind of failure occurs. They used to
+        // run independently and only ever reset on a reading, so the console called six
+        // empty records "consecutive" when a silent cycle had happened in the middle of
+        // them, and ladder_allowed() summed two streaks that were never concurrent.
+        // m_stalled_cycles is what counts every failed cycle regardless of kind.
+        if (m_last == BatteryResult::Unsampled) {
+            m_silent_cycles = 0;
+            if (m_unsampled_cycles < UINT16_MAX) {
+                m_unsampled_cycles++;
+            }
+        } else {
+            m_unsampled_cycles = 0;
+            if (m_silent_cycles < UINT16_MAX) {
+                m_silent_cycles++;
             }
         }
-    } else if (m_silent_cycles < UINT16_MAX) {
-        m_silent_cycles++;
-        if (m_silent_cycles == kSilentCyclesBeforeProbeOnly) {
+        if (m_stalled_cycles < UINT16_MAX) {
+            m_stalled_cycles++;
+        }
+
+        // Arm the retry deadline once, and never move it.
+        //
+        // Both thresholds used to assign m_next_full_cycle unconditionally, so a second
+        // threshold crossing pushed an already-scheduled retry further out. Worked example at
+        // the 900 s field interval: three silent cycles schedule the full retry for cycle 27,
+        // then six empty records cross their own threshold at cycle 26 and move it to cycle
+        // 50 — nearly six more hours in which the one path that can recover the pack does not
+        // run. A deadline that recedes as evidence of failure accumulates is the opposite of a
+        // recovery schedule. It is re-armed in ladder_allowed() after it fires, which is the
+        // only place a *new* deadline is legitimate, and cleared to 0 by a real reading.
+        //
+        // CITE(policy): docs/POWER_BUDGET.md — never let the pack reach a state it cannot
+        //   recover from by itself. Telemetry that recovers only after an unbounded delay is
+        //   that state for as long as the delay lasts.
+        // CITE(spec): docs/FIRMWARE_SPEC.md §7 H7 — "BMS silent → no livelock"; the retry
+        //   must stay scheduled, and bounded, on every mix of failures.
+        const bool spent = (m_unsampled_cycles >= kUnsampledCyclesBeforeProbeOnly) ||
+                           (m_silent_cycles >= kSilentCyclesBeforeProbeOnly) ||
+                           (m_stalled_cycles >= kStalledCyclesBeforeProbeOnly);
+        if (spent && m_next_full_cycle == 0) {
             m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
-            LOGF("   battery : %u consecutive silent cycles — dropping to the direct probe "
-                 "alone, full retry at cycle %lu\n",
-                 (unsigned)m_silent_cycles, (unsigned long)m_next_full_cycle);
+            // All three counts, because which one tripped is the whole diagnosis and the
+            // single number the old line printed could not say.
+            LOGF("   battery : %u empty record(s), %u silent, %u stalled in total — dropping "
+                 "to the direct probe alone, full retry at cycle %lu\n",
+                 (unsigned)m_unsampled_cycles, (unsigned)m_silent_cycles,
+                 (unsigned)m_stalled_cycles, (unsigned long)m_next_full_cycle);
         }
     }
 
