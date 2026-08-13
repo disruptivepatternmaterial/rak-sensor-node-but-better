@@ -9,19 +9,38 @@ cd "$(dirname "$0")/.."
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; DIM=$'\033[2m'; NC=$'\033[0m'
 FAILED=0
-step() { echo; echo "${BLUE}-- $* --${NC}"; }
-ok()   { echo "${GREEN}PASS${NC} $*"; }
-bad()  { echo "${RED}FAIL${NC} $*"; FAILED=1; }
-warn() { echo "${YELLOW}WARN${NC} $*"; }
+BLOCKED=0
+# --strict / PREFLIGHT_STRICT=1 makes a BLOCKED contract item exit non-zero. Off by default so
+# routine CI is not red for a conflict that is deliberately open; on for the release checklist,
+# where shipping against an unresolved payload field is the thing we are trying to prevent.
+STRICT="${PREFLIGHT_STRICT:-0}"
+[[ "${1:-}" == "--strict" ]] && STRICT=1
+
+step()    { echo; echo "${BLUE}-- $* --${NC}"; }
+ok()      { echo "${GREEN}PASS${NC} $*"; }
+bad()     { echo "${RED}FAIL${NC} $*"; FAILED=1; }
+warn()    { echo "${YELLOW}WARN${NC} $*"; }
+blocked() { echo "${RED}BLOCKED${NC} $*"; BLOCKED=$((BLOCKED + 1)); }
 
 echo "${BLUE}=== preflight ===${NC}"
 
 # --------------------------------------------------------------- secrets
 # AGENTS.md: never commit secrets, keys, or live OTAA AppKeys.
 step "secrets"
-SECRET_HITS=$(git ls-files -z \
-  | xargs -0 grep -nIE '(APPKEY|APP_KEY|APPEUI|APP_EUI|DEVEUI|DEV_EUI|NWKSKEY|APPSKEY)[[:space:]]*[:=][[:space:]]*[^ ]*[0-9A-Fa-f]{16}' 2>/dev/null \
-  | grep -viE '(example|template|placeholder|XXXX|0{16}|docs/|\.mdc:|schema\.yaml)' || true)
+# `git grep` rather than `git ls-files | xargs grep`: xargs aborts with
+# "sysconf(_SC_ARG_MAX) failed" under some sandboxes, and because empty output was read as a
+# clean result, this gate reported PASS having never run a single grep. A gate that cannot
+# distinguish "found nothing" from "never looked" is not a gate.
+SECRET_RC=0
+SECRET_RAW=$(git grep -nIE '(APPKEY|APP_KEY|APPEUI|APP_EUI|DEVEUI|DEV_EUI|NWKSKEY|APPSKEY)[[:space:]]*[:=][[:space:]]*[^ ]*[0-9A-Fa-f]{16}' -- ':/' 2>&1) || SECRET_RC=$?
+if [[ "$SECRET_RC" -gt 1 ]]; then
+  echo "$SECRET_RAW"
+  bad "the secret scan itself failed to run (git grep exit $SECRET_RC) -- treating as a failure, not a pass"
+  SECRET_HITS=""
+else
+  SECRET_HITS=$(printf '%s' "$SECRET_RAW" \
+    | grep -viE '(example|template|placeholder|XXXX|0{16}|docs/|\.mdc:|schema\.yaml)' || true)
+fi
 if [[ -n "$SECRET_HITS" ]]; then
   echo "$SECRET_HITS"
   bad "possible live LoRaWAN credentials in tracked files"
@@ -80,8 +99,14 @@ fi
 # AGENTS.md / FIRMWARE_SPEC.md 2.1: a failed read is null, never 0.
 step "null policy"
 if git ls-files 'src/*' 'lib/*' 'include/*' >/dev/null 2>&1 && [[ -n "$(git ls-files 'src/*')" ]]; then
-  ZEROS=$(git ls-files 'src/*' 'lib/*' 'include/*' \
-    | xargs grep -nIE '(fail|error|timeout|invalid)[^;]*=[[:space:]]*0[;,]' 2>/dev/null || true)
+  # git grep, for the same reason as the secrets gate above.
+  ZERO_RC=0
+  ZEROS=$(git grep -nIE '(fail|error|timeout|invalid)[^;]*=[[:space:]]*0[;,]' -- 'src/*' 'lib/*' 'include/*' 2>&1) || ZERO_RC=$?
+  if [[ "$ZERO_RC" -gt 1 ]]; then
+    echo "$ZEROS"
+    bad "the null-policy scan itself failed to run (git grep exit $ZERO_RC)"
+    ZEROS=""
+  fi
   if [[ -n "$ZEROS" ]]; then
     echo "$ZEROS"
     warn "possible fabricated zero on a failure path -- nulls must stay null"
@@ -92,11 +117,44 @@ else
   echo "${DIM}   no firmware sources yet -- skipped${NC}"
 fi
 
+# --------------------------------------------------------------- blocked payload fields
+# A field marked BLOCKED in payload/schema.yaml is an unresolved half of the two-repo ingest
+# contract -- today, the ADR-0002 battery-current sign. The parity checker reported these as
+# WARN and the run still printed "PREFLIGHT OK", so the one summary line a human actually reads
+# said green while a shipped field had no agreed meaning. It gets its own named state now.
+step "payload contract"
+BLOCKED_FIELDS=$(grep -B12 '^    status: BLOCKED' payload/schema.yaml 2>/dev/null \
+  | grep -E '^  - name:' | sed 's/^  - name: //' || true)
+if [[ -n "$BLOCKED_FIELDS" ]]; then
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    blocked "payload/schema.yaml: field '$f' is BLOCKED -- no agreed meaning on the wire"
+  done <<< "$BLOCKED_FIELDS"
+  echo "${DIM}   see docs/decisions/ADR-0002-payload-contract-conflicts.md${NC}"
+else
+  ok "no payload field is BLOCKED"
+fi
+
 # --------------------------------------------------------------- summary
 echo
-if [[ "$FAILED" -eq 0 ]]; then
-  echo "${GREEN}=== PREFLIGHT OK ===${NC}"
-else
+if [[ "$FAILED" -ne 0 ]]; then
   echo "${RED}=== PREFLIGHT FAILED ===${NC}"
+  exit 1
 fi
-exit "$FAILED"
+
+if [[ "$BLOCKED" -gt 0 ]]; then
+  # Deliberately NOT the word "OK". The checks passed; the contract is still open, and that is
+  # a release-blocking fact, not a footnote. Exit 0 unless --strict, so an open ADR does not
+  # turn routine CI red -- but nothing here can be misread as a clean run.
+  echo "${RED}=== PREFLIGHT BLOCKED -- $BLOCKED unresolved payload contract item(s) ===${NC}"
+  echo "${YELLOW}    Checks passed. The ingest contract is NOT settled. Not releasable as final;"
+  echo "    resolve the ADR or ship knowing the field's meaning is undecided.${NC}"
+  if [[ "$STRICT" -eq 1 ]]; then
+    echo "${RED}    --strict: exiting 2.${NC}"
+    exit 2
+  fi
+  exit 0
+fi
+
+echo "${GREEN}=== PREFLIGHT OK ===${NC}"
+exit 0

@@ -280,7 +280,7 @@ def main() -> int:
         print(f"\n   pinned_sha256: {actual_sha}\n")
         return 0
 
-    failures, warnings = [], []
+    failures, warnings, blocked = [], [], []
 
     if decoder_source == "pinned":
         # The vendored copy matches the pin by construction, so gate 1 below is
@@ -311,7 +311,7 @@ def main() -> int:
     channel_names = parse_channel_names(js)
     if not wx_types or not channel_names:
         failures.append("Could not parse WX_TYPES / CHANNEL_NAMES — decoder structure changed.")
-        _report(failures, warnings)
+        _report(failures, warnings, blocked)
         return 1
 
     # --- Gate 2: field-by-field contract
@@ -349,7 +349,10 @@ def main() -> int:
             )
 
         if str(f.get("status", "")).upper() == "BLOCKED":
-            warnings.append(f"{label}: status BLOCKED — {_first_line(f.get('notes'))}")
+            # Not a warning. A BLOCKED field is half of the ingest contract with no agreed
+            # meaning, and folding it into the same bucket as "a formatter change is pending"
+            # is how the run below came to print PASS over it. preflight.sh reads this label.
+            blocked.append(f"{label}: status BLOCKED — {_first_line(f.get('notes'))}")
 
     # --- Gate 3b: does the firmware encoder actually agree with the schema?
     failures.extend(check_encoder(schema))
@@ -364,7 +367,7 @@ def main() -> int:
 
     print(f"{DIM}   checked {len(fields)} fields against "
           f"{len(wx_types)} decoder types{RESET}")
-    _report(failures, warnings)
+    _report(failures, warnings, blocked)
     return 1 if failures else 0
 
 
@@ -630,7 +633,9 @@ def _first_line(text) -> str:
     return s if len(s) <= 150 else s[:147] + "..."
 
 
-def _report(failures, warnings) -> None:
+def _report(failures, warnings, blocked=()) -> None:
+    for b in blocked:
+        print(f"{RED}BLOCKED{RESET} {b}")
     for w in warnings:
         print(f"{YELLOW}WARN{RESET} {w}")
     for f in failures:
@@ -640,7 +645,12 @@ def _report(failures, warnings) -> None:
               f"Do not flash a field node.{RESET}")
     else:
         note = f" ({len(warnings)} call-out(s))" if warnings else ""
-        print(f"{GREEN}PASS{RESET} payload schema matches the TTN formatter{note}")
+        if blocked:
+            print(f"{YELLOW}PASS, BUT BLOCKED{RESET} payload schema matches the TTN formatter"
+                  f"{note} — but {len(blocked)} field(s) have NO AGREED MEANING on the wire. "
+                  f"This is not a clean run; see preflight's 'payload contract' step.")
+        else:
+            print(f"{GREEN}PASS{RESET} payload schema matches the TTN formatter{note}")
 
 
 if __name__ == "__main__":

@@ -117,11 +117,22 @@ def main() -> int:
         if is_vendored(rel.as_posix()):
             continue
 
-        for n, line in enumerate(text.splitlines(), 1):
+        all_lines = text.splitlines()
+        for n, line in enumerate(all_lines, 1):
             m = CITE_RE.search(line)
             if m:
+                # A citation wraps. ADR-0006:148 carries its sibling SHA on the NEXT line, so a
+                # single-line body read it as unpinned and warned on a citation that is in fact
+                # correctly pinned. A false warning is worse than no warning: it is what teaches
+                # a reviewer to skim past the one that matters. Fold indented continuation lines
+                # into the body, stopping at the next citation or the next unindented line.
+                tail = []
+                for cont in all_lines[n:]:
+                    if not cont.strip() or not cont[:1].isspace() or CITE_RE.search(cont):
+                        break
+                    tail.append(cont.strip())
                 cite_count += 1
-                cat, body = m.group(1), m.group(2).strip()
+                cat, body = m.group(1), " ".join([m.group(2).strip()] + tail)
                 if cat not in CATEGORIES:
                     failures.append(
                         f"{rel}:{n}: unknown citation category '{cat}' "
