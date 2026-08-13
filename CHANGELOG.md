@@ -10,6 +10,16 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The Modbus pre-transaction drain is bounded and feeds the watchdog.** `drain_and_settle()`
+  was `while (m_serial.available())` with no ceiling. A silent slave exits immediately, but a
+  babbling or stuck RS-485 driver keeps `available()` true forever, and the watchdog then resets
+  the node from inside a sensor read with `WB_IO2` still HIGH — so the transceiver keeps drawing
+  across the reset, on a node that has to survive months unattended. The drain now stops after
+  twice the longest frame this node asks for or a quarter of the 1000 ms per-transaction budget,
+  whichever comes first, feeds the watchdog on every byte, and logs when it hits the bound.
+
+### Fixed
+
 - **A CRC-valid all-zero RK900 reply is no longer encoded as real weather.** Any `Ok` from the
   Modbus read called `.set()` on all five registers, including `0`, so a station returning an
   empty span published `0.0` hPa, `0.0` %RH and calm wind as measurements. The battery path has

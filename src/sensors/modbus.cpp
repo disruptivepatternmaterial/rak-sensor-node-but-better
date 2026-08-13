@@ -1,6 +1,7 @@
 #include "modbus.h"
 
 #include "../build_features.h"
+#include "../power.h"
 
 namespace {
 
@@ -28,6 +29,28 @@ uint32_t frame_gap_us(uint32_t baud)
 // bounded amount of time and current, never the cycle.
 constexpr uint32_t kReplyTimeoutMs = 1000;
 
+// Bounds on the pre-transaction drain. `while (available())` is a promise that the bus goes
+// quiet, and a stuck or babbling RS-485 driver does not keep it: available() stays true, the
+// loop never returns, and the watchdog resets the node from inside a sensor read — with WB_IO2
+// still HIGH, so the transceiver keeps drawing across the reset. A silent slave is unaffected
+// either way; it exits on the first test.
+//
+// Twice the longest frame this node ever asks for is the byte ceiling: anything past that is
+// not a stale reply left over from a previous transaction, which is the only thing this drain
+// exists to clear. The time ceiling is a quarter of the per-transaction budget, so the drain
+// can never be the reason a read misses its 1000 ms ceiling.
+//
+// CITE(spec): [CIT-MODBUS-SERIAL] RTU frames are delimited by 3.5 character times of silence,
+//   so "stale bytes then quiet" is the only bus state this drain is defined against; a line
+//   that never goes quiet is outside the protocol and must be bounded by the master instead.
+// CITE(spec): docs/FIRMWARE_SPEC.md §2.1 — 1000 ms per-transaction ceiling, 2 retries, then
+//   mark the sensor failed and continue the cycle.
+// CITE(policy): docs/POWER_BUDGET.md — a watchdog reset taken inside a sensor read leaves the
+//   RAK5802 rail enabled, and the node has to survive months unattended; every loop that can
+//   hold the CPU has to end on a deadline the firmware owns.
+constexpr size_t   kMaxDrainBytes = kMaxFrame * 2;
+constexpr uint32_t kMaxDrainMs    = kReplyTimeoutMs / 4;
+
 } // namespace
 
 const char *modbus_result_name(ModbusResult r)
@@ -45,9 +68,29 @@ const char *modbus_result_name(ModbusResult r)
 
 void ModbusMaster::drain_and_settle()
 {
+    const uint32_t started_ms = millis();
+    size_t         dropped    = 0;
+
     while (m_serial.available()) {
         (void)m_serial.read();
+        dropped++;
+
+        // Fed inside the loop, not around it: the point of the bound is that the node keeps
+        // control of the cycle, and the watchdog must not fire on a drain that is making
+        // progress towards its own deadline.
+        // CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — 120 s hardware watchdog over awake time.
+        power::watchdog_feed();
+
+        if (dropped >= kMaxDrainBytes || (millis() - started_ms) >= kMaxDrainMs) {
+            // Worth a line. A bus that will not go quiet is a wiring or termination fault,
+            // and it presents at the sensor as an ordinary CRC failure otherwise.
+            LOGF("      modbus drain bounded after %u byte(s), %lu ms — bus will not go "
+                 "quiet\n",
+                 (unsigned)dropped, (unsigned long)(millis() - started_ms));
+            break;
+        }
     }
+
     delayMicroseconds(frame_gap_us(m_baud));
 }
 
