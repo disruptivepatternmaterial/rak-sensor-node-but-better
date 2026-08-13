@@ -10,6 +10,17 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The rejoin escape no longer leaves the radio on the wrong eight channels.**
+  `Radio::begin()` selects US915 sub-band 2 once and then returns early on every later call,
+  so the only path that reconfigures the MAC afterwards — `lmh_reset_mac()` in the
+  three-failures rejoin escape — had nothing re-applying the channel mask. If the reset
+  restores the region default of 72 channels, roughly seven join attempts in eight go out on
+  frequencies no TTN gateway is tuned to, which is the failure `begin()`'s own comment warns
+  about arriving at the exact moment the node has already given up three times. The sub-band
+  is now re-selected immediately after the reset, and a refusal is logged.
+
+### Fixed
+
 - **The boot counter no longer writes flash before the brownout gate exists.** `Config::begin()`
   incremented the count and, every eighth boot, called `save()` — an erase and rewrite of the
   configuration page. It runs at `main.cpp` setup before `brownout.begin()`, so nothing could
