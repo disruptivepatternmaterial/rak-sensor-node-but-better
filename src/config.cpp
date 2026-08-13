@@ -77,13 +77,40 @@ void Config::begin()
     // uplinks, something is resetting the node.
     m_boots++;
 #if !FEATURE_BENCH_INTERVAL
-    if ((m_boots % kBootPersistEvery) == 0) {
-        save();
-    }
+    // Marked, not written. This runs before power::Brownout is constructed from the persisted
+    // bit, so writing here erases and rewrites a flash page with no gate in front of it — and
+    // the count comes due exactly when the node is resetting in a loop, which is the state where
+    // the pack is least able to carry the write and most able to be interrupted mid-way. The
+    // write is handed to the main cycle instead, after the first battery reading has told the
+    // gate whether flash is affordable. See Config::persist_boot_count_if_due().
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — "Brownout: no flash thrash". This path was
+    //   outside that requirement purely because of where it sat in the boot order.
+    // CITE(datasheet): [CIT-NRF-POWER] the internal flash behind this write; an erase-and-write
+    //   is the largest non-radio current the node draws and the only one that can leave state
+    //   behind it.
+    // CITE(prior-art): [CIT-LITTLEFS-DESIGN] the filesystem commits atomically, which bounds the
+    //   damage of an interrupted write to a lost update rather than a corrupted record — the
+    //   reason this is a power and thrash defect rather than a corruption one.
+    m_boot_write_pending = ((m_boots % kBootPersistEvery) == 0);
 #endif
 
     LOGF("   config  : interval %lu s, boot #%lu\n", (unsigned long)m_interval,
          (unsigned long)m_boots);
+}
+
+bool Config::persist_boot_count_if_due()
+{
+    if (!m_boot_write_pending) {
+        return false;
+    }
+
+    // Cleared on the attempt, not on success. A failed write leaves the count behind by up to
+    // kBootPersistEvery, which is what the counter already tolerates by design; retrying it every
+    // cycle would turn a full or failing filesystem into a write on every wake, which is the
+    // thrash H3 forbids.
+    m_boot_write_pending = false;
+    return save();
 }
 
 bool Config::load()

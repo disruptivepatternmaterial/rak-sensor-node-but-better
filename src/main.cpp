@@ -253,6 +253,13 @@ void loop()
     brownout.update(pack.voltage.valid, pack.voltage.value);
 #endif
 
+    // The boot count's flash write, deferred out of Config::begin() so it happens behind the
+    // gate rather than before the gate exists. Nothing is due on most cycles; when something is,
+    // this is the first point in the run where the pack has been asked how it is doing.
+    if (brownout.flash_write_allowed()) {
+        (void)config.persist_boot_count_if_due();
+    }
+
     // Built to fit what the current data rate allows. The network decides that rate, and
     // at its slowest only 11 of the 35 bytes fit — so the encoder fills the space in
     // priority order rather than producing an uplink that would simply be refused.

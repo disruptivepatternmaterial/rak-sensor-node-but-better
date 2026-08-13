@@ -359,6 +359,24 @@ bool Radio::send(const Payload &p)
             // CITE(bench): docs/reviews/2026-08-12_rak_reference_benchmark.md §2 — the gap
             //   analysis that found this call absent from the whole tree.
             lmh_reset_mac();
+
+            // Re-select the sub-band. begin() sets it once and returns early ever after, so
+            // without this the rejoin escape is the one path that can leave the MAC on a
+            // channel mask nobody chose. Cheap and unconditionally safe: if the reset left the
+            // mask alone this is a no-op, and if it restored the region default of 72 channels
+            // it is the difference between rejoining and grinding against the backoff cap on
+            // frequencies no gateway is tuned to — the failure the comment in begin() warns
+            // about, arriving at the exact moment the node has already given up three times.
+            //
+            // CITE(spec): [CIT-LORA-RP002] US915 defines 72 channels; the eight the network
+            //   uses are a subset the application must select, not a MAC default.
+            // CITE(policy): [CIT-TTN-FREQ] TTN US902-928 uplinks are 903.9-905.3 MHz, i.e.
+            //   sub-band 2 — anything outside it reaches no TTN gateway.
+            // CITE(prior-art): [CIT-WISBLOCK-API2] RAK's framework re-applies its channel
+            //   configuration around MAC re-initialisation rather than assuming it survives.
+            if (!lmh_setSubBandChannels(kSubBand)) {
+                LOGF("   radio   : could not re-select sub-band %u after MAC reset\n", kSubBand);
+            }
         }
         return false;
     }

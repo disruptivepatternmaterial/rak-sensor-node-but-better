@@ -10,6 +10,17 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The boot counter no longer writes flash before the brownout gate exists.** `Config::begin()`
+  incremented the count and, every eighth boot, called `save()` — an erase and rewrite of the
+  configuration page. It runs at `main.cpp` setup before `brownout.begin()`, so nothing could
+  refuse it, and the count comes due exactly when the node is resetting in a loop, which is when
+  the pack is least able to carry a write. A reset storm on a low pack could therefore spend
+  charge and churn the page holding the interval and the persisted brownout bit. The increment
+  still happens at boot; the write is deferred to the main cycle, after the first battery reading,
+  and gated on `power::Brownout::flash_write_allowed()`. A boot spent entirely under a hold writes
+  on the first later cycle where the gate permits it, and the count may under-report by up to
+  eight, which is what it already tolerated by design.
+
 - **A brownout keepalive no longer runs out of frame counter and silences the node for good.**
   The stored counter is written ahead of the live one by `session::kCounterMargin` (32) uplinks,
   and H3 forbids advancing it while the brownout gate holds (#51). A hold that rests on a pack

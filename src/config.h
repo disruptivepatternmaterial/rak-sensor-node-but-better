@@ -167,6 +167,20 @@ class Config {
 
     uint32_t boot_count() const { return m_boots; }
 
+    // Writes the deferred boot count, if one is pending. Returns false when nothing was due or
+    // the write failed.
+    //
+    // Split from begin() because begin() runs before power::Brownout exists, so a save() there
+    // is a flash erase and rewrite at whatever voltage the pack happens to be at — and the boot
+    // counter is due precisely when the node is resetting repeatedly, which is when the supply
+    // is least trustworthy. The count still increments in RAM at boot; only the write moves,
+    // to a point in the cycle where the gate can refuse it. A count that under-reports by a few
+    // boots costs nothing: what it is for is noticing that the number climbs at all.
+    //
+    // Nothing is cleared until an attempt is actually made, so a boot spent entirely under a
+    // hold writes on the first later cycle where the gate permits it.
+    bool persist_boot_count_if_due();
+
     // Whether the brownout gate was engaged when this node last wrote its settings.
     //
     // Persisted because the gate previously lived only in RAM, which made it fail open:
@@ -188,4 +202,7 @@ class Config {
     uint32_t m_boots            = 0;
     bool     m_mounted          = false;
     bool     m_brownout_engaged = false;
+
+    // Set at boot when the count is due to be written, cleared by the deferred write above.
+    bool     m_boot_write_pending = false;
 };
