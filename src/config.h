@@ -205,7 +205,12 @@ class Config {
     // boots costs nothing: what it is for is noticing that the number climbs at all.
     //
     // Nothing is cleared until an attempt is actually made, so a boot spent entirely under a
-    // hold writes on the first later cycle where the gate permits it.
+    // hold writes on the first later boot where the gate permits it.
+    //
+    // Called from setup(), directly after the gate is restored and before anything that can hang.
+    // It was briefly called from the main cycle instead, which put it after both sensor reads —
+    // so a node resetting inside a hung read never reached it, and the counter stopped moving in
+    // the one failure it is there to report.
     bool persist_boot_count_if_due();
 
     // Whether the brownout gate was engaged when this node last wrote its settings.

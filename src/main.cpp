@@ -227,6 +227,30 @@ void setup()
 #endif
 #endif
 
+    // The boot count's flash write, deferred out of Config::begin() so a gate exists in front of
+    // it. It sits here, immediately after that gate is restored, and not in the cycle below: the
+    // cycle runs weather_sensor.read() and battery_sensor.read() first, and a hang in either is
+    // what the watchdog resets on. A node stuck in that loop would never reach the write, so the
+    // counter would stop climbing in exactly the failure it exists to name — and with the field
+    // image detaching USB after 180 s, the boot counter riding out on the uplink is the only
+    // remote signal that separates "resetting repeatedly" from "one sensor died".
+    //
+    // The gate answers from the bit restored out of flash, before this run has measured anything.
+    // That is the conservative direction: a node that was holding when it went down is assumed to
+    // still be holding until a reading says otherwise, so the write is skipped rather than taken
+    // on an unknown supply. Nothing is cleared until an attempt is made, so a boot spent entirely
+    // under a hold writes on the first later boot the gate permits.
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — the watchdog resets a hung cycle, which is the
+    //   event this counter is the only remote evidence of, and §7 H3 for the gate itself.
+    // CITE(prior-art): [CIT-LITTLEFS-DESIGN] atomic commits — an interrupted write costs the
+    //   update, not the record, which is what makes taking it this early acceptable.
+    // CITE(policy): docs/POWER_BUDGET.md — a node that cannot be diagnosed from the uplink is a
+    //   hike, and the hike is the cost this counter exists to avoid.
+    if (brownout.flash_write_allowed()) {
+        (void)config.persist_boot_count_if_due();
+    }
+
 #if FEATURE_RADIO
     radio.begin();
 #endif
@@ -278,13 +302,6 @@ void loop()
     // requires somebody to walk in.
     brownout.update(pack.voltage.valid, pack.voltage.value);
 #endif
-
-    // The boot count's flash write, deferred out of Config::begin() so it happens behind the
-    // gate rather than before the gate exists. Nothing is due on most cycles; when something is,
-    // this is the first point in the run where the pack has been asked how it is doing.
-    if (brownout.flash_write_allowed()) {
-        (void)config.persist_boot_count_if_due();
-    }
 
     // Built to fit what the current data rate allows. The network decides that rate, and
     // at its slowest only 11 of the 35 bytes fit — so the encoder fills the space in

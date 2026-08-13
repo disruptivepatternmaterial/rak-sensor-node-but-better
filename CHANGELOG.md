@@ -36,6 +36,17 @@ any image in this repository has identified its own commit on hardware.
 
 ### Fixed
 
+- **The boot counter advances again during the reset loop it exists to detect.** Deferring its
+  flash write out of `Config::begin()` put it in the main cycle *after* both sensor reads — the
+  two calls that can hang, and a hang is what the watchdog resets on. A node stuck resetting
+  inside a read therefore never reached the write, so the stored count stopped moving in exactly
+  the failure the counter names, and the one remote signal separating "reset loop" from "dead
+  sensor" was dead. `print_banner()`'s watchdog warning does not cover it: that needs a console,
+  and the field image detaches USB after 180 s. The write moves to `setup()`, immediately after
+  `brownout.begin()` restores the gate and before anything that can hang. The deferral itself is
+  kept — the gate is still in front of the write, answering from the persisted bit, which is the
+  conservative direction. **Compile-verified only — unflashed and unobserved.**
+
 - **The frame-counter checkpoint permit and its contract now describe the same firmware, and the
   write-frequency figure is corrected.** `session.h` said the permit was "never for a hold backed
   by a measured low voltage", while `main.cpp` granted it on any armed keepalive — including the
