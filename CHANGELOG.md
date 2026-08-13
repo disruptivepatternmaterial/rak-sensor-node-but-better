@@ -28,10 +28,11 @@ any image in this repository has identified its own commit on hardware.
   evidence alone ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63),
   [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)) are
   now confirmed on hardware.
-- **The field image reaches sleep.** One cycle of `env:soak` at `d568574`: both sensors read, an
-  uplink went out, and the cycle ended `sleep   : 900 s` rather than
-  `wait    : N s (sleep disabled)`. Still one cycle, not a soak —
-  [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records zero soak hours and that is unchanged.
+- **The field image reaches sleep, and wakes from it.** Two cycles of `env:soak` at `d568574`:
+  both sensors read, an uplink went out, and each cycle ended `sleep   : 900 s` rather than
+  `wait    : N s (sleep disabled)`. The second cycle arrived ~900 s later with no boot banner in
+  between, so the node woke from sleep instead of resetting through it. Still two cycles, not a
+  soak — [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records zero soak hours and that is unchanged.
 
 ### Added
 

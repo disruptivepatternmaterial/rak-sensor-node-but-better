@@ -2406,6 +2406,22 @@ on it. No background processes were left running.
      sleep   : 900 s
   ```
 
+- **Second observation — the sleep/wake round trip completes.** The board woke on its own
+  ~900 s later and ran a second cycle with no boot banner in between, so it woke from sleep rather
+  than resetting through it. Boot was 10:28:59, cycle 2 landed at 10:44:0x (build-host clock):
+
+  ```
+  [cycle 2]
+     RK900   : raw 0x0000-0x0004 = 0000 0000 0100 024B 2711
+     RK900   : wind 0.00 m/s @ 0 deg, 25.6 C, 58.7 %RH, 1000.1 hPa
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sendat FF 7E 00 15 02 01 00 01 02 03 10 02 15 BA AA 04 16 B9 FF FF 17 B8 54 18 67 F0 00 43
+     battery : 11.94 V  -0.01 A  84%  24.0 C
+     battery : raw v=1194 i=-1 soc=84 t=240 (t scale UNCONFIRMED — 230 means tenths, 23 means whole degrees)
+     radio   : sent 35 bytes on port 2
+     sleep   : 900 s
+  ```
+
 - **Verdict:** PASS for what it covers. `features : … sleep=1` and the closing line reads
   **`sleep   : 900 s`**, not `wait    : N s (sleep disabled)` — the sleep path is entered on the
   field image, which is the state the node will be measured in. Both sensors read in the same
@@ -2420,7 +2436,12 @@ on it. No background processes were left running.
     *was* attached, so `console_in_use` was true, the `power   : USB kept attached …` line never
     printed, and the port stayed up. Once the reader is released the port goes away at the next
     sleep. Press RESET once to get a flashable window back.
-  - **Still not a soak.** One cycle is not 24 h. Zero soak hours exist.
+  - **Still not a soak.** Two cycles are not 24 h. Zero soak hours exist.
+  - **Board left in this state:** running `env:soak` at `d568574`, asleep on a 900 s cycle, session
+    `0x260CE734`. The serial reader was released at 10:46:03, so the *next* sleep is the first one
+    with no host attached and `detach()` will fire — the port will disappear by design. That is the
+    unattended field configuration, and it is the configuration a sleep-current measurement has to
+    be taken in.
   - Sleep current remains unmeasured, and cannot be measured over USB (rule 50 trap 5) or from
     pack telemetry, whose LSB is 10 mA.
 
