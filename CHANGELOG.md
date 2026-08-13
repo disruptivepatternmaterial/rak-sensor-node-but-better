@@ -634,8 +634,17 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 ## [0.4.0] — 2026-08-05
 
 **Battery telemetry works on hardware.** A new working subsystem, backward compatible with the
-TTN decoder, so a minor bump per SemVer and [`docs/RELEASE.md`](docs/RELEASE.md). Firmware
-version emitted in the uplink is now `0.4.0`.
+TTN decoder, so a minor bump per SemVer and [`docs/RELEASE.md`](docs/RELEASE.md). The firmware
+version is now `0.4.0`.
+
+**Corrected 2026-08-12:** this section originally read "firmware version emitted in the uplink is
+now `0.4.0`." That was never true. `src/payload.cpp` encodes nine fields and none of them is a
+version; [`payload/schema.yaml`](payload/schema.yaml) lists "Firmware version reported in the
+uplink" under `requires_formatter_change` with `status: open`, and `scripts/check_decoder_parity.py`
+prints it as a call-out on every run. The version reaches a human through the boot serial banner
+(`src/main.cpp` `LOGF("firmware : %s\n", FIRMWARE_VERSION)`) and nowhere else, so ingest cannot
+tell a stale node from a current one. [`docs/RELEASE.md`](docs/RELEASE.md) §"The version must be
+observable on the device" already said this correctly; the changelog did not.
 
 Gates for this release: `scripts/preflight.sh` PASS; **decoder parity PASS across all nine
 emitted fields** against the live TTN formatter in `forest-weather-machines`; LoRaWAN airtime
