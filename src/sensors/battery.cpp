@@ -405,6 +405,26 @@ constexpr uint32_t kPushListenUs = 20000000; // 20 s
 //   cycles 2-7 were answered by the direct probe alone in well under a second. The expensive
 //   phases have only ever been useful on the first cycle after a cold pack.
 constexpr uint16_t kSilentCyclesBeforeProbeOnly = 3;
+
+// The same bound for a pack that is answering with placeholders instead of not answering at
+// all, and deliberately a larger one.
+//
+// Unsampled is a checksum-valid SENDAT frame from the address we asked: the pack is present,
+// powered and framing correctly, it just has no measurement in the record yet. That is the one
+// state the push listen exists to resolve — the reference reads every real value from an
+// unsolicited report — so switching the listen off after three of these removes the only path
+// out of the placeholder zeros and leaves the battery null for the rest of the deployment.
+// Six is still a bound, not a licence: after six consecutive template-only cycles the driver
+// drops to the cheap probe and pays for the expensive phases once every
+// kFullLadderRetryCycles cycles, exactly as it does for silence.
+//
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+//   onewireHandle() requests data once and then reads every subsequent value from unsolicited
+//   SENDAT frames on a 50 ms tick, so the push is the measurement path, not a fallback.
+// CITE(policy): docs/POWER_BUDGET.md — wake time that has repeatedly bought nothing is the
+//   budget item with no upside; the bound is what keeps a present-but-mute pack from costing
+//   ~25 s every cycle forever.
+constexpr uint16_t kUnsampledCyclesBeforeProbeOnly = 6;
 #if FEATURE_BATTERY_FAST
 // A bench build must not lock itself out of the path it is there to exercise.
 constexpr uint32_t kFullLadderRetryCycles = 2;
@@ -1152,17 +1172,24 @@ bool Battery::ladder_allowed()
                 "anyway, it is the only thing that can clear the hold"));
     }
 
-    if (m_silent_cycles < kSilentCyclesBeforeProbeOnly) {
+    // Silence and a placeholder template are different evidence and get different allowances.
+    // A pack that answers with an empty record is present and needs the push listen; a pack
+    // that says nothing needs it far less, having already failed to say anything.
+    const uint32_t stalled   = (uint32_t)m_silent_cycles + (uint32_t)m_unsampled_cycles;
+    const uint32_t allowance = (m_last == BatteryResult::Unsampled)
+                                   ? kUnsampledCyclesBeforeProbeOnly
+                                   : kSilentCyclesBeforeProbeOnly;
+    if (stalled < allowance) {
         return true;
     }
     if (m_cycles >= m_next_full_cycle) {
-        LOGF("   battery : %u silent cycles — retrying the full ladder\n",
-             (unsigned)m_silent_cycles);
+        LOGF("   battery : %lu stalled cycles — retrying the full ladder\n",
+             (unsigned long)stalled);
         m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
         return true;
     }
-    LOGF("   battery : %u silent cycles — probe only until cycle %lu\n",
-         (unsigned)m_silent_cycles, (unsigned long)m_next_full_cycle);
+    LOGF("   battery : %lu stalled cycles — probe only until cycle %lu\n",
+         (unsigned long)stalled, (unsigned long)m_next_full_cycle);
     return false;
 }
 
@@ -1199,8 +1226,10 @@ BatteryReading Battery::read()
     // Nothing had ever answered, so the pack stayed unprovisioned, kept re-announcing, and
     // reported placeholder zeros.
     //
-    // BOOT is still sent first, because its documented effect is to make probes re-announce
-    // and that is precisely what this phase needs to hear.
+    // Nothing is transmitted to open this phase. The BOOT that used to lead it is now a
+    // once-per-power-cycle nudge sent by the caller (boot_once()), because BOOT is the
+    // reference's reboot verb and sending it on every attempt restarted the pack being
+    // latched — issue #62.
     //
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c — the master
     //   has no provision *poll*: protocol_list[SNHUB_TYPE_PROVISION] defines only `.req`
@@ -1251,12 +1280,15 @@ BatteryReading Battery::read()
     // The reply is kept, not just the fact that one arrived. Re-asking the same address for
     // data we already hold would waste a second round trip on the common path.
     size_t n = 0;
-    m_last   = BatteryResult::NoReply;
     m_cycles++;
 
     // Whether this cycle may pay for the expensive half of the ladder: the announcement window
     // and the push listen. See kBatterySilentCyclesBeforeProbeOnly.
+    // Asked before m_last is reset, deliberately: the gate's whole input is what the *previous*
+    // cycle saw, and an empty record and silence are weighed differently.
     const bool full_ladder = ladder_allowed();
+
+    m_last = BatteryResult::NoReply;
 
     bool answered_direct = false;
     {
@@ -1269,12 +1301,24 @@ BatteryReading Battery::read()
             const BatteryQueryMatch match{BatteryMatchMode::Response, kProbeId, m_seq};
             const BatteryResult     r = parse(rx, got, candidate, match);
             if (r == BatteryResult::Ok || r == BatteryResult::Unsampled) {
-                m_pid           = kProbeId;
-                answered_direct = true;
-                m_last          = r;
-                n               = got;
-                out             = candidate;
-                LOGLN(F("   battery : pack answered at 0x01 — skipping provisioning"));
+                m_pid  = kProbeId;
+                m_last = r;
+                n      = got;
+                out    = candidate;
+
+                // An Unsampled reply proves the address and nothing else. Treating it as
+                // "provisioned" skipped the announcement window, and the announcement window
+                // is the only thing that can turn a pack reporting 0xFF back into a latched
+                // one — so a pack answering the template at 0x01 was never re-latched and
+                // never sampled. Skip provisioning only when this cycle carried a real
+                // reading, or when the pack has itself confirmed a pid other than 0xFF.
+                answered_direct = (r == BatteryResult::Ok) || m_pack_latched;
+                if (answered_direct) {
+                    LOGLN(F("   battery : pack answered at 0x01 — skipping provisioning"));
+                } else {
+                    LOGLN(F("   battery : pack answered at 0x01 with an empty record — "
+                            "running the ladder anyway"));
+                }
             }
         }
     }
@@ -1445,8 +1489,23 @@ BatteryReading Battery::read()
     // Reset on any reading, so one good cycle restores the full ladder immediately: the count
     // exists to stop a permanent silence being expensive, not to punish a pack that recovers.
     if (m_last == BatteryResult::Ok) {
-        m_silent_cycles   = 0;
-        m_next_full_cycle = 0;
+        m_silent_cycles    = 0;
+        m_unsampled_cycles = 0;
+        m_next_full_cycle  = 0;
+    } else if (m_last == BatteryResult::Unsampled) {
+        // Counted separately, because it is not silence: the pack answered. It still counts
+        // towards the same bound, so a pack that answers templates forever costs the expensive
+        // phases six times and then once every kFullLadderRetryCycles cycles — not every cycle
+        // forever, and not never.
+        if (m_unsampled_cycles < UINT16_MAX) {
+            m_unsampled_cycles++;
+            if (m_unsampled_cycles == kUnsampledCyclesBeforeProbeOnly) {
+                m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
+                LOGF("   battery : %u consecutive empty records — dropping to the direct probe "
+                     "alone, full retry at cycle %lu\n",
+                     (unsigned)m_unsampled_cycles, (unsigned long)m_next_full_cycle);
+            }
+        }
     } else if (m_silent_cycles < UINT16_MAX) {
         m_silent_cycles++;
         if (m_silent_cycles == kSilentCyclesBeforeProbeOnly) {

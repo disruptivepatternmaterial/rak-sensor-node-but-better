@@ -248,6 +248,15 @@ class Battery {
     // into a cheap probe plus an occasional full retry. See issue #39.
     uint16_t m_silent_cycles = 0;
 
+    // Consecutive cycles in which the pack answered with a checksum-valid but empty record.
+    //
+    // Kept apart from m_silent_cycles because the two are different evidence and earn
+    // different allowances: an empty record proves the pack is present and framing, and the
+    // push listen is the only thing that turns it into a reading, so it is worth paying for
+    // longer. Both feed the same bound in ladder_allowed(), so neither can run the expensive
+    // phases forever.
+    uint16_t m_unsampled_cycles = 0;
+
     // Cycle count at which the full ladder is next allowed to run again, once the driver has
     // dropped back to probe-only. Compared against m_cycles rather than millis() so it does
     // not depend on the wall clock surviving sleep.

@@ -10,6 +10,20 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A pack answering with an empty record no longer switches off the listen that would fill
+  it.** `Unsampled` — a checksum-valid SENDAT reply carrying the all-zero record template —
+  was counted as both "the address works" (so the provisioning ladder was skipped) and "the
+  pack is silent" (so after three cycles the 20 s push listen was gated off). The reference
+  reads every real value from an unsolicited push, so gating that listen off is what left the
+  battery null for the rest of a deployment. `Unsampled` now counts in its own bounded
+  allowance: it no longer skips provisioning unless the pack has itself confirmed a pid other
+  than `0xFF`, and it keeps the push listen alive for up to six consecutive cycles before the
+  driver drops to the cheap probe and retries the full ladder once every 24 cycles — the same
+  ceiling silence has always had. An absent pack still cannot cost more than one expensive
+  cycle in 24. (#62, #39)
+
+### Fixed
+
 - **The battery driver rebooted the pack on every attempt to re-latch it.** `acquire_pid()`
   opened each provisioning window with a BOOT broadcast. In the reference master
   (`forest-weather-machines` @ `efc0e3c`,
