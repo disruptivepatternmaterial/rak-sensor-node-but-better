@@ -74,6 +74,47 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-12 (night) — Ten fixes landed. COMPILE-VERIFIED ONLY. No hardware ran any of them.
+
+**Host:** Heliotrope Ridge. **Range:** everything after `2e89c93` through the `v0.4.1` release
+commit. **Board state during this work:** RAK4631 asleep, USB detached, unreachable — no serial
+port was opened and no image was flashed.
+
+**What is claimed:** these commits compile. `pio run -e rak4631`, `-e soak` and `-e battdiag`
+each returned `SUCCESS` in a throwaway worktree on the build host. That is the whole claim.
+
+**What is NOT claimed:** nothing here has been observed running. Ten behavioural fixes — the
+no-evidence brownout hold that disabled its own exit (#61), keepalive frame-counter starvation,
+the ungated boot-counter flash write, sub-band re-selection after the rejoin escape, downlink
+length checking (#63, #64), a set-interval downlink applied during a brownout hold (#65), the
+backoff first step raised to the fair-use floor, the pack no longer rebooted on every re-latch
+attempt (#62 root cause), empty pack records no longer counted as silence, and an all-zero RK900
+span refused instead of encoded as weather, plus a bounded Modbus drain that feeds the watchdog
+— are **reasoned from code and from the reference master, not measured.** Several of them touch
+the sleep and brownout paths, which are exactly the paths that cannot be proven by compiling.
+
+Each needs its own bench observation before it may be described as working. Until then the
+honest status of every one of them is *believed correct, unobserved*.
+
+**Hardware facts from earlier the same day, restated here because the release cites them and a
+release note must not send the reader hunting:**
+
+- `env:soak` and `env:battdiag` at `f6a897d` both boot into **application mode** — ioreg
+  `idProduct 32809`, no `nRF UF2` MSC interface. Not DFU.
+- The pack read `12.07 V  -0.01 A  89%  25.0 C`, **5 of 5 cycles at `b436aa9`** and **5 of 5
+  again at `f6a897d`**.
+- Earlier the same day, a **15-cycle episode of all-zero records with `source = 0xFF`** in the
+  frame. That observation is what #61 was filed from.
+
+**Zero soak hours exist.** Nothing in this entry is a soak, and compiling three environments is
+not a bench run. H8 has not started. Status stays `🚧 NOT YET DEPLOYED`.
+
+**Standing bench fact, so the next person does not lose twenty minutes to it:** the field image
+detaches USB 180 s after boot (`src/power.cpp`, ADR-0008 grace window). A board left running
+past that grace has no serial port and cannot be flashed — **press RESET once** to get a fresh
+180 s window, then flash.
+
+
 ### 2026-08-12 — #61 brownout/ladder deadlock: gate fix runs the ladder; pack re-latch still unproven
 
 - **Commit:** working tree on `f6a897d` + the #61 fix (committed as the SHA in the same change)
