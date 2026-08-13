@@ -159,6 +159,32 @@ Record the mean sleep current, the sleep-window duration it was taken over, the
 awake-phase peak, **which of the two measurement points it was taken at**, and the
 instrument. A number without its window and its measurement point is not a measurement.
 
+## The network-side alternative — `scripts/soak_ttn.sh`
+
+The serial harness has to hold the port open for the whole run, and that is not free. The
+field image detaches USB about 180 s after boot **when no host is attached**
+([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md),
+[#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)). A
+reader that stays attached suppresses the detach, so a 24 h serial soak measures a bench
+variant of the image rather than the one that ships.
+
+`scripts/soak_ttn.sh` watches the same node from the network instead. It polls
+`ttn-lw-cli end-devices get <app> <dev> --session.last-f-cnt-up` and records every advance of
+the frame counter, so the node is observed without anything being attached to it:
+
+```bash
+nohup scripts/soak_ttn.sh 24h bench >/dev/null 2>&1 &
+grep -E 'SOAK HEARTBEAT|SOAK UPLINK|SOAK ANOMALY' ~/soak-runs/latest-ttn/events.log | tail
+```
+
+Choose it when the question is *does the shipped image keep waking and transmitting for a day*.
+Choose the serial harness when the question needs console detail — a boot banner, a watchdog
+warning, a sensor value — and accept that the run is then about a console-attached variant.
+
+The network side cannot see a reboot that recovers, because a restored session keeps counting;
+it sees only what reaches TTN. It measures nothing about current draw. Neither harness measures
+sleep current — that needs the meter procedure above.
+
 ## Pass / fail — 24 h bench soak
 
 Derived from H8. All of these must hold; any one failing is a fail, not a caveat.

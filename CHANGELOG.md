@@ -8,6 +8,33 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-08-13
+
+**Release candidate, not a deployment.** This tag exists so a soaking board can be traced to an
+exact commit. It is a candidate on three counts and no more: the eight-case downlink matrix
+passed on the physical node, both sensors read inside the field image in one cycle, and that
+cycle reached `sleep   : 900 s` and woke from it. Everything beyond those three is unproven.
+
+`H8` is **not met** — at the moment this tag was cut, `docs/EVIDENCE.md` records **zero soak
+hours**, no ≥24 h bench run and no ≥7 d field shadow. Sleep current has never been measured
+(the pack's telemetry LSB is 10 mA and the budget turns on ~1 mA, so pack telemetry cannot
+measure it). [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) is open: the
+battery-current sign is still contradictory between the spec and the live decoder, and
+`payload/schema.yaml` still carries `batt_current` as `BLOCKED`, which is why
+`scripts/preflight.sh` legitimately ends `=== PREFLIGHT BLOCKED ===`. Open defects that this
+release does **not** fix:
+[#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) (the
+pack re-latch path is still unproven),
+[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68), and
+[#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74) (a
+permanently failing session write can mute an otherwise healthy node).
+
+Versioned **PATCH**, not MINOR: every change since `0.4.1` is a regression fix, a refactor with
+no behavior change, or documentation. No new capability was added, and no payload channel or
+type changed, so [`.cursor/rules/60-decoder-parity.mdc`](.cursor/rules/60-decoder-parity.mdc)
+implies no paired TTN formatter change.
+
+
 **Now partly hardware-verified.** `d568574` was flashed to the board as `env:soak` — the field
 image — on 2026-08-13 and its boot banner read back `commit   : d568574`, which is the first time
 any image in this repository has identified its own commit on hardware. Later the same day

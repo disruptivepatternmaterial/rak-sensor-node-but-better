@@ -56,6 +56,7 @@ def main() -> int:
         if cycle == 0:
             emit(master, "=== rak-sensor-node ===")
             emit(master, "firmware : 0.0.0-selftest")
+            emit(master, "commit   : 0000000")
             emit(master, f"   config  : interval 300 s, boot #{boot}")
         cycle += 1
         emit(master, f"[cycle {cycle}]")

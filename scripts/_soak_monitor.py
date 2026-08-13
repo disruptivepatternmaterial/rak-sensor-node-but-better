@@ -51,6 +51,7 @@ except ImportError:  # pragma: no cover - reported by soak.sh before it gets her
 # nothing, so the source line is named next to each one.
 RE_BANNER = re.compile(r"=== rak-sensor-node ===")                # main.cpp boot banner
 RE_WATCHDOG = re.compile(r"last reset came from the watchdog")    # main.cpp:134
+RE_COMMIT = re.compile(r"commit\s*:\s*([0-9a-f]{7,40})")            # main.cpp print_banner()
 RE_BOOTNUM = re.compile(r"config\s*:\s*interval\s+\d+\s*s,\s*boot\s*#(\d+)")  # config.cpp:85
 RE_CYCLE = re.compile(r"\[cycle (\d+)\]")                         # main.cpp:183
 RE_BATTERY_V = re.compile(r"battery\s*:\s*(\d+)\.(\d{2})\s*V")    # battery.cpp:1444
@@ -132,6 +133,20 @@ class Soak:
             # decided by the boot counter and the watchdog warning that follow it.
             if self.cycles:
                 self.anomaly("reboot", "boot banner after cycles had already started")
+
+        m = RE_COMMIT.search(line)
+        if m:
+            # The soak is evidence about one image. Without the SHA the log cannot say
+            # which, and H8 evidence is worthless unattributed (#73). A banner SHA that
+            # disagrees with the tree the run was launched from means the board is not
+            # running what the operator believes it is -- that is an anomaly, not a note.
+            self.banner_commit = m.group(1)
+            if self.args.commit not in ("unknown", "") and \
+               not self.banner_commit.startswith(self.args.commit[:7]) and \
+               not self.args.commit.startswith(self.banner_commit[:7]):
+                self.anomaly("commit-mismatch",
+                             f"board banner says {self.banner_commit}, "
+                             f"run was launched from {self.args.commit}")
 
         if RE_WATCHDOG.search(line):
             self.watchdog_resets += 1
@@ -341,6 +356,7 @@ class Soak:
             "completed_full_duration": elapsed >= self.args.seconds - 5,
             "label": self.args.label,
             "commit": self.args.commit,
+            "banner_commit": getattr(self, "banner_commit", None),
             "host": self.args.host,
             "cycles_seen": len(self.cycles),
             "first_cycle": self.cycles[0] if self.cycles else None,
@@ -378,6 +394,7 @@ class Soak:
             f"### Soak — {summary['started_utc']} → {summary['ended_utc']}",
             "",
             f"- Host: `{self.args.host}` · commit `{self.args.commit}` · label `{self.args.label}`",
+            f"- Board banner commit: `{getattr(self, 'banner_commit', None) or 'NOT OBSERVED'}`",
             f"- Duration: {elapsed} s of {self.args.seconds} s requested "
             f"({'full' if summary['completed_full_duration'] else 'CUT SHORT'})",
             f"- Cycles seen: {len(self.cycles)} "
