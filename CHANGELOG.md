@@ -36,6 +36,23 @@ any image in this repository has identified its own commit on hardware.
 
 ### Fixed
 
+- **A set-interval downlink taken during a brownout hold is no longer dropped on the second
+  retry, after the console said it would persist.** `Config::set_interval_seconds()` assigned
+  `m_interval` before attempting the write and left it there when the write failed, so the next
+  retry matched the unwritten value at the `seconds == m_interval` short-circuit, wrote nothing,
+  and returned true — and `main.cpp` cleared its pending value believing the command had landed.
+  The commanded cadence was then live only until the next reset, having been reported as saved.
+  Reachable on any failing write, including every save on a node whose filesystem did not mount,
+  where `save()` returns false without touching flash. The value is now staged and rolled back on
+  failure, so a true return means the value is on flash and nothing else; the RAM-apply stays in
+  `main.cpp`, which also now honors the return value on the gate-allowed path where it was
+  previously discarded. The retry is bounded to three flash attempts so the fix cannot turn a
+  broken filesystem into a settings-page rewrite on every wake — H3's thrash rule arriving through
+  the door opened to fix a different defect. After that the cadence stays applied in RAM and the
+  console says exactly that. Refs
+  [#65](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/65).
+  **Compile-verified only — unflashed and unobserved.**
+
 - **A second kind of battery failure no longer postpones an already-scheduled recovery
   retry.** Both threshold branches assigned `m_next_full_cycle` unconditionally, so crossing
   the second threshold moved a retry that was already pending: three silent cycles schedule

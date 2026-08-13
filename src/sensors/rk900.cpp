@@ -129,12 +129,29 @@ WeatherReading RK900::read()
         out.pressure.set(regs[kPressure]);
     }
 
-    LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, %u.%u hPa\n",
-         regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,
-         regs[kWindDirection],
-         (int16_t)regs[kTemperature] / 10, abs((int16_t)regs[kTemperature] % 10),
-         regs[kHumidity] / 10, regs[kHumidity] % 10,
-         regs[kPressure] / 10, regs[kPressure] % 10);
+    // The summary must say what the payload says. Printing `0.0 hPa` on the line after
+    // deciding not to encode the field put a measured-looking pressure in the bench capture
+    // that the uplink does not carry, and the next person to compare the two starts debugging
+    // the decoder or the register map instead of the barometer. A console line that
+    // contradicts the wire is worse than no console line.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §2.1 null policy — a `0` pressure register is
+    //   omitted, and "0.0 hPa is a vacuum, not weather".
+    // CITE(bench): docs/EVIDENCE.md — evidence is the raw observation; a diagnostic that
+    //   disagrees with the encoded payload is not one.
+    if (out.pressure.valid) {
+        LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, %u.%u hPa\n",
+             regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,
+             regs[kWindDirection],
+             (int16_t)regs[kTemperature] / 10, abs((int16_t)regs[kTemperature] % 10),
+             regs[kHumidity] / 10, regs[kHumidity] % 10,
+             regs[kPressure] / 10, regs[kPressure] % 10);
+    } else {
+        LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, pressure null\n",
+             regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,
+             regs[kWindDirection],
+             (int16_t)regs[kTemperature] / 10, abs((int16_t)regs[kTemperature] % 10),
+             regs[kHumidity] / 10, regs[kHumidity] % 10);
+    }
 
     return out;
 }

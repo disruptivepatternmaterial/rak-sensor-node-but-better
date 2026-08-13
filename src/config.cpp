@@ -192,14 +192,32 @@ bool Config::set_interval_seconds(uint32_t seconds)
         return true; // no write — flash cycles are a consumable
     }
 
-    m_interval = seconds;
+    // Staged, and rolled back if the write does not land. Leaving the new value in m_interval
+    // after a failed save() made the *second* attempt a silent no-op: the `seconds ==
+    // m_interval` test above returned true without writing anything, so a caller retrying a
+    // deferred set-interval cleared its pending value believing it had persisted. The command
+    // was then dropped, having already told the console it would survive the reset. Reachable
+    // on every retry path and on every save() while the filesystem is unmounted, where save()
+    // returns false without ever touching flash.
+    //
+    // Rolling back rather than keeping it live is what makes the retry honest: the value stays
+    // applied in RAM by the caller that owns the retry (main.cpp), and this object reports
+    // only what is actually on flash. Refs #65.
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H5 — the interval must survive power loss, which is
+    //   a claim this function is the only thing entitled to make.
+    // CITE(spec): [CIT-LW-LINK] Class A — a downlink can only follow an uplink, so a dropped
+    //   set-interval cannot be re-sent on demand; the network has already drained its queue.
+    // CITE(prior-art): [CIT-LITTLEFS-DESIGN] "All POSIX operations ... are atomic, even in
+    //   event of power-loss" — a failed write leaves the previous record intact, so the stored
+    //   value really is the old one and rolling RAM back to match it is not a guess.
+    const uint32_t previous = m_interval;
+    m_interval              = seconds;
 
-    // A failed write is worth reporting rather than swallowing: the node will honor the
-    // new interval until the next reset and then silently revert to the old one, which
-    // from a distance looks like the downlink was ignored days later for no reason.
     if (!save()) {
-        LOGF("   config  : interval %lu s active but NOT saved — reverts on reset\n",
-             (unsigned long)m_interval);
+        m_interval = previous;
+        LOGF("   config  : interval %lu s NOT saved — still %lu s on flash\n",
+             (unsigned long)seconds, (unsigned long)m_interval);
         return false;
     }
 

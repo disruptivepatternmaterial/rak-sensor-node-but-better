@@ -182,6 +182,14 @@ class Config {
     // Validates, stores, and persists. Returns false for an out-of-range value, which is
     // then ignored entirely rather than clamped: a downlink asking for something
     // impossible is more likely a corrupted message than a real instruction.
+    //
+    // Also returns false when the write did not land, and in that case the in-RAM value is
+    // rolled back to what is on flash. True therefore means one thing only — the value is
+    // stored — which is what lets a caller retry safely. Keeping a failed value live made a
+    // retry a silent no-op: the second call matched the unwritten value, returned true, and
+    // the caller dropped the command believing it had persisted. Applying a value that is not
+    // yet stored is the caller's job (see main.cpp's pending_interval), because only the
+    // caller knows how long it intends to keep trying.
     bool set_interval_seconds(uint32_t seconds);
 
     uint32_t boot_count() const { return m_boots; }

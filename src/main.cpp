@@ -82,10 +82,30 @@ bool session_flash_write_allowed()
 // Consecutive cycles in which neither sensor produced a single field.
 uint32_t empty_cycles = 0;
 
-// A set-interval downlink accepted while the brownout gate withheld its flash write. Held in
-// RAM so the command takes effect on the very next sleep, and retried against the gate every
-// cycle until it lands on flash. Zero means nothing is pending. Refs #65.
+// A set-interval downlink that is live in RAM but not yet on flash — either the brownout gate
+// withheld the write, or the write was attempted and failed. Held here so the command takes
+// effect on the very next sleep, and retried until it lands. Zero means nothing is pending.
+// Refs #65.
 uint32_t pending_interval = 0;
+
+// Attempts the retry above is allowed to spend on flash. Bounded because Config now rolls its
+// value back when a write fails, which is what stops a dropped command — but an unbounded
+// retry against a filesystem that is broken rather than merely busy would then attempt a
+// remove-and-rewrite of the settings page on every wake, forever. That is precisely the thrash
+// H3 forbids, arriving by the door opened to fix a different defect. Three, because a write
+// that fails three times in a row on a pack the gate has already judged healthy is a broken
+// filesystem, not a transient. The value stays applied in RAM afterwards and the console says
+// so; it is the writing that stops, not the command.
+//
+// CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — "Brownout: no flash thrash". The bound exists to
+//   keep this retry inside that requirement.
+// CITE(prior-art): [CIT-LITTLEFS-DESIGN] copy-on-write metadata pairs committed with a CRC —
+//   a failed commit leaves the old record readable, so abandoning the retry loses the new
+//   value rather than corrupting the stored one.
+// CITE(policy): docs/POWER_BUDGET.md — flash erase-and-write is the largest non-radio current
+//   the node draws; spending it once per wake for the life of the deployment is not affordable.
+constexpr uint8_t kPendingIntervalWriteAttempts = 3;
+uint8_t           pending_interval_writes_left  = 0;
 
 // How often to transmit proof of life while both sensors stay silent. The first quiet cycle
 // reports immediately, so a wiring mistake made during installation is visible before anyone
@@ -299,9 +319,18 @@ void loop()
     // after brownout.update() has seen this cycle's reading, so the write happens on the first
     // cycle where it is affordable rather than waiting for another downlink that may never
     // come — a Class A node cannot ask for one. Refs #65.
-    if (pending_interval != 0 && brownout.flash_write_allowed() &&
-        config.set_interval_seconds(pending_interval)) {
-        pending_interval = 0;
+    if (pending_interval != 0 && pending_interval_writes_left > 0 &&
+        brownout.flash_write_allowed()) {
+        --pending_interval_writes_left;
+        if (config.set_interval_seconds(pending_interval)) {
+            pending_interval = 0;
+        } else if (pending_interval_writes_left == 0) {
+            // Said plainly, because the earlier line promised persistence. The cadence is
+            // still the one that was commanded; it is only the flash copy that is not.
+            LOGF("   config  : interval %lu s stays active in RAM — flash write failed, no "
+                 "further attempts, reverts to %lu s on reset\n",
+                 (unsigned long)pending_interval, (unsigned long)config.interval_seconds());
+        }
     }
 
     uint32_t sleep_for = (pending_interval != 0) ? pending_interval : config.interval_seconds();
@@ -368,8 +397,9 @@ void loop()
             DownlinkCommand cmd;
             if (radio.take_downlink(cmd)) {
                 if (cmd.set_interval) {
-                    if (brownout.flash_write_allowed()) {
-                        config.set_interval_seconds(cmd.interval_value);
+                    if (brownout.flash_write_allowed() &&
+                        config.set_interval_seconds(cmd.interval_value)) {
+                        // Live and on flash. Nothing left to retry.
                     } else if (Config::interval_in_range(cmd.interval_value)) {
                         // The gate refuses the flash write, not the command. Dropping it here
                         // was silent and unrecoverable: take_downlink() has already consumed
@@ -379,11 +409,21 @@ void loop()
                         // command, because a longer interval is how the node is nursed back.
                         // Applied in RAM now, written to flash on the first cycle the gate
                         // allows one. Refs #65, H3 in docs/FIRMWARE_SPEC.md §7.
-                        pending_interval = cmd.interval_value;
-                        sleep_for        = pending_interval;
-                        LOGF("   config  : interval %lu s active but NOT saved — brownout "
-                             "hold, will persist when the pack recovers\n",
-                             (unsigned long)pending_interval);
+                        pending_interval             = cmd.interval_value;
+                        pending_interval_writes_left = kPendingIntervalWriteAttempts;
+                        sleep_for                    = pending_interval;
+                        if (brownout.flash_write_allowed()) {
+                            // The gate allowed the write and it failed anyway. Same handling:
+                            // live now, retried on the next cycles, and never reported as
+                            // saved when it was not.
+                            LOGF("   config  : interval %lu s active but NOT saved — write "
+                                 "failed, retrying next cycle\n",
+                                 (unsigned long)pending_interval);
+                        } else {
+                            LOGF("   config  : interval %lu s active but NOT saved — brownout "
+                                 "hold, will persist when the pack recovers\n",
+                                 (unsigned long)pending_interval);
+                        }
                     } else {
                         // Range-checked here because Config never sees the value in this
                         // branch. Out of range is ignored entirely, not clamped, exactly as
