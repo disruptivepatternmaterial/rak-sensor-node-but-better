@@ -425,7 +425,14 @@ void loop()
                 if (cmd.set_interval) {
                     if (brownout.flash_write_allowed() &&
                         config.set_interval_seconds(cmd.interval_value)) {
-                        // Live and on flash. Nothing left to retry.
+                        // Live and on flash, and it governs the sleep that starts in a few
+                        // lines. sleep_for was computed before the downlink was read, so
+                        // leaving it alone spent one more cycle at the old cadence while the
+                        // brownout branch below applied its value immediately — the same
+                        // command taking effect a cycle apart depending on the pack. The spec
+                        // asks for "next wake after RX" (§4), and this sleep is what produces
+                        // that wake.
+                        sleep_for = config.interval_seconds();
                     } else if (Config::interval_in_range(cmd.interval_value)) {
                         // The gate refuses the flash write, not the command. Dropping it here
                         // was silent and unrecoverable: take_downlink() has already consumed
