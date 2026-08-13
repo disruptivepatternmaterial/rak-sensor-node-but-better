@@ -1,6 +1,7 @@
 #include "radio.h"
 
 #include "build_features.h"
+#include "config.h"
 #include "session.h"
 
 #if FEATURE_RADIO
@@ -52,11 +53,33 @@ constexpr uint32_t kRxWindowFallbackMs = 7000;
 // between tries. Same number of attempts over a day, a small fraction of the current.
 #define JOINREQ_NBTRIALS 1
 
-// Backoff bounds. The cap is deliberately below the default reporting interval so a
-// recovering network is noticed promptly, and the growth stops the node spending its whole
-// energy budget transmitting into an outage.
-constexpr uint32_t kBackoffFirstSeconds = 60;
+// Backoff bounds. The growth stops the node spending its whole energy budget transmitting
+// into an outage, and the cap is at the default reporting interval so a recovering network
+// is noticed within one ordinary cycle.
+//
+// The first step is the fair-use floor, not something shorter. main.cpp replaces the sleep
+// with this value on any join or send failure, so a shorter first step is a cadence the
+// config.h static_assert exists to make unbuildable — reached at run time instead of at
+// compile time. At 60 s an alternating fail/succeed pattern reaches roughly 67 s of airtime
+// a day at DR0, more than twice the allowance, and the retry it buys is worthless anyway:
+// a gateway that was unreachable a minute ago almost always still is. Raising the constant
+// rather than clamping the sleep in main.cpp keeps the join-failure log line honest, which
+// is the whole of #24 — a backoff that reports one wait and takes another is the defect
+// that cost the bring-up.
+//
+// CITE(policy): [CIT-TTN-FUP] 30 s of uplink airtime per node per 24 h.
+// CITE(spec): [CIT-LORA-RP002] US915 data rates and per-DR payload sizes — the basis for
+//   the ~370 ms an 11-byte uplink takes at DR0 (SF10BW125) versus ~98 ms at DR3.
+// CITE(spec): docs/FIRMWARE_SPEC.md §4 — the 900 s field interval floor these agree with.
+constexpr uint32_t kBackoffFirstSeconds = kFupFloorSeconds;
 constexpr uint32_t kBackoffMaxSeconds   = 3600;
+
+// Asserted for the same reason config.h asserts the interval floor: a build that can
+// transmit faster than the shared allowance should not exist, and the backoff is the one
+// path that overrides the interval.
+static_assert(kBackoffFirstSeconds >= kFupFloorSeconds,
+              "The join/send backoff would transmit faster than the fair-use floor, "
+              "overriding the interval the config.h static_assert protects.");
 
 // Consecutive send failures before the session is treated as dead. Rejoining is expensive
 // and only helps when the network has genuinely forgotten the node, so it should follow a

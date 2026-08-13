@@ -10,6 +10,18 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A failed join or uplink no longer retries fifteen times faster than the fair-use floor
+  allows.** `config.h` carries a `static_assert` pinning every radio build to the 900 s
+  floor, but `main.cpp` replaces the sleep with `Radio::backoff_seconds()` on any join or
+  send failure, and its first step was 60 s. An alternating fail-then-succeed pattern
+  therefore reached roughly 67 s of airtime a day at DR0 — over twice TTN's 30 s allowance —
+  through the one path the compile-time guard could not see. The first backoff step is now
+  the fair-use floor itself, and a matching `static_assert` in `radio.cpp` keeps it there.
+  Raising the constant rather than clamping the sleep at the call site also keeps the
+  join-failure log line honest about how long the wait really is (#24).
+
+### Fixed
+
 - **A corrupted downlink can no longer pass itself off as a status request.**
   `0x01` set-interval was length-checked exactly (5 bytes) but `0x03` request-status accepted
   any frame of one byte or more, contrary to `docs/FIRMWARE_SPEC.md` §4 and rule 40, which
