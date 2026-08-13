@@ -82,6 +82,11 @@ bool session_flash_write_allowed()
 // Consecutive cycles in which neither sensor produced a single field.
 uint32_t empty_cycles = 0;
 
+// A set-interval downlink accepted while the brownout gate withheld its flash write. Held in
+// RAM so the command takes effect on the very next sleep, and retried against the gate every
+// cycle until it lands on flash. Zero means nothing is pending. Refs #65.
+uint32_t pending_interval = 0;
+
 // How often to transmit proof of life while both sensors stay silent. The first quiet cycle
 // reports immediately, so a wiring mistake made during installation is visible before anyone
 // leaves the site; after that the rate drops to keep a permanently broken sensor from
@@ -285,7 +290,16 @@ void loop()
         ++empty_cycles;
     }
 
-    uint32_t sleep_for = config.interval_seconds();
+    // An interval taken during a brownout hold is live now and persisted later. Retried here,
+    // after brownout.update() has seen this cycle's reading, so the write happens on the first
+    // cycle where it is affordable rather than waiting for another downlink that may never
+    // come — a Class A node cannot ask for one. Refs #65.
+    if (pending_interval != 0 && brownout.flash_write_allowed() &&
+        config.set_interval_seconds(pending_interval)) {
+        pending_interval = 0;
+    }
+
+    uint32_t sleep_for = (pending_interval != 0) ? pending_interval : config.interval_seconds();
 
 #if FEATURE_RADIO
     // One uplink allowed through a no-evidence hold, so a node with a healthy pack and a dead
@@ -348,8 +362,33 @@ void loop()
             }
             DownlinkCommand cmd;
             if (radio.take_downlink(cmd)) {
-                if (cmd.set_interval && brownout.flash_write_allowed()) {
-                    config.set_interval_seconds(cmd.interval_value);
+                if (cmd.set_interval) {
+                    if (brownout.flash_write_allowed()) {
+                        config.set_interval_seconds(cmd.interval_value);
+                    } else if (cmd.interval_value >= kIntervalMinSeconds &&
+                               cmd.interval_value <= kIntervalMaxSeconds) {
+                        // The gate refuses the flash write, not the command. Dropping it here
+                        // was silent and unrecoverable: take_downlink() has already consumed
+                        // the frame and the network has already drained its queue, so there is
+                        // nothing left to retry and — being Class A — no way to ask again. A
+                        // brownout hold is also exactly when an operator reaches for this
+                        // command, because a longer interval is how the node is nursed back.
+                        // Applied in RAM now, written to flash on the first cycle the gate
+                        // allows one. Refs #65, H3 in docs/FIRMWARE_SPEC.md §7.
+                        pending_interval = cmd.interval_value;
+                        sleep_for        = pending_interval;
+                        LOGF("   config  : interval %lu s active but NOT saved — brownout "
+                             "hold, will persist when the pack recovers\n",
+                             (unsigned long)pending_interval);
+                    } else {
+                        // Range-checked here because Config never sees the value in this
+                        // branch. Out of range is ignored entirely, not clamped, exactly as
+                        // Config::set_interval_seconds() would have done.
+                        LOGF("   config  : rejected interval %lu s (allowed %lu-%lu)\n",
+                             (unsigned long)cmd.interval_value,
+                             (unsigned long)kIntervalMinSeconds,
+                             (unsigned long)kIntervalMaxSeconds);
+                    }
                 }
                 if (cmd.request_status) {
                     // The next cycle's uplink is the answer. Rather than transmitting

@@ -10,6 +10,18 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A set-interval downlink delivered during a brownout hold is no longer thrown away.**
+  `main.cpp` gated the command on `brownout.flash_write_allowed()`, so while the gate held
+  the command was dropped with no console line, no effect in RAM, and nothing to retry —
+  `take_downlink()` had already consumed the frame and the network had already drained its
+  queue. Being Class A, there was no way to ask for it again either. A hold is precisely
+  when an operator reaches for this command, since a longer interval is how a low node is
+  nursed back. The new interval now takes effect on the next sleep and is written to flash
+  on the first cycle the gate allows a write, so H3's no-flash-during-brownout rule is
+  unchanged. Out-of-range values are still ignored rather than clamped. (#65)
+
+### Fixed
+
 - **A failed join or uplink no longer retries fifteen times faster than the fair-use floor
   allows.** `config.h` carries a `static_assert` pinning every radio build to the 900 s
   floor, but `main.cpp` replaces the sleep with `Radio::backoff_seconds()` on any join or
