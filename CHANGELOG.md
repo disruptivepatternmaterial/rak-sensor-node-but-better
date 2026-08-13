@@ -10,6 +10,18 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A corrupted downlink can no longer pass itself off as a status request.**
+  `0x01` set-interval was length-checked exactly (5 bytes) but `0x03` request-status accepted
+  any frame of one byte or more, contrary to `docs/FIRMWARE_SPEC.md` §4 and rule 40, which
+  both specify one byte. Any garbled frame whose first byte happened to be `0x03` shortened
+  the sleep to the interval floor and spent an unscheduled uplink out of a 30 s/day airtime
+  budget. `0x03` is now checked exactly, and a known opcode arriving with the wrong length
+  says so instead of being reported as `unknown opcode 0x01` — which named the wrong cause
+  and pointed whoever was reading the console at a firmware mismatch that did not exist.
+  (#63, #64)
+
+### Fixed
+
 - **The rejoin escape no longer leaves the radio on the wrong eight channels.**
   `Radio::begin()` selects US915 sub-band 2 once and then returns early on every later call,
   so the only path that reconfigures the MAC afterwards — `lmh_reset_mac()` in the

@@ -438,10 +438,32 @@ bool Radio::take_downlink(DownlinkCommand &out)
         return true;
     }
 
-    if (opcode == kCmdRequestStatus) {
+    // Exact length here too, for the same reason and because the contract says so: request
+    // status is one byte and nothing else. Accepting anything at or above one byte meant a
+    // corrupted frame that happens to start 0x03 shortened the sleep to the interval floor
+    // and spent an unscheduled uplink out of a budget measured in seconds per day. Refs #63.
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §4 — downlink 0x03 request-status carries no
+    //   arguments, 1 byte total, on fPort 10.
+    // CITE(policy): [CIT-TTN-FUP] 30 s of uplink airtime per node per 24 h, so an uplink
+    //   provoked by a corrupted frame is spent out of a budget that does not refill.
+    // CITE(spec): [CIT-LW-LINK] §3 Class A — the node cannot ask the network to repeat a
+    //   garbled command, so a frame that does not look exactly right is discarded, not
+    //   guessed at.
+    if (opcode == kCmdRequestStatus && s_rx_len == 1) {
         out.request_status = true;
         LOGLN(F("   radio   : downlink — status requested"));
         return true;
+    }
+
+    // A known opcode carrying the wrong number of bytes is a different diagnosis from an
+    // opcode this firmware has never heard of, and reporting the first as the second sends
+    // whoever is reading the console looking for a firmware mismatch that does not exist.
+    // Refs #64.
+    if (opcode == kCmdSetInterval || opcode == kCmdRequestStatus) {
+        LOGF("   radio   : downlink — opcode 0x%02X with wrong length %u, ignored\n", opcode,
+             (unsigned)s_rx_len);
+        return false;
     }
 
     // An unrecognized opcode is ignored rather than treated as an error. That is what lets
