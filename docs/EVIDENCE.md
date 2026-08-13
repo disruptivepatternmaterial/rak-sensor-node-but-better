@@ -2625,6 +2625,59 @@ on it. No background processes were left running.
 
 - **Still zero soak hours.** One cycle is not a soak; `README.md` stays `🚧 NOT YET DEPLOYED`.
 
+### 2026-08-13 — inline USB current meter: peak ~40 mA, minimum reads `0` at a **10 mA** resolution floor
+
+- **Commit:** `572bcfa` — the `v0.4.2` soak image (`env:soak`, byte-identical to `env:rak4631`
+  per [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)), running a 900 s cycle.
+- **Host:** **not** Heliotrope Ridge. The node was moved off the bench and the readings come from
+  the **operator's inline USB current meter**, wired between the USB host power source and the
+  RAK4631. Heliotrope Ridge built and flashed the image; it did not take this measurement. The
+  24 h TTN-side soak monitor was running throughout and is unaffected.
+- **Measured:** whole-board current drawn over the USB supply rail, across the awake and sleeping
+  phases of the 900 s cycle.
+- **Observation** — operator-reported, verbatim:
+
+  ```
+  max amp = .04
+  min is 0
+  yeah it goes to 100ths that is all
+  ```
+
+  So: peak **0.04 A = 40 mA**; minimum **reads `0`**; display resolution **0.01 A**, i.e. one
+  least-significant digit is **10 mA**. A single digit of resolution makes the peak
+  "0.04 ± 0.01 A", not a precise 40 mA.
+
+- **What this establishes.**
+  1. **Peak draw observed so far is ~40 mA.** No subsystem is stuck drawing hundreds of
+     milliamps — the coarse but real upper bound rules out a runaway rail.
+  2. **Sleep/idle current is below 10 mA.** That is the only thing the `0` reading supports.
+
+- **What this does NOT establish — read this before quoting a number from it.**
+  1. **No sleep-current figure exists.** The `0` minimum is the meter's **resolution floor, not a
+     measurement**. This is the *same trap* already recorded in this file for the RAK9154 pack
+     telemetry, whose LSB is also 10 mA while [`POWER_BUDGET.md`](POWER_BUDGET.md) turns on
+     roughly **1 mA** — and whose documented defect cases (0.89–1.2 mA for peripherals left
+     enabled, ~6 mA for the radio left awake) all sit **at or below one LSB**. A 10 mA meter is no
+     better than the pack telemetry for this question. The module's own datasheet sleep figure is
+     **2.0 µA** [CIT-RAK4631-RAW] — roughly 5000× below one digit of this display. "Sleep current
+     is unmeasured" stays an open blocker in `AGENTS.md` and issue
+     [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+  2. **The LoRa TX current has not been measured.** 40 mA is *lower* than the datasheet's
+     transmit figures — RAKwireless gives `Tx mode LoRa @17 dBm` **92 mA** and `@20 dBm`
+     **125 mA** [CIT-RAK4631-RAW]. The likely explanation is that the meter's slow display
+     sampling missed the ~50 ms transmit burst, **not** that the radio drew less than its
+     datasheet. Do not record 40 mA as a transmit figure. The operator has left the meter inline
+     to watch for a higher peak across further cycles.
+
+- **Verdict:** **INCONCLUSIVE.** Useful as a coarse upper bound on peak draw and as a ceiling on
+  idle draw (< 10 mA). It closes no power gate. Per `AGENTS.md`, this must not be inherited by any
+  later document as "sleep current measured" — it is the absence of a measurement, recorded.
+
+- **Next:** closing the power gate needs instrumentation with **µA resolution** — a Nordic PPK2
+  (the method behind [CIT-RAK-SLEEP]), a current-sense shunt read on a scope, or a
+  coulomb-counting integration over a long window. Tracked in
+  [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary

@@ -81,7 +81,8 @@ runtime_hours = usable_pack_capacity_mAh / I_avg_mA
 | MCU wake + init | TBD | TBD | measured | ⬜ |
 | RS-485 enabled, RK900 poll | ≤ 1 s per txn, ≤ 2 retries (`FIRMWARE_SPEC.md` §2.1) | TBD — includes RAK5802 transceiver | [CIT-RAK5802] + measured | ⬜ |
 | BMS poll | ≤ 1 s per txn | TBD | measured | ⬜ |
-| LoRa TX | depends on DR/SF and payload | TBD at US915 TX power | [CIT-SX1262] | ⬜ |
+| LoRa TX | depends on DR/SF and payload | TBD at US915 TX power — datasheet reference **92 mA @ 17 dBm**, **125 mA @ 20 dBm** | [CIT-SX1262] + [CIT-RAK4631-RAW] | ⬜ |
+| Whole board, peak over one 900 s cycle | burst | **~40 mA ± 10 mA observed** — coarse; the meter likely missed the TX burst | bench meter, 2026-08-13 ([EVIDENCE.md](EVIDENCE.md)) | coarse |
 | RX1 + RX2 windows | per Class A | TBD | [CIT-LW-LINK] + [CIT-SX1262] | ⬜ |
 | Flash write (interval change only) | rare | TBD | [CIT-NRF-POWER] | ⬜ |
 
@@ -123,6 +124,28 @@ independent reasons, either of which alone is fatal:
 
 **Resolution floor: 10 mA. Required resolution: ~1 mA. A meter is the only way.** No sleep
 current figure is recorded here, and none should be quoted from pack telemetry.
+
+### …and not just any meter — a 10 mA bench meter fails for the identical reason
+
+Attempted 2026-08-13 (`572bcfa`) with an inline USB current meter between the host supply and the
+board. Its display resolves to **0.01 A**, so **one digit is 10 mA** — exactly the pack telemetry's
+LSB, and exactly ten times the figure this page turns on. It read a peak of **0.04 A** and a
+minimum of **`0`**.
+
+**That `0` is a resolution floor, not a measurement.** It establishes only that idle draw is
+*below 10 mA*, which every defect case in the table above already satisfies: 0.89–1.2 mA for
+peripherals left enabled and ~6 mA for the radio left awake would each display as `0`. The
+module's own datasheet sleep figure is **2.0 µA** [CIT-RAK4631-RAW], roughly 5000× below a single
+digit. **No sleep-current figure exists, and this measurement did not produce one.**
+
+The 40 mA peak is a genuine — if coarse — ceiling on peak draw, and it rules out a subsystem stuck
+in the hundreds of milliamps. It is **not** a transmit measurement: it sits *below* the datasheet's
+92 mA at 17 dBm [CIT-RAK4631-RAW], which points at the meter's slow sampling missing the ~50 ms
+burst rather than at a radio drawing less than spec.
+
+Closing this needs µA-capable instrumentation — a Nordic PPK2 (the method behind
+[CIT-RAK-SLEEP]), a shunt on a scope, or coulomb counting over a long window. Tracked in
+issue [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
 
 This leaves the `delay()`-based sleep at `src/power.cpp:134-136` unmeasured, exactly as its
 own comment at `:129-133` states. It parks the task in FreeRTOS and lets the idle task drop
