@@ -2218,6 +2218,48 @@ reaching the board.
 RESET on the RAK19007 brings it back immediately and is the fastest route to getting `23604cf`
 on it. No background processes were left running.
 
+### 2026-08-13 — sixteen unattended `stage3` cycles, both sensors live, no reset
+
+- **Firmware on the board:** the boot banner carries **no git SHA** — only
+  `firmware : 0.4.1` and `built    : Aug 12 2026 23:32:15`. It cannot be pinned to a commit
+  from the console alone. The newest commit on the build host older than that build stamp is
+  `f15a983` (2026-08-12 21:16:45 -0700), which is also current `main`; that is consistent with
+  the banner and is **not** the same as confirmed. Recorded this way deliberately rather than
+  asserting `f15a983` ran.
+- **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`, console captured to
+  `/tmp/stage3_cap.txt` by a single attached reader.
+- **Measured:** an unattended `stage3` run — RK900 weather read, RAK9154 pack telemetry and an
+  uplink per cycle, with `FEATURE_SLEEP=0` and a 1800 s awake wait between cycles.
+- **Observation:** one boot banner in the whole capture (no reset), cycle markers **1 and 3–17**
+  present and strictly increasing, 14 `sent 35 bytes on port 2` lines, session restored rather
+  than rejoined (`session : restored 0x260CE734, counter 2080`). Cycle 17 verbatim:
+
+  ```
+  [cycle 17]
+     RK900   : raw 0x0000-0x0004 = 0000 0000 00F7 024F 2716
+     RK900   : wind 0.00 m/s @ 0 deg, 24.7 C, 59.1 %RH, 1000.6 hPa
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sendat FF 7E 00 15 02 01 00 01 15 03 10 02 15 BA AC 04 16 B9 FF FF 17 B8 55 18 67 DC 00 47
+     battery : 11.96 V  -0.01 A  85%  22.0 C
+     battery : raw v=1196 i=-1 soc=85 t=220 (t scale UNCONFIRMED — 230 means tenths, 23 means whole degrees)
+     radio   : sent 35 bytes on port 2
+     wait    : 1800 s (sleep disabled)
+  ```
+
+- **Verdict:** PASS for what it covers — the field-image cycle repeats without intervention and
+  both sensors answer every cycle. Pack voltage drifts 12.02 V → 11.96 V and SoC 87% → 85% over
+  the run, at roughly −0.01 A reported, which is the 10 mA telemetry LSB and therefore still not
+  a current measurement.
+- **Notes and what this is *not*:**
+  - **Not a soak.** `FEATURE_SLEEP=0`, so the sleep path — the whole point of H8 — is never
+    entered. Zero soak hours still exist.
+  - **Not proof of [#62].** The pack was already latched at `0x01` for every cycle, so the
+    re-latch path was never exercised. Two cycle markers are missing from the capture
+    (`[cycle 2]`, and 14 uplink lines against 16 markers); the reader attached after boot, so
+    absence here is a gap in the capture, not an observed failure. It is recorded as a gap.
+  - **Nothing was flashed and nothing was reset.** The board was left running, the reader left
+    attached.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary
