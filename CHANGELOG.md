@@ -8,6 +8,19 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **The one-wire receive timeouts carry their reasoning, and the SENDAT turnaround uses the
+  named constant.** `kFirstByteTimeoutUs` and `kInterByteTimeoutUs` were bare numbers with
+  half-line comments; both are now sourced against the watchdog window, the awake-time budget,
+  and the 3.5-character framing idea they are modelled on. `query()` also had a bare `delay(2)`
+  where it means `kTurnaroundMs` — the cited guard gap that made the pack latch in the first
+  place — which was a second place for that value to drift.
+- **`owscan`'s verdict no longer reads as proof that the handshake works.** The scan never
+  answers a VER3 announcement, so it cannot latch a pid or observe one; "bytes arrived, the
+  pack talks" has been mistaken for "the pid latched" more than once. The verdict now says so
+  and points at `battdiag`.
+
 ### Fixed
 
 - **The Modbus pre-transaction drain is bounded and feeds the watchdog.** `drain_and_settle()`

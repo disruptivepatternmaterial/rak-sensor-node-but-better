@@ -556,6 +556,13 @@ void onewire_scan(uint8_t pin)
         LOGLN(F("          not the wire. Read the hex above before changing any constant —"));
         LOGLN(F("          which phase produced it says whether the pack answers unprompted,"));
         LOGLN(F("          answers a BOOT, or answers a SENDAT, and at which probe id."));
+        // The verdict has to say what it cannot see. This scan never answers an announcement,
+        // so it cannot latch a pid and cannot report whether one is latched -- and "the pack
+        // talks" has been read as "the handshake works" more than once in this project's
+        // history. battdiag is the build that answers.
+        LOGLN(F("          It does NOT mean the pid latched: this scan never answers a VER3"));
+        LOGLN(F("          announcement, so it cannot complete or confirm the handshake. Use"));
+        LOGLN(F("          the battdiag build for that, and read the provId in its dump."));
     }
     LOGLN();
 }

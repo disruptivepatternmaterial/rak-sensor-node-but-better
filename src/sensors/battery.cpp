@@ -348,6 +348,27 @@ SoftwareHalfSerial &bus(uint8_t pin)
 //   shared line reproduces.
 SoftwareHalfSerial &link_for(uint8_t pin) { return bus(pin); }
 
+// How long a receive waits for the first byte, and how long a gap ends a frame.
+//
+// Both are bench-derived rather than published: no document states this pack's reply latency,
+// and PARAMGET drew no reply on this link, so there is nothing to read it out of. What bounds
+// them is on our side. The first-byte wait is the price a cycle pays per unanswered query, so
+// it is set by the wake budget, not by patience — half a second, against a 900 s interval and
+// the 120 s watchdog window, is affordable per query and could not hide a hang. The inter-byte
+// gap is roughly 4.4 character times at 9600 8N1 (1.146 ms per byte), the same shape as the
+// 3.5-character silence Modbus uses to delimit an RTU frame, with margin for the pack pausing
+// mid-record.
+//
+// CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — the 120 s watchdog is the outer bound every wait
+//   in this driver has to sit inside; §2.1 sets the same discipline for the other bus.
+// CITE(spec): [CIT-MODBUS-SERIAL] the 3.5-character inter-frame silence is the standard way a
+//   byte-oriented serial link decides a frame has ended; this is that idea at 9600 8N1 with
+//   margin, on a bus with no length field the parser can trust before checksumming.
+// CITE(policy): docs/POWER_BUDGET.md — awake time is the budget item with no upside, so an
+//   unanswered query has to cost a bounded, small fraction of the cycle.
+// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp onewireHandle() uses a
+//   per-byte `delay(2)` grace to delimit the same frames; the gap here is that idea expressed
+//   as a timeout, widened because this driver reads once per wake instead of every 50 ms.
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 
@@ -658,7 +679,10 @@ size_t Battery::query(uint8_t dest, uint8_t *buf, size_t cap)
 {
     link_for(m_pin).flush(); // anything still queued predates this request
     send_frame(dest, kHubTypeSendData, kPayloadSendData);
-    delay(2); // let the probe turn the line around
+    // The same turnaround guard the provisioning reply uses, by name rather than by a bare 2.
+    // This gap is the fix that made the pack latch at all (see kTurnaroundMs); a duplicate
+    // literal here is a second place for it to drift out of agreement with the cited one.
+    delay(kTurnaroundMs);
     return receive(buf, cap);
 }
 
