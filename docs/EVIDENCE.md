@@ -2464,6 +2464,138 @@ on it. No background processes were left running.
   - Sleep current remains unmeasured, and cannot be measured over USB (rule 50 trap 5) or from
     pack telemetry, whose LSB is 10 mA.
 
+### 2026-08-13 — `65f8615` on hardware: battery ladder survives 20 cycles, field image reaches sleep, and one transient probe miss still spends the BOOT
+
+- **Commit:** `65f8615` — **read back from the boot banner on the board**, not inferred
+- **Host:** Heliotrope Ridge (`ntableman@130.111.32.200`), board `/dev/cu.usbmodem31201`
+- **Measured:** (1) `env:battdiag` — 20 consecutive ~10 s battery cycles at `65f8615`;
+  (2) `env:soak` — the field image, one full cycle including the sleep call
+- **Observation — `env:battdiag` boot banner and first cycle:**
+
+  ```
+  === rak-sensor-node ===
+  firmware : 0.4.1
+  commit   : 65f8615
+  built    : Aug 13 2026 13:02:09
+  features : rk900=0 battery=1 radio=0 sleep=0 wdt=1
+  interval : bench=1, bounds 10-86400 s, default 10 s
+     config  : bench build — interval forced to 10 s, stored value ignored
+     config  : interval 10 s, boot #1
+
+  [cycle 1]
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sampling confirmed — pack is reporting live values
+     battery : sendat FF 7E 00 15 02 01 00 01 01 03 10 02 15 BA A8 04 16 B9 FF FF 17 B8 54 18 67 F0 00 42
+     battery : 11.92 V  -0.01 A  84%  24.0 C
+     battery : raw v=1192 i=-1 soc=84 t=240 (t scale UNCONFIRMED — 230 means tenths, 23 means whole degrees)
+     wait    : 10 s (sleep disabled)
+  ```
+
+  The banner naming its own commit re-confirms the build-stamp change on hardware, this time at
+  `65f8615`.
+
+- **Observation — the pack was live in every one of 20 cycles.** Cycles 1 through 20 each printed
+  `11.92 V  -0.01 A  84%  24.0 C`, raw `v=1192 i=-1 soc=84 t=240`, and the cycle counter advanced
+  monotonically `[cycle 1]` … `[cycle 20]` with **no second boot banner**, no reset and no crash
+  loop. Slightly below the previous night's `11.94 V ... 84%`, consistent with a slow drift down on
+  USB power with no charge source.
+
+- **Observation — the expected post-boot `Unsampled` cycles did not occur, so `e070708` was not
+  exercised.** `AGENTS.md` documents ~2 null cycles after boot while the pack samples. This capture
+  had **zero**: cycle 1 already reported `sampling confirmed — pack is reporting live values` and a
+  live reading. The pack had been polled continuously by an immediately preceding `battdiag` flash,
+  so it was already sampled when the MCU restarted. **The specific defect `e070708` fixes — an
+  ordinary `Unsampled` reply from `0x01` being scored as no answer — therefore did not arise, and
+  the fix remains compile-verified only.** No `Unsampled` line appears anywhere in the capture.
+
+- **Observation — a `BOOT` did fire, on cycle 10, and it was a genuine one-cycle probe miss, not
+  the `e070708` path:**
+
+  ```
+  [cycle 9]
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sendat FF 7E 00 15 02 01 00 01 09 03 10 02 15 BA A8 04 16 B9 FF FF 17 B8 54 18 67 F0 00 43
+     battery : 11.92 V  -0.01 A  84%  24.0 C
+
+  [cycle 10]
+     battery : pack silent at its id — one BOOT this power cycle
+     battery : no confirmed latch — proceeding unprovisioned
+     battery : sendat FF 7E 00 15 02 01 00 01 0C 03 10 02 15 BA A8 04 16 B9 FF FF 17 B8 54 18 67 F0 00 43
+     battery : 11.92 V  -0.01 A  84%  24.0 C
+
+  [cycle 11]
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sendat FF 7E 00 15 02 01 00 01 0D 03 10 02 15 BA A8 04 16 B9 FF FF 17 B8 54 18 67 F0 00 44
+     battery : 11.92 V  -0.01 A  84%  24.0 C
+  ```
+
+  Read the sequence-number byte: cycle 9 used `09`, cycle 10's surviving frame used `0C`, cycle 11
+  used `0D`. Two sequence numbers (`0A`, `0B`) were consumed by probe attempts that drew no matched
+  reply, so phase 0 genuinely saw silence — this is not an `Unsampled` reply being misread. The
+  pack then answered the push listen in the **same** cycle with a live reading, and cycle 11 was
+  clean again. So a single transient miss, roughly 1 cycle in 20, is enough to spend the one BOOT
+  the power cycle is allowed and to send the reboot verb to a demonstrably healthy pack. Filed as
+  [#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75).
+
+- **Observation — the pack never appeared unlatched.** `provId 0xFF` does not occur anywhere in the
+  capture; every cycle but 10 printed `pack answered at 0x01 — skipping provisioning`. The
+  re-latch path in
+  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) was
+  **not exercised** and remains unproven.
+
+- **Observation — `env:soak` (the field image, byte-identical to `env:rak4631`) at `65f8615`, one
+  full cycle ending in the sleep call:**
+
+  ```
+  === rak-sensor-node ===
+  firmware : 0.4.1
+  commit   : 65f8615
+  built    : Aug 13 2026 13:07:15
+  features : rk900=1 battery=1 radio=1 sleep=1 wdt=1
+  interval : bench=0, bounds 900-86400 s, default 3600 s
+  deveui   : 42BB96EF76E200F1
+  appeui   : 0000000000000000
+  region   : US915 sub-band 2
+     config  : interval 900 s, boot #3
+     session : restored 0x260CE734, counter 2208
+
+  [cycle 1]
+     RK900   : raw 0x0000-0x0004 = 0000 0000 0103 024B 2708
+     RK900   : wind 0.00 m/s @ 0 deg, 25.9 C, 58.7 %RH, 999.2 hPa
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sampling confirmed — pack is reporting live values
+     battery : sendat FF 7E 00 15 02 01 00 01 01 03 10 02 15 BA A8 04 16 B9 FF FF 17 B8 54 18 67 F0 00 42
+     battery : 11.92 V  -0.01 A  84%  24.0 C
+     battery : raw v=1192 i=-1 soc=84 t=240 (t scale UNCONFIRMED — 230 means tenths, 23 means whole degrees)
+     session : saved 0x260CE734, resume at 2240
+     radio   : sent 35 bytes on port 2
+     sleep   : 900 s
+  ```
+
+  Both sensors read in the same cycle, the session restored rather than rejoined, an uplink went
+  out, and the cycle closed `sleep   : 900 s` — not `wait    : N s (sleep disabled)`. The persisted
+  900 s interval from the 2026-08-13 downlink matrix survived two reflashes and is still in force.
+
+- **Observation — RK900 null-pressure honesty (`da655e9`) is untested.** The only field-image cycle
+  captured read a real pressure, `999.2 hPa` from raw `2708`, so the summary line had a genuine
+  value to print and the refused-pressure branch was never entered. Nothing was observed either
+  way; the fix stays compile-verified only.
+
+- **Verdict:** PASS on survival and on the sleep path — the battery ladder ran 20 cycles at
+  `65f8615` with live values and no reset, and the field image reached `sleep   : 900 s`.
+  INCONCLUSIVE on `e070708` and on `da655e9`, neither of which had its defect condition arise.
+  One new defect found and filed
+  ([#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75)).
+
+- **Board left:** running `env:soak` at `65f8615`, asleep on a 900 s cycle, session `0x260CE734`.
+  The field image detaches from USB ~180 s after boot by design
+  ([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md),
+  [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)), so the
+  board disappearing from `/dev/cu.usbmodem*` is correct behavior, not a dead board. One RESET
+  press restores the console and a flashable window.
+
+- **Still zero soak hours.** One cycle is not a soak; `README.md` stays `🚧 NOT YET DEPLOYED`.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary

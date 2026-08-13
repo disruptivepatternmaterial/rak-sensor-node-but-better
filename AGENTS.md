@@ -95,7 +95,7 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 3 | RAK9154 battery telemetry over one-wire | **working on hardware 2026-08-05 (`1a203d3`, re-verified `b6bbf31`)** — pack latches pid `0x01` and reports `12.23 V, +0.00 A, 98%, 23.0 °C` across seven consecutive cycles ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Root cause of the long stall was reply turnaround timing, not framing: answer no sooner than 2 ms after the pack's last byte (`kTurnaroundMs`) and lead every frame with four wake bytes. **Expect ~2 null cycles after boot while the pack samples — this line is load-bearing.** Re-confirmed 2026-08-12 (`b436aa9`): 20 consecutive `battdiag` cycles, 19 live, the one null being cycle 2, latched at `0x01` throughout with no `provId FF` anywhere in the capture. Several sessions read that null cycle as a provisioning failure because `stage3`'s 1800 s cycle means one capture window holds exactly one cycle — **use `battdiag` (~10 s) for any pack question, never `stage3`.** Open: [#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36), [#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) |
 | 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | Downlink matrix: all eight command cases | **8/8 PASS on hardware 2026-08-13** (inferred `f15a983`, `stage3`, sleep disabled) — valid `0x01` set-interval (1800 s → 900 s, persisted across a reflash), valid `0x03` status, wrong-length `0x01` and `0x03` both rejected as *wrong length* not *unknown opcode* ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63), [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)), unknown opcode `0x7F` ignored, valid command on the wrong FPort ignored by port, two queued commands drained one per cycle, and cycles 18–26 monotonic with no reset. `take_downlink()` observed for the first time, closing [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | Field image on the board, sleep reached | `env:soak` (byte-identical to `env:rak4631`) flashed 2026-08-13 at **`d568574`, asserted from the banner** — the first board to name its own commit. One cycle: both sensors read, uplink sent, and the cycle closed `sleep   : 900 s`, not `wait    : N s (sleep disabled)`. One cycle is not a soak ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
+| — | Field image on the board, sleep reached | `env:soak` (byte-identical to `env:rak4631`) flashed 2026-08-13 at **`d568574`, asserted from the banner** — the first board to name its own commit. One cycle: both sensors read, uplink sent, and the cycle closed `sleep   : 900 s`, not `wait    : N s (sleep disabled)`. One cycle is not a soak. Repeated 2026-08-13 at **`65f8615`**, banner-asserted again: both sensors, session `0x260CE734` restored not rejoined, 35 bytes on port 2, `sleep   : 900 s` ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **Not started. Zero soak hours exist.** The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. It has never produced a soak hour: the one attempt, 2026-08-12 at `f626698`, waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
 
 ## Where v0.4.1 leaves things
@@ -116,7 +116,19 @@ root cause — **#62 stays open**, the re-latch is unproven), empty pack records
 silence, an all-zero RK900 span refused instead of encoded as weather, and a bounded Modbus drain
 that feeds the watchdog.
 
-**Treat every one as *believed correct, unobserved*.** Several sit on the sleep, brownout and
+**2026-08-13 update: `65f8615` has now run on hardware, and the picture is partly better and
+partly unchanged.** `env:battdiag` at `65f8615` ran 20 consecutive cycles with the pack live every
+cycle (`11.92 V  -0.01 A  84%  24.0 C`) and no reset, and `env:soak` at `65f8615` read both
+sensors, uplinked, and reached `sleep   : 900 s`. That is a **survival** result for the eleven
+fixes as a set. It is not a per-fix result: the two that sit on the battery path had their defect
+conditions never arise. `e070708` was not exercised because the capture had **zero** post-boot
+`Unsampled` cycles — the pack was already sampling from the preceding flash — and `da655e9` was
+not exercised because the RK900 read a real `999.2 hPa`. A **new** defect did surface:
+[#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75), one
+transient probe miss spending the power cycle's only BOOT on a healthy pack
+([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
+
+**Treat everything not named above as *believed correct, unobserved*.** Several sit on the sleep, brownout and
 rejoin paths, which are exactly what compiling cannot exercise. Do not describe any of them as
 working until a bench capture says so.
 
@@ -131,7 +143,8 @@ Open issues from this pass: [#62](https://github.com/disruptivepatternmaterial/r
 [#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68),
 [#69](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/69),
 [#70](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/70),
-[#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71).
+[#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71),
+[#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75).
 
 ## Open blockers
 

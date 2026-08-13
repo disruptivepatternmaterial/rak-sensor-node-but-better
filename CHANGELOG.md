@@ -10,9 +10,43 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 **Now partly hardware-verified.** `d568574` was flashed to the board as `env:soak` — the field
 image — on 2026-08-13 and its boot banner read back `commit   : d568574`, which is the first time
-any image in this repository has identified its own commit on hardware.
+any image in this repository has identified its own commit on hardware. Later the same day
+`65f8615` was flashed as both `env:battdiag` and `env:soak`, and both banners read back
+`commit   : 65f8615`.
 
 ### Verified on hardware
+
+- **The battery ladder runs 20 consecutive cycles at `65f8615` with live values and no reset.**
+  `env:battdiag`, ~10 s cycles: every cycle reported `11.92 V  -0.01 A  84%  24.0 C`, the counter
+  advanced `[cycle 1]` … `[cycle 20]` with no second boot banner, and `provId 0xFF` never appeared.
+  This is the first hardware evidence for any of the eleven fixes that landed after `d568574`, and
+  it is a survival result rather than a per-fix one.
+- **The field image at `65f8615` still reaches sleep.** One `env:soak` cycle read both sensors,
+  restored session `0x260CE734` rather than rejoining, sent 35 bytes on port 2, and closed
+  `sleep   : 900 s`. The 900 s interval persisted by the downlink matrix survived two further
+  reflashes.
+
+### Found on hardware, not fixed
+
+- **One transient probe miss spends the power cycle's only BOOT on a healthy pack**
+  ([#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75)).
+  On cycle 10 of 20, phase 0 drew no matched reply — the sendat sequence byte jumps `09` → `0C`,
+  so two probes really did go unanswered — printed
+  `pack silent at its id — one BOOT this power cycle`, and rebooted a pack that answered the push
+  listen in the same cycle with a live reading. This is **not** the defect `e070708` fixed and not
+  the [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62)
+  re-latch path; it is the recovery ladder reacting to a single miss instead of a run of them. In
+  the field a power cycle lasts months, so the one BOOT is spent long before the failure it exists
+  for.
+
+### Still compile-verified only after this session
+
+- **`e070708` (routine empty battery reply must not reboot the pack) was not exercised.** The
+  capture had **zero** post-boot `Unsampled` cycles — the pack had been polled continuously by the
+  preceding flash and was already sampling, so cycle 1 read live. The defect condition never arose.
+- **`da655e9` (RK900 summary must not print a pressure it refused to encode) was not exercised.**
+  The one field-image cycle captured read a real `999.2 hPa`, so the refused-pressure branch was
+  never entered.
 
 - **The downlink command matrix passes 8 of 8 on the physical node.** `scripts/downlink_matrix.sh`
   drove valid set-interval and request-status, both malformed-length rejections, an unknown opcode,
