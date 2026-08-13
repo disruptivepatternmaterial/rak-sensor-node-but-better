@@ -2594,6 +2594,35 @@ on it. No background processes were left running.
   board disappearing from `/dev/cu.usbmodem*` is correct behavior, not a dead board. One RESET
   press restores the console and a flashable window.
 
+- **Observation — the node woke itself on schedule, and the USB detach is conditional on a
+  reader.** The capture was left attached. Cycle 2 arrived ~900 s after cycle 1 with **no boot
+  banner in between**, so it woke from sleep rather than resetting through it:
+
+  ```
+     sleep   : 900 s
+
+  [cycle 2]
+     RK900   : raw 0x0000-0x0004 = 0000 0000 0105 024A 2707
+     RK900   : wind 0.00 m/s @ 0 deg, 26.1 C, 58.6 %RH, 999.1 hPa
+     battery : pack answered at 0x01 — skipping provisioning
+     battery : sendat FF 7E 00 15 02 01 00 01 02 03 10 02 15 BA A7 04 16 B9 FF FF 17 B8 54 18 67 F0 00 44
+     battery : 11.91 V  -0.01 A  84%  24.0 C
+     battery : raw v=1191 i=-1 soc=84 t=240 (t scale UNCONFIRMED — 230 means tenths, 23 means whole degrees)
+     radio   : sent 35 bytes on port 2
+     sleep   : 900 s
+  ```
+
+  Both sensors read again, both values moved slightly (`999.2` → `999.1 hPa`, `11.92` → `11.91 V`),
+  and a second uplink went out. A host-side poll every 10 s recorded `PORT_PRESENT` and
+  `ioreg 32809 = 1` continuously from boot through **past 16 minutes**, far beyond the 180 s grace.
+  That is consistent with `b1e59d6` — the field image detaches **when nobody is watching**, and a
+  reader holding the port open suppresses it. It is therefore **not** a contradiction of
+  [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60), and it
+  means item 1 of [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
+  — re-enumeration on the host after a detach-sleep — is **still untested**, because no detach
+  occurred to re-enumerate from. The console surviving a full sleep/wake cycle is new information
+  and is the closest thing to it so far.
+
 - **Still zero soak hours.** One cycle is not a soak; `README.md` stays `🚧 NOT YET DEPLOYED`.
 
 <!-- Template:

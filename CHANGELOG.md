@@ -48,6 +48,11 @@ any image in this repository has identified its own commit on hardware. Later th
   advanced `[cycle 1]` … `[cycle 20]` with no second boot banner, and `provId 0xFF` never appeared.
   This is the first hardware evidence for any of the eleven fixes that landed after `d568574`, and
   it is a survival result rather than a per-fix one.
+- **The field image at `65f8615` reaches sleep and wakes from it.** Cycle 2 arrived ~900 s after
+  cycle 1 with no boot banner in between, both sensors read again with moved values
+  (`999.2` -> `999.1 hPa`, `11.92` -> `11.91 V`) and a second uplink went out. A host poll also
+  showed the USB console surviving the whole sleep/wake cycle while a reader was attached, which
+  confirms the detach in #60 is conditional on nobody watching.
 - **The field image at `65f8615` still reaches sleep.** One `env:soak` cycle read both sensors,
   restored session `0x260CE734` rather than rejoining, sent 35 bytes on port 2, and closed
   `sleep   : 900 s`. The 900 s interval persisted by the downlink matrix survived two further
