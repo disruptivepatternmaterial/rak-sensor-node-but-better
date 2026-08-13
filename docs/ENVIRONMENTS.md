@@ -9,7 +9,7 @@ project. Agent-facing version: [`.cursor/rules/10-environments.mdc`](../.cursor/
 Workstation (locked down)                Heliotrope Ridge (build host)
     ~/Documents/Brandt/                      ~/Documents/GitHub/lorawan/
   rak-sensor-node-but-better               rak-sensor-node-but-better
-                                           192.168.10.223  (ssh alias: wx3-harness)
+                                           $RAK_BUILD_HOST (ssh alias: wx3-harness)
   author code + docs                       PlatformIO 6.1.19, gh, PyYAML
   git, gh                                  RAK4631 on USB  <-- the only one
   NO PlatformIO                            flash, serial capture, soak
@@ -19,18 +19,38 @@ Workstation (locked down)                Heliotrope Ridge (build host)
                     (the only transport)
 ```
 
-## The build host address — do not commit it
+## The build host address — not stable, and not committed
 
-**`192.168.10.223` is currently unreachable.** It is kept in the diagram above as the
-historical LAN address, not as a working one. As of 2026-08-12 the host answers on a
-**public** address, which is deliberately **not recorded anywhere in this repository** — a
-public address plus the account name in a tracked file is an invitation, and this repo is
-public.
+**The address has already changed once, and will change again. Treat every address you
+find written down as expired until a probe says otherwise.**
 
-Set it per-shell, or once in ssh config:
+| Period | Address | State |
+|---|---|---|
+| until 2026-08-12 | `192.168.10.223` (LAN) | **dead** — now fails `No route to host` |
+| 2026-08-12 → | a **public** address, ask the operator | working, verified 2026-08-13 |
+
+The current address is deliberately **not recorded anywhere in this repository** — a public
+address plus the account name in a tracked file is an invitation, and this repo is public
+(confirmed `PUBLIC` via `gh repo view`, 2026-08-13). So an old transcript or an old commit
+showing `192.168.10.223` is not wrong about history; it is simply stale. Two sessions have
+now been lost to reading it as current and concluding the host was down.
+
+### Confirm reachability in one command
+
+Do this **before** concluding anything about the host. It is one round trip:
 
 ```bash
-export BUILD_HOST=ntableman@<address>          # this shell only
+ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'
+# → Heliotrope-Ridge
+```
+
+`BatchMode=yes` is deliberate: key auth is already set up (see below), so a prompt for a
+password means the key is not loaded, not that the host is unreachable.
+
+### Setting the address
+
+```bash
+export RAK_BUILD_HOST=ntableman@<address>       # this shell only
 ```
 
 ```
@@ -39,10 +59,15 @@ Host wx3-harness                                # ~/.ssh/config — preferred, p
     User ntableman
 ```
 
-`scripts/push.sh`, `scripts/remote.sh`, `scripts/build.sh` and `scripts/flash.sh` all read
-`BUILD_HOST` and default to the `wx3-harness` alias. `push.sh` now probes reachability first
-and prints this instruction instead of stalling in a TCP timeout that reads as a broken
-script.
+`scripts/push.sh`, `scripts/remote.sh`, `scripts/build.sh`, `scripts/flash.sh` and
+`scripts/soak.sh` all resolve the host as
+`${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}` — so `BUILD_HOST` still works for existing
+shells, `RAK_BUILD_HOST` is the name to use going forward, and with neither set they fall
+back to the ssh alias, which keeps the address in `~/.ssh/config` where it belongs.
+
+`scripts/remote.sh check` prints the host it resolved before it tries it, and both it and
+`push.sh` probe reachability first so a wrong address fails in seconds with instructions
+rather than stalling in a TCP timeout that reads as a broken script.
 
 Ask the operator for the current address. Do not guess it, and do not paste it into a
 commit, an issue, a doc, or a comment.
@@ -79,10 +104,10 @@ and add it to the matrix above.
 `PATH`.** This makes installed tools look absent:
 
 ```console
-$ ssh ntableman@192.168.10.223 'pio --version'
+$ ssh "$RAK_BUILD_HOST" 'pio --version'
 zsh: command not found: pio          # <-- WRONG. PlatformIO 6.1.19 is installed.
 
-$ ssh ntableman@192.168.10.223 'zsh -l -c "pio --version"'
+$ ssh "$RAK_BUILD_HOST" 'zsh -l -c "pio --version"'
 PlatformIO Core, version 6.1.19      # correct
 ```
 

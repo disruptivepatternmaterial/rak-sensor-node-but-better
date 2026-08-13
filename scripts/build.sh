@@ -69,7 +69,7 @@ echo
 if scripts/remote.sh run "pio run ${*:-}"; then
   echo
   echo "${GREEN}=== BUILD OK ===${NC}"
-  echo "host:   Heliotrope Ridge (${BUILD_HOST:-ntableman@192.168.10.223})"
+  echo "host:   Heliotrope Ridge (${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}})"
   echo "commit: ${SHA}"
   echo "${DIM}Report the host and commit with any result -- a result without both is not evidence.${NC}"
 else

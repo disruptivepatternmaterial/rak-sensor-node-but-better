@@ -66,9 +66,18 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   from their IDE, which has a separate GitHub sign-in. Fetch and carry on.
 
 - **This machine cannot compile or flash.** No PlatformIO, no device on USB, `$HOME` is
-  read-only. Everything that touches hardware runs on Heliotrope Ridge
-  (`ssh ntableman@192.168.10.223`) — and remote commands need `zsh -l -c` or `pio` will
-  look like it is not installed. Use `scripts/remote.sh`.
+  read-only. Everything that touches hardware runs on Heliotrope Ridge — and remote commands
+  need `zsh -l -c` or `pio` will look like it is not installed. Use `scripts/remote.sh`.
+
+- **The build host address is not stable, and the one in old transcripts is dead.**
+  `192.168.10.223` was correct until 2026-08-12 and now returns `No route to host`; the host
+  since answers on a **public** address kept deliberately out of this public repo. Two
+  sessions have been burned concluding the host was down when it was not. Ask the operator
+  for the address, `export RAK_BUILD_HOST=ntableman@<address>`, and confirm in one command
+  before diagnosing anything:
+  `ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'` →
+  `Heliotrope-Ridge`. Scripts resolve `${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}`; the
+  `wx3-harness` ssh alias is the permanent fix. See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 - **The payload is a two-repo contract.** The TTN formatter lives in
   `forest-weather-machines`. A drifted encoder does not lose one field; the decoder throws
   and discards the entire uplink. `scripts/check_decoder_parity.py` runs on every build.

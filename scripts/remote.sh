@@ -20,7 +20,20 @@
 
 set -euo pipefail
 
-BUILD_HOST="${BUILD_HOST:-ntableman@192.168.10.223}"
+# The build host's address has already moved once: it was the LAN address 192.168.10.223
+# until 2026-08-12, which now answers "No route to host". Treat the address as unstable and
+# never as a constant -- a worker that reads a hardcoded address as authoritative concludes
+# the host is down and burns its whole budget. The address that works today is a PUBLIC one
+# and is deliberately absent from this repository, which is public: see the address note in
+# docs/ENVIRONMENTS.md. Override per shell, or define the ssh alias once:
+#
+#   export RAK_BUILD_HOST=ntableman@<address>     # this shell only
+#   Host wx3-harness                              # ~/.ssh/config, persistent -- preferred
+#       HostName <address>
+#       User ntableman
+#
+# BUILD_HOST is honored first for backward compatibility with existing shells and scripts.
+BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}"
 BUILD_HOST_NAME="${BUILD_HOST_NAME:-Heliotrope Ridge}"
 REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
@@ -37,10 +50,29 @@ rsh() { ssh "${SSH_OPTS[@]}" "$BUILD_HOST" "zsh -l -c $(printf '%q' "$1")"; }
 # Run a command inside the remote repo.
 rrepo() { rsh "cd $REMOTE_REPO && $1"; }
 
+# "cannot reach the build host. On the VPN/LAN?" was the wrong advice for the wrong failure:
+# the address had changed, not the network, and a session acting on that hint concluded the
+# host was down. Say which address was tried and how to change it.
+unreachable() {
+  echo "${RED}ERROR${NC} cannot reach the build host at '${BUILD_HOST}'." >&2
+  echo "       The address is NOT stable -- it has moved once already (the LAN address" >&2
+  echo "       192.168.10.223 stopped answering on 2026-08-12). Do not conclude the host" >&2
+  echo "       is down until you have tried the current address. Override it:" >&2
+  echo "         export RAK_BUILD_HOST=ntableman@<address>" >&2
+  echo "       or define the 'wx3-harness' alias in ~/.ssh/config (preferred, persists)." >&2
+  echo "       Ask the operator for the address -- it is public and is deliberately not" >&2
+  echo "       recorded in this repository. See docs/ENVIRONMENTS.md." >&2
+  echo "       Confirm reachability in one command:" >&2
+  echo "         ssh -o ConnectTimeout=8 -o BatchMode=yes \"\$RAK_BUILD_HOST\" 'zsh -l -c \"hostname\"'" >&2
+  echo "       (BatchMode is on, so a host that wants a password also lands here.)" >&2
+  exit 1
+}
+
 cmd_check() {
   info "Build host: $BUILD_HOST_NAME ($BUILD_HOST)"
-  rsh 'echo "host: $(scutil --get ComputerName 2>/dev/null || hostname)"' \
-    || die "cannot reach the build host. On the VPN/LAN?"
+  echo "${DIM}   override with RAK_BUILD_HOST=user@address (BUILD_HOST also honored)${NC}"
+  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$BUILD_HOST" true 2>/dev/null || unreachable
+  rsh 'echo "host: $(scutil --get ComputerName 2>/dev/null || hostname)"' || unreachable
   echo "${DIM}-- toolchain --${NC}"
   rsh 'for t in pio git gh python3; do
          p=$(command -v $t 2>/dev/null || echo MISSING)

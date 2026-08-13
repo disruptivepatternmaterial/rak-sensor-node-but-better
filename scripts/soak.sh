@@ -24,7 +24,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-BUILD_HOST="${BUILD_HOST:-ntableman@192.168.10.223}"
+# Not a constant: the old LAN default (192.168.10.223) stopped answering 2026-08-12.
+# Override with RAK_BUILD_HOST, or define the wx3-harness ssh alias. docs/ENVIRONMENTS.md.
+BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}"
 REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 SOAK_ROOT="${SOAK_ROOT:-soak-runs}"

@@ -12,7 +12,7 @@ nothing and check.
 |---|---|---|
 | Role | Author code, docs, specs, git, `gh` | Compile, flash, serial capture, soak |
 | Path | `~/Documents/Brandt/rak-sensor-node-but-better` | `~/Documents/GitHub/lorawan/rak-sensor-node-but-better` |
-| Reach | local | `ssh ntableman@192.168.10.223` (alias `wx3-harness`) |
+| Reach | local | `ssh "$RAK_BUILD_HOST"` (alias `wx3-harness`) — **address is not stable, see below** |
 | PlatformIO | **absent** | `/opt/homebrew/bin/pio` |
 | `gh` CLI | present | `/opt/homebrew/bin/gh`, `GITHUB_TOKEN` in `~/.zprofile` |
 | USB / DFU | **no device** — cannot flash | **the only machine with the RAK4631 on USB** |
@@ -30,6 +30,31 @@ physical device is a build-host operation, full stop.
 If a tool is genuinely missing on **both** machines, install it on the **build host** and
 record it in `docs/ENVIRONMENTS.md`. Never install project toolchains on the workstation.
 
+## The build host address is not stable — probe before you conclude
+
+**Every address written down in this repo, in an old commit, or in an old transcript is
+expired until a probe says otherwise.** The LAN address `192.168.10.223` was correct until
+2026-08-12 and now fails with `No route to host`. Since then the host answers on a **public**
+address that is deliberately **not** in this repository, because the repo is public.
+
+Two sessions have now been burned reading the stale address as current and concluding the
+build host was down. It was not down. Do not repeat this.
+
+Set the address, then confirm it in one command before anything else:
+
+```bash
+export RAK_BUILD_HOST=ntableman@<address>       # ask the operator for <address>
+ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'
+# → Heliotrope-Ridge
+```
+
+Every script resolves the host as `${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}`, so the
+preferred permanent fix is the `wx3-harness` alias in `~/.ssh/config` — that keeps the
+address out of the repo entirely. `scripts/remote.sh check` prints the host it resolved and
+fails in seconds with instructions naming `RAK_BUILD_HOST`, rather than stalling in a TCP
+timeout that reads as a broken script. Never paste the current address into a commit, an
+issue, a doc, or a comment.
+
 ## The SSH gotcha that will bite you
 
 **Non-interactive SSH does not source `~/.zprofile`, so `/opt/homebrew/bin` is not on
@@ -39,7 +64,7 @@ like "PlatformIO is not installed." It is installed. Your shell is just wrong.
 Always force a login shell:
 
 ```bash
-ssh ntableman@192.168.10.223 'zsh -l -c "cd ~/Documents/GitHub/lorawan/rak-sensor-node-but-better && pio run"'
+ssh "$RAK_BUILD_HOST" 'zsh -l -c "cd ~/Documents/GitHub/lorawan/rak-sensor-node-but-better && pio run"'
 ```
 
 Use `scripts/remote.sh` instead of hand-rolling this — it handles the login shell, the

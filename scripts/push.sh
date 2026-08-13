@@ -29,13 +29,13 @@ die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 # that must not live in a tracked file. Point BUILD_HOST at the host, or better, define an
 # ssh alias so the address stays in ~/.ssh/config where it belongs:
 #
-#   export BUILD_HOST=ntableman@<address>        # one shell
+#   export RAK_BUILD_HOST=ntableman@<address>    # one shell
 #   Host wx3-harness                              # ~/.ssh/config, persistent
 #       HostName <address>
 #       User ntableman
 #
 # See docs/ENVIRONMENTS.md.
-BUILD_HOST="${BUILD_HOST:-wx3-harness}"
+BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}"
 REMOTE_PATH="${REMOTE_PATH:-Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 # Pushed by explicit SSH URL, never by `git push origin`. The build host's tracked origin is
 # an HTTPS remote, and over a non-interactive ssh it has no credential helper and no tty, so
@@ -71,11 +71,11 @@ fi
 # "ssh: connect ... Operation timed out" told nobody what to do about it.
 if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$BUILD_HOST" true 2>/dev/null; then
   echo "${RED}ERROR${NC} cannot reach build host '${BUILD_HOST}'." >&2
-  echo "       Set BUILD_HOST to the current address, or add an ssh alias:" >&2
-  echo "         export BUILD_HOST=ntableman@<address>" >&2
-  echo "       The LAN address 192.168.10.223 in docs/ENVIRONMENTS.md is currently" >&2
-  echo "       unreachable. The working address is public and is deliberately not" >&2
-  echo "       recorded in this repository — see docs/ENVIRONMENTS.md." >&2
+  echo "       Set RAK_BUILD_HOST to the current address, or add an ssh alias:" >&2
+  echo "         export RAK_BUILD_HOST=ntableman@<address>" >&2
+  echo "       The address is not stable: the LAN address 192.168.10.223 stopped" >&2
+  echo "       answering on 2026-08-12. The working address is public and is" >&2
+  echo "       deliberately not recorded in this repository — see docs/ENVIRONMENTS.md." >&2
   echo "       (BatchMode is on here, so a host needing a password also lands here;" >&2
   echo "        load the key into the agent or use an alias with IdentityFile.)" >&2
   exit 1
