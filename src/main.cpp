@@ -270,10 +270,14 @@ void loop()
     // priority order rather than producing an uplink that would simply be refused.
     Payload payload;
 #if FEATURE_RADIO
-    payload.build(weather, pack, radio.max_payload());
+    // Sampled once. max_payload() calls LoRaMacQueryTxPossible() every time, so asking twice
+    // both costs a second MAC query and risks logging a different number from the one the
+    // encoder actually built against.
+    const size_t budget = radio.max_payload();
+    payload.build(weather, pack, budget);
     if (payload.dropped() > 0) {
         LOGF("   uplink  : %u field(s) dropped to fit %u bytes\n", payload.dropped(),
-             (unsigned)radio.max_payload());
+             (unsigned)budget);
     }
 #else
     payload.build(weather, pack);

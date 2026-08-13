@@ -10,6 +10,15 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **Two small honesty fixes in the uplink path.** `Radio::send()` refused on "not joined"
+  without a console line, unlike every other refusal in the function, so the most ordinary
+  reason for a quiet cycle was the one that looked like nothing at all. And the
+  fields-dropped log re-queried the MAC for the payload budget instead of reporting the
+  figure the encoder had actually built against, so a rate change between the two calls
+  would have printed a number that was never used.
+
+### Fixed
+
 - **A set-interval downlink delivered during a brownout hold is no longer thrown away.**
   `main.cpp` gated the command on `brownout.flash_write_allowed()`, so while the gate held
   the command was dropped with no console line, no effect in RAM, and nothing to retry —

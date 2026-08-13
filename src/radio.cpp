@@ -315,6 +315,10 @@ bool Radio::send(const Payload &p)
     // dropping that uplink without a word, which left the node looking dead exactly when
     // knowing otherwise mattered most.
     if (!m_joined) {
+        // Every other refusal in this function says so on the console; this one did not, which
+        // made the most ordinary of them — no session yet — the only one that looked like
+        // nothing happening at all.
+        LOGLN(F("   radio   : not joined — uplink skipped"));
         return false;
     }
 
