@@ -10,6 +10,17 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A CRC-valid all-zero RK900 reply is no longer encoded as real weather.** Any `Ok` from the
+  Modbus read called `.set()` on all five registers, including `0`, so a station returning an
+  empty span published `0.0` hPa, `0.0` %RH and calm wind as measurements. The battery path has
+  refused the pack's equivalent all-zero record for exactly this reason; the weather path had no
+  such guard. An all-zero span is now `ModbusResult::Unsampled` and contributes no fields, and a
+  zero pressure register is omitted on its own even when the rest of the span is plausible.
+  Genuine zeros — calm wind, due north, 0.0 °C — are unaffected. `docs/FIRMWARE_SPEC.md` §2.1
+  records the rule.
+
+### Fixed
+
 - **A pack answering with an empty record no longer switches off the listen that would fill
   it.** `Unsampled` — a checksum-valid SENDAT reply carrying the all-zero record template —
   was counted as both "the address works" (so the provisioning ladder was skipped) and "the

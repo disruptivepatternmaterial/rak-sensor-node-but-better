@@ -28,6 +28,7 @@ enum class ModbusResult : uint8_t {
     BadCrc,         // reply corrupted, usually wiring or termination
     BadFrame,       // reply well-formed but not the answer to what was asked
     Exception,      // slave answered with an error code
+    Unsampled,      // reply CRC-valid but the span is all zero — see rk900.cpp
 };
 
 const char *modbus_result_name(ModbusResult r);

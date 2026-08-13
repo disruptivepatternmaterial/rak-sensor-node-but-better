@@ -81,14 +81,53 @@ WeatherReading RK900::read()
     LOGF("   RK900   : raw 0x0000-0x0004 = %04X %04X %04X %04X %04X\n",
          regs[0], regs[1], regs[2], regs[3], regs[4]);
 
-    // The span either arrives whole and CRC-checked or not at all, so all five fields
-    // become valid together. Values are stored exactly as the sensor reported them;
-    // scaling belongs to the encoder, which has to match the TTN decoder's divisors.
+    // A CRC-valid frame is not the same thing as a measurement.
+    //
+    // Every field of an all-zero span is a physical claim, and one of them cannot be true:
+    // 0.0 hPa is a vacuum, not weather. The whole span is therefore refused rather than
+    // encoded, which is the same judgement the battery path already makes on the pack's
+    // all-zero record template — and for the same reason, since a node that wakes, reads once
+    // and sleeps for an hour has no second chance to notice. A gap in the series is
+    // recoverable; a plausible wrong number is not.
+    //
+    // Judging the whole span keeps every genuine zero: 0 m/s is calm, 0 degrees is due north,
+    // and 0.0 degC is an ordinary temperature in the woods. Those survive as long as one other
+    // register is non-zero, which for a working station is always true of pressure.
+    //
+    // CITE(datasheet): [CIT-RK900] RK900-09 register map — register 0x0004 is barometric
+    //   pressure at x0.1 hPa, so the value 0 decodes to 0.0 hPa; the sensor cannot be in a
+    //   vacuum and still be reporting.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §2.1 null policy — "Never invent 0". A missing read
+    //   is omitted from the payload, not encoded as a zero.
+    // CITE(bench): docs/EVIDENCE.md — the RAK9154 has been captured returning a checksum-valid
+    //   all-zero record while demonstrably alive, which is why battery_frame.cpp refuses it
+    //   (BatteryResult::Unsampled). The RK900 had no equivalent guard.
+    if ((regs[kWindSpeed] | regs[kWindDirection] | regs[kTemperature] | regs[kHumidity] |
+         regs[kPressure]) == 0) {
+        m_last = ModbusResult::Unsampled;
+        LOGLN(F("   RK900   : CRC-valid but all five registers are zero — no reading "
+                "(0.0 hPa is not weather)"));
+        return out; // every field stays invalid — the encoder will omit them all
+    }
+
+    // The span either arrives whole and CRC-checked or not at all, so the fields become
+    // valid together. Values are stored exactly as the sensor reported them; scaling
+    // belongs to the encoder, which has to match the TTN decoder's divisors.
     out.wind_speed.set(regs[kWindSpeed]);
     out.wind_direction.set(regs[kWindDirection]);
     out.temperature.set((int16_t)regs[kTemperature]);
     out.humidity.set(regs[kHumidity]);
-    out.pressure.set(regs[kPressure]);
+
+    // Pressure alone, for the mixed case the whole-span test cannot catch: a station reporting
+    // real wind and a 0.0 hPa barometer has a broken barometer, not a vacuum. The field is left
+    // null and the rest of the reading still goes out.
+    // CITE(datasheet): [CIT-RK900] register 0x0004, x0.1 hPa.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §2.1 — missing field omitted, never encoded as 0.
+    if (regs[kPressure] == 0) {
+        LOGLN(F("   RK900   : pressure register reads 0 — omitting the field, not encoding it"));
+    } else {
+        out.pressure.set(regs[kPressure]);
+    }
 
     LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, %u.%u hPa\n",
          regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,

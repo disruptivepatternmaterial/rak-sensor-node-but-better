@@ -44,6 +44,14 @@ Cross-links (sibling repos on this machine / org):
 
 **Null policy:** missing Modbus → omit field / encode null sentinel per payload schema. Never invent `0`. Wind direction may be null when wind speed is 0 (match existing decoder policy).
 
+A CRC-valid reply is not by itself a measurement. A span in which **all five registers read
+`0`** is refused whole (`ModbusResult::Unsampled`) and contributes no fields, and a **`0`
+pressure register** is omitted on its own even when the rest of the span is plausible — `0.0`
+hPa is a vacuum, not weather. Genuine zeros survive: `0` m/s is calm, `0`° is due north, and
+`0.0` °C is an ordinary winter temperature, all of which pass as long as one other register is
+non-zero. This mirrors the battery path, which has refused the pack's all-zero record template
+since `b6bbf31` (`src/sensors/battery_frame.cpp`, `BatteryResult::Unsampled`).
+
 **Total-silence policy (proof of life).** When *neither* sensor yields a single field, the node
 still transmits a zero-length uplink — immediately on the first such cycle, then every 8th
 consecutive silent cycle. This is deliberate and is not a data uplink: it distinguishes a

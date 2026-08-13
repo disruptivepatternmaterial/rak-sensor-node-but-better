@@ -38,6 +38,7 @@ const char *modbus_result_name(ModbusResult r)
     case ModbusResult::BadCrc:    return "bad crc";
     case ModbusResult::BadFrame:  return "bad frame";
     case ModbusResult::Exception: return "exception";
+    case ModbusResult::Unsampled: return "all-zero span";
     }
     return "?";
 }
