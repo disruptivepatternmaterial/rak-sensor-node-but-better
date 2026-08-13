@@ -36,6 +36,13 @@ any image in this repository has identified its own commit on hardware.
 
 ### Fixed
 
+- **The RK900 console summary no longer prints a pressure the uplink deliberately omitted.**
+  The encoder correctly leaves the field null when register `0x0004` reads `0`, and the very
+  next line printed `0.0 hPa` as though it had been measured — so a bench capture contradicted
+  the payload and pointed the next debugger at the decoder or the register map rather than at
+  the barometer. The line now reads `pressure null` in that case. Introduced by `6c9bdc0`
+  earlier the same night. Diagnostic output only; the encoded payload is unchanged.
+
 - **A set-interval downlink taken during a brownout hold is no longer dropped on the second
   retry, after the console said it would persist.** `Config::set_interval_seconds()` assigned
   `m_interval` before attempting the write and left it there when the write failed, so the next

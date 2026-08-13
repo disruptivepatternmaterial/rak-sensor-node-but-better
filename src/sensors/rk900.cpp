@@ -138,6 +138,8 @@ WeatherReading RK900::read()
     //   omitted, and "0.0 hPa is a vacuum, not weather".
     // CITE(bench): docs/EVIDENCE.md — evidence is the raw observation; a diagnostic that
     //   disagrees with the encoded payload is not one.
+    // CITE(policy): AGENTS.md — null sensor readings stay null and zeros are never
+    //   fabricated. A console line that prints one is the same fabrication in another place.
     if (out.pressure.valid) {
         LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, %u.%u hPa\n",
              regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,
