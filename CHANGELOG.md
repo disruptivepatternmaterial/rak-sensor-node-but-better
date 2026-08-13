@@ -36,6 +36,15 @@ any image in this repository has identified its own commit on hardware.
 
 ### Fixed
 
+- **The downlink matrix harness can no longer record PASS with no answering uplink.** In
+  `case_a`, `wait_for` was called for the FPort 2 uplink and its exit status discarded, so a
+  timeout still recorded PASS — with the literal string `<no uplink observed>` pasted into the
+  evidence field of the passing row. The status now decides: PASS on the observed uplink, FAIL
+  otherwise. Tonight's `case_a` result was independently re-verified against the raw console,
+  so the recorded evidence stands; the harness simply must not be able to report green over a
+  missing observation. `case_a` was the only unchecked call — the other six `wait_for` sites
+  already test it.
+
 - **The RK900 console summary no longer prints a pressure the uplink deliberately omitted.**
   The encoder correctly leaves the field null when register `0x0004` reads `0`, and the very
   next line printed `0.0 hPa` as though it had been measured — so a bench capture contradicted

@@ -157,7 +157,7 @@ case_b() {  # valid 0x01 set-interval to 900 s. Runs first: halves every later w
 }
 
 case_a() {  # valid 0x03 request-status. Issue #54 wants the command observed on console.
-  local id=a off hit hit2
+  local id=a off hit hit2 up
   if done_already "$id"; then say "case $id   : already recorded, skipping"; return 0; fi
   off="$(console_size)"
   say "=== CASE $id START === valid 0x03 request-status"
@@ -168,9 +168,16 @@ case_a() {  # valid 0x03 request-status. Issue #54 wants the command observed on
   say "case $id   : first downlink line: $hit"
   hit2="$(console_find "$off" 'status requested')"
   if [ -n "$hit2" ]; then
-    # The answering uplink is the next cycle's FPort 2 send.
-    local up; up="$(wait_for "$off" "$TIMEOUT_SHORT" 'sent 35 bytes on port 2')"
-    record "$id" PASS "$hit2 ;; ${up:-<no uplink observed>}"
+    # The answering uplink is the next cycle's FPort 2 send, and it is part of the
+    # acceptance, not colour. This branch used to record PASS unconditionally and paste
+    # the literal string "<no uplink observed>" into the evidence field of a passing row --
+    # a gate that reports green over a missing observation, which is the exact class of
+    # defect this project has already been burned by. wait_for's exit status decides.
+    if up="$(wait_for "$off" "$TIMEOUT_SHORT" 'sent 35 bytes on port 2')"; then
+      record "$id" PASS "$hit2 ;; $up"
+    else
+      record "$id" FAIL "$hit2 ;; no answering uplink observed"
+    fi
   else
     record "$id" FAIL "$hit"
   fi
