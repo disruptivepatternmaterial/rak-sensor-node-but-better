@@ -108,6 +108,80 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-14 — `1c2df3c` flashed as `env:soak` and is running. Banner SHA NOT read back.
+
+**Host:** Heliotrope Ridge. **Commit built and flashed:** `1c2df3c`. **Environment:** `env:soak`
+(byte-identical to `env:rak4631`, [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)).
+**Verdict: flash confirmed, image identity NOT confirmed from the device.**
+
+**Why this flash happened:** the operator is taking the node to the field today and chose to ship
+the `#75` BOOT-allowance fix (`ec9725a`) rather than the longer-soaked `572bcfa`, accepting fewer
+soak hours on the shipping image. This is the image that goes to the woods.
+
+**What is established.** `scripts/flash.sh` completed `=== FLASH OK ===` at 15:59:31Z against
+`/dev/cu.usbmodem31201`, and the board came back on the bus as an **application**, not a
+bootloader:
+
+```
+=== FLASH OK ===
+commit: 1c2df3c0d7f45b23f6feae65e4c87bdfd49330dc
+usb:    239A:8029 (application running)
+```
+
+Re-checked independently ~10 min later, still `idProduct = 32809` (`0x8029`) with product string
+`WisCore RAK4631 Board`. Per `docs/FIRST_FLASH.md` a board with no valid application stays in its
+bootloader and enumerates `0029`/`002A`, so `8029` establishes that *an* application is running
+and that the DFU write did not leave the board unprogrammed.
+
+**What is NOT established, and this is the important line.** **The boot banner was never
+captured, so the running image's SHA is asserted only from the build-and-flash tooling, not read
+back from the device.** `AGENTS.md` treats a banner-asserted SHA as the standard precisely
+because `8029` cannot distinguish the newly written image from a previously resident one. Three
+capture attempts returned **0 bytes**:
+
+- `pio device monitor` cannot be used non-interactively — it constructs a `miniterm` `Console()`
+  and dies with `termios.error: (25, 'Inappropriate ioctl for device')` when stdout is redirected.
+  Use a raw `cat` on the port instead.
+- Two raw `cat` captures (100 s and 200 s) read nothing. The port stayed present throughout, and
+  the firmware only writes during a cycle, so both windows fell inside the 900 s sleep. A capture
+  intended to catch a cycle must therefore span **>900 s**, not the 180 s USB grace.
+- A backgrounded capture launched over SSH with `nohup ... &` was **dead** when checked: it did
+  not survive the session closing. Run the capture in the foreground, or under `screen`.
+
+The banner prints only at boot (`src/main.cpp:143`) and there is no console command to re-request
+it, so **settling this requires one single press of RESET while a >900 s capture is held open** —
+a single press reboots the application; a double-tap enters DFU and would not run it. That press
+was requested several times during this session and did not happen, so the entry is filed
+honestly rather than left to imply a verification that was not performed.
+
+Consequently **neither sensor was observed reading in this image, and `sleep : 900 s` was not
+observed.** Nothing here supersedes the `65f8615` cycle evidence; it simply is not re-confirmed
+on `1c2df3c`.
+
+**The flashed image does transmit.** A 24 h soak was started on it at 16:09:16Z
+(`~/soak-runs/20260814T160916Z_ttn_rc-v0.4.3-1c2df3c/`, label `rc-v0.4.3-1c2df3c`, baseline
+`last_f_cnt_up=2464`) and its first uplink was **read from `events.log`, not assumed from the
+process running**:
+
+```
+2026-08-14T16:19:24Z SOAK UPLINK f_cnt=2465 delta=1 gap=607s total=1
+2026-08-14T16:19:24Z === SOAK HEARTBEAT 2 === elapsed=607s of 86400s uplinks=1 f_cnt=2465 resets=0 anomalies=0 query_failures=0
+```
+
+That is a real uplink delivered to TTN after the flash, with `resets=0`, so the image on the board
+joins and transmits. It still does not identify the image — a resident older build would also
+transmit — which is why the banner remains the outstanding check. **The soak has minutes, not
+hours: no soak-hour claim is made here, and `H8` is untouched by it.** Its outcome must be written
+only once it ends.
+
+**Two process defects were found the expensive way** and both are fixed in this range. A flash
+window was lost to a poller whose "port appeared" line was misread as empty. A second window was
+lost to the new `scripts/flash.sh` soak guard **firing with no soak running** — it grepped
+`remote.sh`'s own echoed command line, which contains the pattern string, and named
+`Running on Heliotrope Ridge: pgrep -fl ...` as the offending process. Fixed in `1c2df3c` by
+anchoring on a leading pid. A false refusal on a deadline is worse than no guard, because the
+override becomes reflexive.
+
 ### 2026-08-14 — 19.03 h of clean soak on `572bcfa`, stopped deliberately at 76 uplinks and 0 anomalies
 
 **Host:** Heliotrope Ridge. **Tree soaked:** `572bcfa` (`v0.4.2`). **Run directory:**
