@@ -82,7 +82,7 @@ implementing lines for each gate.
 | H5 | Interval + keys survive power loss | ✅ interval and session over `InternalFS`; keys are compiled into the image, so "keys survive" is true trivially rather than by storage | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
 | H6 | RK900 absent → no livelock | ✅ bounded 1000 ms reply timeout; caller tolerates failure without retrying forever | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
 | H7 | BMS silent → no livelock | ✅ bounded first-byte and inter-byte timeouts, bounded provisioning window. Bounded but **long** — `acquire_pid()` measured at 45.4 s of a 50.5 s wake, inside the 120 s WDT window with less margin than it sounds | Unplug BMS data → cycle continues | ⬜ none |
-| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | ⬜ none — **zero soak hours exist.** The harness and procedure are built (`scripts/soak.sh`, [`SOAK.md`](SOAK.md), `env:soak`); the one attempt, 2026-08-12 at `f626698`, never attached to the board and logged 140 bytes in 180 s. **H8 has not started** |
+| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | 🟨 **started but not met.** First real soak hours exist: **19.03 h on `572bcfa` with 76 uplinks and 0 anomalies**, 2026-08-13/14, stopped deliberately short of 24 h to ship the `#75` battery fix (entry below). 19.03 h < 24 h, and a partial run on one image cannot be topped up by another, so **H8 is still open** and the ≥7 d field shadow has not begun. The earlier 2026-08-12 attempt at `f626698` never attached and logged 140 bytes in 180 s |
 
 The [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §9 first-light list is now **closed**, and closing
 it changes nothing about the status above:
@@ -107,6 +107,54 @@ Newest first, by the date the entry was committed (`git log --format='%ad' -- do
 not by the date embedded in its heading — two 2026-08-03 entries and two 2026-07-31 entries each
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
+
+### 2026-08-14 — 19.03 h of clean soak on `572bcfa`, stopped deliberately at 76 uplinks and 0 anomalies
+
+**Host:** Heliotrope Ridge. **Tree soaked:** `572bcfa` (`v0.4.2`). **Run directory:**
+`~/soak-runs/20260813T202735Z_ttn_rc-v0.4.2/` — **preserved, not deleted.** **Verdict: partial
+pass, superseded on purpose.**
+
+**These are the first soak hours this project has ever accumulated.** The prior H8 row in this
+file said "zero soak hours exist"; that is now wrong and is corrected above.
+
+**What was measured:** whether the field image transmits on its 900 s cycle, unattended, for a
+long run — the sleep, radio and power paths under wall-clock time rather than one cycle.
+
+**Raw observation**, read from `events.log` (33745 bytes) at the moment of the stop, not
+inferred from the process existing:
+
+```
+2026-08-13T20:27:35Z === SOAK TTN START === label=rc-v0.4.2 duration=86400s device=puma-concolor-001
+2026-08-13T20:27:35Z     image      : firmware=0.4.2 banner_commit=dcd6807
+2026-08-13T20:27:35Z     tree       : 572bcfa
+2026-08-13T20:27:36Z     baseline   : last_f_cnt_up=2272
+2026-08-14T15:29:28Z SOAK UPLINK f_cnt=2398 delta=1 gap=969s total=76
+2026-08-14T15:29:28Z === SOAK HEARTBEAT 228 === elapsed=68511s of 86400s uplinks=76 f_cnt=2398 anomalies=0 query_failures=1
+```
+
+**Final numbers: elapsed 68511 s (19.03 h) of 86400 s, 76 uplinks, `f_cnt` 2398 from a baseline
+of 2272, 0 anomalies, 1 query failure.** Zero anomalies across 19 h means no gap ever exceeded
+the 2700 s silence threshold. The single query failure was a TTN API read, not a missed uplink.
+
+**Why it was stopped short of 24 h:** the operator is taking the node to the field today and
+chose to ship the `#75` BOOT-allowance fix rather than the image with the longer soak — an
+explicit trade of soak hours for a battery-path fix, made with the alternative on the table. The
+run was ended by `kill 76549` at ~15:30Z with its directory left intact, because 19 clean hours
+on the sleep, radio and power paths is real evidence and those paths are unchanged in the
+shipping image.
+
+**What this does NOT establish.** `H8` requires ≥24 h, so **`H8` remains open** — 19.03 h is not
+24 h, and a partial run cannot be topped up later by a different image. It says nothing about
+the battery path in the shipping build: the `#75` fix is not in `572bcfa`. The soak reads TTN
+ingest, so it proves uplinks *arrived*; it did not read the board's serial console and therefore
+asserts nothing about which SHA was running beyond the `dcd6807` banner captured at the earlier
+flash — the log flags this itself, and `572bcfa` is `dcd6807` plus documentation only.
+
+**Unrelated but worth recording:** the build host dropped off the network entirely for ~50 min
+(≈14:40Z–15:29Z, SSH and ICMP both, `uptime` afterwards showing 47 days so it never rebooted).
+The soak was unaffected — it kept logging throughout and `query_failures` stayed at 1 — so the
+outage was between the workstation and the host, not the host and TTN. A session that loses the
+host cannot push at all, since the workstation's own `git push origin` is 403.
 
 ### 2026-08-12 (night) — Ten fixes landed. COMPILE-VERIFIED ONLY. No hardware ran any of them.
 
