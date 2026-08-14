@@ -108,7 +108,7 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
-### 2026-08-14 — `1c2df3c` flashed as `env:soak` and is running. Banner SHA NOT read back.
+### 2026-08-14 — `1c2df3c` flashed as `env:soak`; both sensors and `sleep : 900 s` observed. Banner SHA still NOT read back.
 
 **Host:** Heliotrope Ridge. **Commit built and flashed:** `1c2df3c`. **Environment:** `env:soak`
 (byte-identical to `env:rak4631`, [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)).
@@ -154,9 +154,37 @@ a single press reboots the application; a double-tap enters DFU and would not ru
 was requested several times during this session and did not happen, so the entry is filed
 honestly rather than left to imply a verification that was not performed.
 
-Consequently **neither sensor was observed reading in this image, and `sleep : 900 s` was not
-observed.** Nothing here supersedes the `65f8615` cycle evidence; it simply is not re-confirmed
-on `1c2df3c`.
+**Correction, 16:17:56Z — both sensors and the sleep line have since been observed on this
+image.** The paragraph that stood here said neither had been, which was true when written and is
+now superseded by a capture that succeeded. The three failures above were diagnosed correctly: a
+capture must span **>900 s** to catch a cycle. `scripts/capture.py` does exactly that — it
+reattaches across the sleep-time USB drop — and run for 1500 s it caught a full cycle:
+
+```
+2026-08-14 09:17:56 [cycle 2]
+2026-08-14 09:17:57    RK900   : raw 0x0000-0x0004 = 0000 0000 00FB 0255 2726
+2026-08-14 09:17:57    RK900   : wind 0.00 m/s @ 0 deg, 25.1 C, 59.7 %RH, 1002.2 hPa
+2026-08-14 09:17:57    battery : pack answered at 0x01 — skipping provisioning
+2026-08-14 09:17:57    battery : 11.76 V  -0.01 A  79%  23.0 C
+2026-08-14 09:17:57    radio   : sent 35 bytes on port 2
+2026-08-14 09:18:04    sleep   : 900 s
+```
+
+So on the image now on the board: **both sensors read in one cycle** — RK900 at 25.1 °C /
+59.7 %RH / 1002.2 hPa / calm, and the RAK9154 pack live at 11.76 V, −0.01 A, 79 %, 23.0 °C,
+already latched at `0x01` — and **the cycle closes `sleep : 900 s`**, the field sleep path, not
+`wait : N s (sleep disabled)`. The pack answered without a BOOT being spent, which is the
+behaviour `ec9725a` was written to produce, though a healthy pack does not exercise the fix's
+failure gates.
+
+This capture also **cross-confirms the network record**: the serial cycle at 16:17:56Z is the
+same event the soak logged from TTN as `f_cnt=2465` at 16:19:24Z. Two independent observers, one
+cycle.
+
+**It still does not identify the image.** The banner prints only at boot, and `[cycle 2]` shows
+this was a *wake*, not a boot — the cycle counter carried over, so a wake does not reprint the
+banner. Everything above would look identical on a resident older build. The banner remains the
+one outstanding check, and it still needs a single RESET press.
 
 **The flashed image does transmit.** A 24 h soak was started on it at 16:09:16Z
 (`~/soak-runs/20260814T160916Z_ttn_rc-v0.4.3-1c2df3c/`, label `rc-v0.4.3-1c2df3c`, baseline
@@ -173,6 +201,16 @@ joins and transmits. It still does not identify the image — a resident older b
 transmit — which is why the banner remains the outstanding check. **The soak has minutes, not
 hours: no soak-hour claim is made here, and `H8` is untouched by it.** Its outcome must be written
 only once it ends.
+
+**A second soak was started by mistake and has been stopped.** Two workers each launched
+`soak_ttn.sh` against the same device, at 16:09:16Z (pid 28695) and 16:23:32Z (pid 31838).
+Two pollers reading one device is not additive evidence — they double the TTN query rate and
+each sees the other's uplinks, so the later run was killed and the surviving run is the **earlier
+and longer** one, `~/soak-runs/20260814T160916Z_ttn_rc-v0.4.3-1c2df3c/`. The `latest-ttn` symlink
+was repointed back to it, and the abandoned directory is kept as
+`~/soak-runs/ABANDONED_duplicate_20260814T162332Z` rather than deleted. **Exactly one soak is
+running.** The lesson is the same one `scripts/flash.sh` and `scripts/push.sh` already encode:
+check for a running soak before starting work, because a `pgrep` taken minutes earlier is stale.
 
 **Two process defects were found the expensive way** and both are fixed in this range. A flash
 window was lost to a poller whose "port appeared" line was misread as empty. A second window was
@@ -2809,50 +2847,6 @@ on it. No background processes were left running.
   (the method behind [CIT-RAK-SLEEP]), a current-sense shunt read on a scope, or a
   coulomb-counting integration over a long window. Tracked in
   [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
-
-### 2026-08-14 — H8 bench soak of `rc-v0.4.2` ran 19 h 02 m with zero anomalies, then was deliberately stopped short of 24 h
-
-- **Commit:** tree `572bcfa`; the running image's banner was captured at the `dcd6807` flash and
-  `572bcfa` is `dcd6807` plus documentation only, with no source change. Firmware `0.4.2`,
-  `env:soak` — which [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md) makes
-  byte-identical to `env:rak4631`, so this is evidence about the shipped image.
-- **Host:** Heliotrope Ridge (`scripts/soak_ttn.sh 24h rc-v0.4.2`, pid 76549)
-- **Measured:** network-side uplink arrival at TTN over a continuous unattended run — cadence,
-  frame-counter continuity, and resets. Device `puma-concolor-001`, application `my-app-tobi`.
-- **Observation** — first and last lines of
-  `~/soak-runs/20260813T202735Z_ttn_rc-v0.4.2/events.log`, verbatim:
-
-  ```
-  2026-08-13T20:27:35Z === SOAK TTN START === label=rc-v0.4.2 duration=86400s device=puma-concolor-001 app=my-app-tobi
-  2026-08-13T20:27:36Z     baseline   : last_f_cnt_up=2272
-  2026-08-14T15:29:28Z SOAK UPLINK f_cnt=2398 delta=1 gap=969s total=76
-  2026-08-14T15:29:28Z === SOAK HEARTBEAT 228 === elapsed=68511s of 86400s uplinks=76 f_cnt=2398 anomalies=0 query_failures=1
-  ```
-
-  Final numbers: **elapsed 68511 s (19 h 02 m) of the 86400 s target · 76 uplinks ·
-  `f_cnt` 2272 → 2398 · anomalies 0 · query failures 1.**
-
-- **What this establishes.** Across 19 h unattended, every uplink stepped the frame counter by
-  exactly 1 (`delta=1` on all 76) and no gap exceeded the 2700 s anomaly threshold, so **no reset
-  and no missed cycle occurred**. The sleep, radio and power paths held for 19 continuous hours on
-  the shipped image. The single query failure was a TTN API read that returned nothing on one
-  poll; the following poll recovered with the counter intact, so it is a harness-side network blip
-  and not a node event.
-
-- **What this does NOT establish.** **H8 is not satisfied.** `FIRMWARE_SPEC.md` §7 H8 requires
-  ≥24 h; this run reached 19 h 02 m — 79 % of the gate, and a gate is not a percentage. Do not
-  record this as a passed soak anywhere.
-
-- **Why it was stopped:** deliberately, by the operator, at 2026-08-14 ~15:33Z. The node is going
-  to the woods at 21:00Z the same day, and the choice was between shipping this image — which has
-  the 19 clean hours above but **not** the `ec9725a` battery BOOT-allowance fix — or flashing the
-  fix and accepting only a few hours of soak on it. He chose the fix, knowingly. The run directory
-  is preserved on the build host and was not deleted.
-
-- **Verdict:** **INCONCLUSIVE for H8 — PASS on everything it did cover.** 19 h 02 m of clean
-  unattended operation at 0 anomalies is real evidence about the sleep, radio and power paths, and
-  it carries forward to the successor image only insofar as those paths are unchanged in it. It
-  closes no deployment gate.
 
 <!-- Template:
 
