@@ -43,6 +43,42 @@ if [[ -n "$ENV_NAME" ]]; then
       Available: $(grep -o '^\[env:[^]]*\]' platformio.ini | sed 's/\[env:\(.*\)\]/\1/' | tr '\n' ' ')"
 fi
 
+# ----------------------------------------------------------------- is a soak running?
+# Flashing resets the board. If a soak is in flight, that ends the run -- and a 24 h soak is a
+# day of wall-clock time that cannot be compressed or recovered, which makes it the most
+# expensive thing on this host to destroy by accident. Worse, this happens before any warning
+# the operator would see: `scripts/build.sh` fast-forwards the build host's checked-out tree,
+# which replaces the soak's own script under the running shell (CIT-POSIX-SH, and the same
+# reasoning as the guard in scripts/push.sh).
+#
+# This is not a hypothetical. On 2026-08-14 a scheduled reflash-and-restart ran against a host
+# with an 18 h soak still in flight and only avoided it by noticing another worker's dirty tree.
+# The guard removes the failure mode instead of relying on someone noticing
+# (.cursor/rules/00-agent-liveness.mdc; AGENTS.md "prefer deleting a failure mode").
+#
+# CITE(spec): POSIX.1-2024 Shell Command Language §2.3 [CIT-POSIX-SH] -- a shell reads its
+#   input in terms of lines from the open file, so replacing a running script mid-read resumes
+#   in the new contents at the old offset.
+# CITE(policy): docs/SOAK.md and FIRMWARE_SPEC.md §7 H8 -- deployment is gated on a >=24 h
+#   bench soak, so an interrupted soak has to be restarted from zero hours.
+if [[ "${ALLOW_FLASH_DURING_SOAK:-0}" != "1" ]]; then
+  SOAK_PS=$(scripts/remote.sh run 'pgrep -fl "soak(_ttn)?\.sh" 2>/dev/null || true' 2>/dev/null \
+    | tr -d '\r' | grep -E 'soak' || true)
+  if [[ -n "${SOAK_PS//[[:space:]]/}" ]]; then
+    echo
+    echo "${RED}=== REFUSING TO FLASH -- A SOAK IS RUNNING ===${NC}"
+    echo "${SOAK_PS}" | sed 's/^/     /'
+    echo
+    echo "Flashing resets the board and ends that run. A >=24 h soak is the H8 deployment"
+    echo "gate and cannot be compressed -- restarting it costs a full day."
+    echo
+    echo "Check what it is:      scripts/remote.sh run 'tail -20 <soak log>'"
+    echo "Flash after it ends:   scripts/flash.sh${ENV_NAME:+ --env $ENV_NAME}"
+    echo "Override deliberately: ALLOW_FLASH_DURING_SOAK=1 scripts/flash.sh${ENV_NAME:+ --env $ENV_NAME}"
+    exit 1
+  fi
+fi
+
 echo "${BLUE}== build ==${NC}"
 scripts/build.sh ${ENV_NAME:+-e "$ENV_NAME"}
 
