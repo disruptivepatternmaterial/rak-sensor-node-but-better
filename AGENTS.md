@@ -87,7 +87,8 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   plus network-side confirmation that the uplinks are landing at TTN and the first delivered
   downlink). **That does not change the status.** Deployment stays blocked until the H1-H8 gates
   and the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close — not merely on "every subsystem
-  answered once." **Zero soak hours exist** — see the H8 row below before repeating otherwise.
+  answered once." **A 24 h bench soak is IN FLIGHT for the first time** — see the H8 row below
+  before repeating either "zero soak hours" or "the soak passed."
 - **The RAK4631 board definition is vendored** in [`rakwireless/`](rakwireless/) because it
   does not exist in the PlatformIO registry. Do not edit it, and do not "fix" the build by
   copying files into `~/.platformio` — see [`rakwireless/README.md`](rakwireless/README.md).
@@ -105,7 +106,26 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | Downlink matrix: all eight command cases | **8/8 PASS on hardware 2026-08-13** (inferred `f15a983`, `stage3`, sleep disabled) — valid `0x01` set-interval (1800 s → 900 s, persisted across a reflash), valid `0x03` status, wrong-length `0x01` and `0x03` both rejected as *wrong length* not *unknown opcode* ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63), [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)), unknown opcode `0x7F` ignored, valid command on the wrong FPort ignored by port, two queued commands drained one per cycle, and cycles 18–26 monotonic with no reset. `take_downlink()` observed for the first time, closing [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | Field image on the board, sleep reached | `env:soak` (byte-identical to `env:rak4631`) flashed 2026-08-13 at **`d568574`, asserted from the banner** — the first board to name its own commit. One cycle: both sensors read, uplink sent, and the cycle closed `sleep   : 900 s`, not `wait    : N s (sleep disabled)`. One cycle is not a soak. Repeated 2026-08-13 at **`65f8615`**, banner-asserted again: both sensors, session `0x260CE734` restored not rejoined, 35 bytes on port 2, `sleep   : 900 s` ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **Not started. Zero soak hours exist.** The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. It has never produced a soak hour: the one attempt, 2026-08-12 at `f626698`, waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
+| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **IN FLIGHT, not complete — and therefore not yet evidence.** A 24 h bench soak of `rc-v0.4.2` has been running on Heliotrope Ridge since 2026-08-13 (pid 76549, `scripts/soak_ttn.sh 24h rc-v0.4.2`), and as of 2026-08-14 15:00Z was ~18.5 h in with 74 uplinks and **0 anomalies**, finishing ~20:27Z. **Do not stop it, flash the board, or reset the board** until it ends; `scripts/flash.sh` and `scripts/push.sh` now refuse on their own and name their overrides. Compiling on the build host is fine — use a `/tmp` clone. **There is deliberately no `docs/EVIDENCE.md` entry**: a run in flight is not a result, and this is exactly the mistake of 2026-08-12 that this file already warns about. Write the outcome after it lands, pass or fail. Everything below this sentence describes the harness, which was built before any hour was ever accumulated. The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. Before the run above it had never produced a soak hour: the one earlier attempt, 2026-08-12 at `f626698`, waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
+
+## Where v0.4.3 leaves things
+
+**`0.4.3` (2026-08-14) is staged but deliberately untagged, and nothing in it has run on
+hardware.** `env:rak4631`, `env:soak` and `env:battdiag` compile `SUCCESS` on Heliotrope Ridge
+and that is the whole claim — the same standing as `0.4.1` had. The board was not touched
+because the 24 h soak of `rc-v0.4.2` was in flight all session, and **the tag waits until the
+image has booted on the board**, so that no tag ever names firmware nobody has watched start.
+
+Everything since `572bcfa` is therefore **believed correct, unobserved**: the #75 BOOT-allowance
+fix (`ec9725a`), the frame-counter-step fix in the soak reader (`7b03d3a`), the overridable
+build-host address (`81285eb`), and the ADR-0002 sign closure (`e8002d9`, which changed no wire
+behavior). When the soak ends, flash and capture before believing any of it.
+
+Two guards were added after two workers died mid-task overnight, one leaving a dirty tree that
+blocked a scheduled flash: `scripts/flash.sh` refuses to flash while a soak runs, and
+`scripts/push.sh` refuses a fast-forward that would rewrite the running soak's own script
+(a shell reads a script incrementally, so replacing it mid-run executes a fragment). Both name
+their override. `scripts/remote.sh sync` already refused on a dirty tree at either end.
 
 ## Where v0.4.1 leaves things
 

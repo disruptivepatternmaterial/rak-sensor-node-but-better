@@ -8,6 +8,36 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-08-14
+
+**Compile-verified only. Nothing in this release has run on hardware.** `env:rak4631`,
+`env:soak` and `env:battdiag` build `SUCCESS` on Heliotrope Ridge and that is the entire claim,
+exactly as it was for `0.4.1`. The board was deliberately not touched: a 24 h bench soak of
+`0.4.2` was in flight for the whole of this work, so flashing would have reset the node and
+thrown away the first soak hours this project has ever accumulated. **No tag is cut here** — the
+tag waits until the image has actually run on the board, so that a tag never names firmware
+nobody has seen boot.
+
+`H8` is **still not met.** At the time of this entry the ≥24 h bench soak is *in flight, not
+complete*, and no ≥7 d field shadow has begun. [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records no
+soak outcome, and deliberately so: `AGENTS.md` forbids recording a launch as if it were a
+result, after a "soak started" entry was once committed 92 seconds before the harness gave up.
+Sleep current remains unmeasured. Status stays `🚧 NOT YET DEPLOYED`.
+
+Versioned **PATCH**: every change is a regression fix, a tooling fix, or documentation. No new
+firmware capability, and no payload channel or type changed, so
+[`.cursor/rules/60-decoder-parity.mdc`](.cursor/rules/60-decoder-parity.mdc) implies no paired
+TTN formatter change. The one payload-adjacent change is `batt_current` moving from
+`status: BLOCKED` to `proposed` in `payload/schema.yaml`, which records a convention the wire
+already followed rather than altering it.
+
+Open defects this release does **not** fix:
+[#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) (the
+pack re-latch path is still unproven),
+[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68),
+[#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72) and
+[#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74).
+
 ### Decided
 
 - **The battery-current sign convention is closed, and the payload freeze is unblocked.**
@@ -69,6 +99,43 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   **Unflashed and unobserved:** compile-verified only, on a board that must not be touched while
   a soak runs. The check that would prove it is a `battdiag` capture in which a transient miss
   produces *no* BOOT, plus one in which sustained silence produces exactly one BOOT per episode.
+
+- **A soak can no longer be destroyed by a routine push or a scheduled flash.** Both scripts that
+  reach the build host now detect a running soak first. The mechanism is not obvious and is worth
+  stating once: a shell reads a script incrementally and keeps a byte offset into the open file
+  ([`CIT-POSIX-SH`](docs/CITATIONS.md), POSIX.1-2024 §2.3), and `git merge --ff-only` *replaces* a
+  file rather than editing it in place, so fast-forwarding the build host mid-soak makes the
+  running shell resume at its old offset inside new contents and execute a fragment of a line.
+  The symptom is a syntax error hours into a run. This nearly happened: `7b03d3a` modifies
+  `scripts/soak_ttn.sh`, which is the exact script the 24 h TTN soak is executing.
+  - `scripts/push.sh` still relays commits to the non-checked-out ref — always safe, since that
+    never touches a working tree — and then decides about step 2/2 by **comparing the incoming
+    diff against the scripts the running soak actually has open**. A docs or `CHANGELOG` push
+    proceeds; a push that would rewrite the soak's own script refuses and parks the commits on
+    the relay ref. The guard is narrow on purpose: one that blocked every push for 24 h would be
+    overridden by reflex, and a guard overridden by reflex protects nothing. Override with
+    `ALLOW_PUSH_DURING_SOAK=1`.
+  - `scripts/flash.sh` refuses outright, because flashing resets the board and ends the run
+    regardless of which files changed. Override with `ALLOW_FLASH_DURING_SOAK=1`. This closes a
+    real near-miss: on 2026-08-14 a scheduled reflash ran against a host with an 18 h soak still
+    in flight and was only averted by a worker noticing an unrelated dirty tree.
+
+### Fixed — tooling
+
+- **`scripts/check_citations.py` no longer reports "has no URL" for a citation whose URL is on the
+  next line of a source file.** The continuation-folding logic added for the ADR-0006 sibling-SHA
+  false positive required a continuation to be *whitespace*-indented, which is true of markdown
+  but never of a `.sh`, `.py`, `.c` or `.h` file, where a wrapped citation begins at column 0 with
+  `#` or `//`. So every multi-line citation in a source file read as unsourced. This was
+  misfiling itself as a known false positive while being a real checker defect — the failure
+  `scripts/push.sh:106: CITE(spec) has no URL` was reported over a URL sitting one line below it.
+  The fold now strips an optional comment marker before testing for the indent. A citation that
+  genuinely points nowhere still fails, and the run reports 392 markers with no new warnings.
+- **The GNU Bash manual is replaced by POSIX.1-2024 as the cited authority for incremental script
+  reading.** `gnu.org` returns **HTTP 403** to automated fetches, and rule 20 forbids committing a
+  citation that cannot be verified. The Open Group's Shell Command Language §2.3 states the same
+  fact normatively — "The shell shall read its input in terms of lines" — and is fetchable, so it
+  is registered as [`CIT-POSIX-SH`](docs/CITATIONS.md) and the 403 is recorded next to it.
 
 ## [0.4.2] — 2026-08-13
 
