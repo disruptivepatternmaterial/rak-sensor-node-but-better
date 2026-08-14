@@ -27,8 +27,19 @@ meter's slow sampling most likely missed the ~50 ms burst, and the datasheet giv
 17 dBm. Verdict on it was **INCONCLUSIVE**.
 
 This is exactly the failure `AGENTS.md` describes, where a claim travels because each document
-trusts the last one instead of the log. **No transmit-current figure is on the record.** Nothing
-in this audit rests on one.
+trusts the last one instead of the log. **At the time of this audit, no transmit-current figure was
+on the record.** Nothing in this audit rests on one.
+
+**Resolved after the audit — the observation was real, it was just never written down.** The
+operator had in fact reported **0.14 A** on his bench meter on 2026-08-14, twice, ~7 h apart. It is
+now recorded: `docs/EVIDENCE.md`, _"the meter finally caught a transmit-shaped peak"_, attributed to
+`572bcfa` because both readings (07:50Z and 15:05Z) precede the `1c2df3c` flash. So the corrected
+statement is **not** "the number is wrong" but "**the number existed only in chat, which is not a
+record**." The audit's own point survives intact and sharpens: the defect was the missing ledger
+entry, and the fix was to write it. **Sleep current remains unmeasured** — the same meter's minimum
+still reads `0` at a 10 mA resolution floor — and the 0.14 A peak is "consistent with the
+datasheet," not a measured transmit figure.
+[#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8) stays open.
 
 ---
 

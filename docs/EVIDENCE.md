@@ -2988,6 +2988,94 @@ on it. No background processes were left running.
   coulomb-counting integration over a long window. Tracked in
   [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
 
+### 2026-08-14 — the meter finally caught a transmit-shaped peak: **0.14 A**, stable across many cycles; minimum still `0` at the same **10 mA** floor
+
+- **Commit:** `572bcfa` — the `v0.4.2` soak image (`env:soak`, byte-identical to `env:rak4631` per
+  [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)), 900 s cycle. **Both readings are
+  attributed to `572bcfa`, and the attribution is clean rather than assumed.** The board carried
+  `572bcfa` until it was reflashed to `1c2df3c` (`v0.4.3`) that afternoon; the soak on `1c2df3c`
+  started at **16:09:16Z**, so the flash preceded that. The operator's readings are timestamped
+  **~00:50 and ~08:05 local (UTC−7)** = **07:50Z and 15:05Z**, both hours before the flash and
+  before the `572bcfa` soak was stopped at ~15:30Z. **Nothing here is evidence about `1c2df3c`**,
+  the shipped image — do not carry these numbers onto it. The power path is unchanged between the
+  two trees, but "unchanged code" is an inference, not a measurement, and this file records the
+  latter.
+- **Host:** **not** Heliotrope Ridge. This is the **operator's bench current meter** — the same
+  inline USB meter as the 2026-08-13 entry below, wired between the USB host power source and the
+  RAK4631. Heliotrope Ridge built and flashed the image and ran the TTN-side soak; it did not take
+  this measurement and cannot. No serial port was attached and nothing was reset to obtain it.
+- **Measured:** whole-board current over the USB supply rail — peak and minimum — observed
+  continuously across a window spanning **many 900 s cycles** (~7 h between the two readings).
+- **Observation** — operator-reported, verbatim, in the order reported:
+
+  ```
+  max is now .14A
+  ```
+  ```
+  sorry .14a
+  ```
+  ```
+  still .14 amp max on the meter
+  ```
+
+  The second line is the operator correcting his own typo to make the magnitude explicit: the peak
+  is **0.14 A = 140 mA**, not 1.4 A and not 14 mA. The third line came **~7 h later**, after many
+  further cycles, and reports the peak **unchanged**. The minimum still **reads `0`**. Display
+  resolution is unchanged at **0.01 A**, i.e. one least-significant digit is **10 mA**, so the peak
+  is "0.14 ± 0.01 A" — fourteen digits of a fourteen-digit reading, not a calibrated 140 mA.
+
+- **What this establishes.**
+  1. **A peak consistent with a LoRa transmit burst has now been caught.** The RAK4631 datasheet
+     gives `Tx mode LoRa @17 dBm` **92 mA** and `@20 dBm` **125 mA**, with an overall sleep figure
+     of **2.0 µA**
+     ([CITE(datasheet): RAK4631 WisBlock Core datasheet, "Power Consumption" — CIT-RAK4631-RAW](https://raw.githubusercontent.com/RAKWireless/rakwireless-docs/master/docs/Product-Categories/WisBlock/RAK4631/Datasheet/README.md)).
+     A **whole-board** 140 mA peak sits sensibly *above* the radio-only figure once the nRF52840
+     and the RAK5802 RS-485 transceiver are added to it. That is the first bench observation on
+     this project that is *shaped like* a transmit event, and it removes the specific worry the
+     2026-08-13 entry raised — that the meter might never catch the burst at all.
+  2. **The peak is stable across many cycles.** Two readings ~7 h apart, over many 900 s cycles,
+     both **0.14 A**. There is no runaway, no escalating draw, and no ratcheting peak — the failure
+     mode where something latches on and never releases would have shown here and did not.
+
+- **What this does NOT establish — read this before quoting a number from it.**
+  1. **No sleep current. Still none, and this entry does not change that.** The `0` minimum is the
+     meter's **resolution floor, not a measurement**. One least-significant digit is 10 mA; the
+     module's datasheet sleep figure is **2.0 µA** [CIT-RAK4631-RAW], roughly **5000×** below a
+     single digit of this display, and [`POWER_BUDGET.md`](POWER_BUDGET.md) turns on ~1 mA. A `0`
+     on this meter is arithmetically incapable of distinguishing a healthy 2 µA sleep from a
+     9 mA defect. "Sleep current is unmeasured" stays an open blocker in `AGENTS.md`, and
+     [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)
+     **stays open**.
+  2. **This is not a measured transmit current either.** 0.14 A is **one digit** of resolution on
+     a meter that samples slowly, catching the tail of a ~50 ms burst by luck rather than by
+     design. The honest reading is "**consistent with the datasheet**" — not "TX draws 140 mA."
+     Do not enter 140 mA into a power budget as a measured figure, and do not derive an airtime or
+     duty-cycle energy number from it. [`POWER_BUDGET.md`](POWER_BUDGET.md) keeps its LoRa TX row
+     as a datasheet reference, not a bench figure.
+  3. **It says nothing about the shipped image.** See the commit note above: `1c2df3c` was not on
+     the board for either reading.
+
+- **Relationship to the 2026-08-13 entry below — this supersedes nothing.** The 2026-08-13
+  _inline USB current meter_ entry (peak 0.04 A, minimum `0`, verdict **INCONCLUSIVE**) stands
+  exactly as written and is not restated here. That entry ended by noting the operator had left
+  the meter inline **to watch for a higher peak across further cycles**; this entry is that watch
+  returning a result. It **adds** a transmit-shaped peak observation and **removes nothing**: the
+  40 mA reading was not wrong, it was a slow meter missing the burst, and its own warning against
+  reading 40 mA as a transmit figure was correct. Both entries leave sleep current unmeasured.
+
+- **Verdict:** **INCONCLUSIVE for both power gates, and genuinely informative anyway.** It closes
+  no gate in `FIRMWARE_SPEC.md` §7 and does not advance H2. What it buys is a coarse peak that is
+  *consistent with* the datasheet transmit figure and a demonstration that the peak does not grow
+  over many cycles. Per `AGENTS.md`, no later document may inherit this as "transmit current
+  measured" or "sleep current measured" — it is one coarse peak and one absent measurement,
+  recorded together on purpose.
+
+- **Next:** unchanged from 2026-08-13. Closing the power gate needs **µA-resolution**
+  instrumentation — a Nordic PPK2 (the method behind [CIT-RAK-SLEEP]), a current-sense shunt on a
+  scope, or coulomb-counting over a long window. A meter whose LSB is 10 mA cannot answer it no
+  matter how many cycles it watches. Tracked in
+  [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary
