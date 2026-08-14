@@ -8,6 +8,41 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Decided
+
+- **The battery-current sign convention is closed, and the payload freeze is unblocked.**
+  Positive means the pack is **charging**, negative means **discharging** — the operator's
+  decision on 2026-08-13, adopting the convention the pack itself reports. Recorded in
+  [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md), which moves from Open to
+  Accepted; `batt_current` in `payload/schema.yaml` moves from `status: BLOCKED` to `proposed`
+  with the convention spelled out, so `scripts/preflight.sh` reaches `PREFLIGHT OK` instead of
+  `=== PREFLIGHT BLOCKED ===` for the first time since the gate was added. This had blocked
+  `FIRMWARE_SPEC.md` §6 for six weeks.
+
+  **Nothing on the wire changed, and that is the point.** The resolution was expected to
+  require a paired change to the live TTN formatter. Read from code it required none: the pack
+  word is parsed verbatim (`src/sensors/battery_frame.cpp`), emitted verbatim
+  (`src/payload.cpp` `put_s16`), and the decoder's `WX_TYPES[185]` only sign-extends and
+  divides by 100 with no negation anywhere in `arrayToDecimal` — its header has documented
+  "positive = charging" all along. Choosing the pack's convention therefore means **no sign
+  transform exists anywhere between the pack's register and the TTN record**, so there is no
+  site at which the record can silently invert and no cutover window in which the two repos
+  could disagree. The node kept transmitting on its 15-minute cycle throughout.
+
+  The claim that lost was our own: `FIRMWARE_SPEC.md` §2.2's "negative = charging per field
+  docs", a field note that most likely described the RAK2560 Hub's re-encoding rather than the
+  pack's raw register. It is corrected, and per rule 20 the conflict stays documented in
+  ADR-0002 rather than being erased. The `do not write charge/discharge logic against the
+  sign` prohibitions in rules 50 and 60 are lifted and replaced with the opposite instruction:
+  do not add an inversion on either side. A wrong flip here does not throw and does not drop
+  the uplink — it quietly reverses charge and discharge, which is worse, because nothing fails
+  visibly.
+
+  **Not observed on hardware.** This is a decision about which convention the project records,
+  not a bench result. The only reading in evidence is -0.01 A on a discharging pack — one LSB,
+  consistent with the decision without proving it. A charge current well clear of the LSB has
+  still never been captured, and no evidence entry claims it has.
+
 ### Fixed
 
 - **A transient probe miss no longer spends the pack's only BOOT, and a genuine failure now gets

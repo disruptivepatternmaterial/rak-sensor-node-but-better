@@ -53,7 +53,16 @@ struct WeatherReading {
 
 struct BatteryReading {
     Maybe<uint16_t> voltage;     // x0.01 V
-    Maybe<int16_t>  current;     // x0.01 A — sign convention unresolved, see ADR-0002
+    // x0.01 A, as the pack reports it: POSITIVE = charging, NEGATIVE = discharging
+    // (ADR-0002, decided 2026-08-13). Never apply a sign transform to this value —
+    // the pack's convention is the project's convention precisely so that no code
+    // anywhere can silently invert the record.
+    // CITE(spec): [CIT-CAYENNE-LPP] Cayenne LPP — type 185 is signed 16-bit in 0.01 A
+    //   units, so the wire carries the sign and only its meaning was ever in question.
+    // CITE(sibling): [CIT-FWM-DECODER] rak-wx-station-default.js @
+    //   efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 — WX_TYPES[185] is signed/divisor 100
+    //   with no negation in arrayToDecimal, and its header documents positive = charging.
+    Maybe<int16_t>  current;
     Maybe<uint8_t>  soc;         // %
     // Tenths of a degree, matching the wire format the encoder expects. The pack reports
     // this over one-wire using the same IPSO type as its own uplinks, which carry tenths —

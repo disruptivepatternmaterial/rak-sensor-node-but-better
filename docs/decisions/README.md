@@ -29,7 +29,7 @@ Every ADR carries citations to the same standard as code (rule 20).
 | ADR | Title | Status |
 |---|---|---|
 | [0001](ADR-0001-build-and-flash-on-build-host.md) | Author locally, build and flash on Heliotrope Ridge | Accepted |
-| [0002](ADR-0002-payload-contract-conflicts.md) | Payload contract conflicts with the live TTN decoder | Open — blocks payload freeze |
+| [0002](ADR-0002-payload-contract-conflicts.md) | Payload contract conflicts with the live TTN decoder | Accepted — all three conflicts decided; current sign closed 2026-08-13 |
 
 ## Open decisions not yet ADR'd
 

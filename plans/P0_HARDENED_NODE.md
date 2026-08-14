@@ -47,7 +47,7 @@ bytes at the datasheet's 4800.
 | 3 | Keep Probe IO junction vs direct RK900 | **Open** — [`docs/HARDWARE.md`](../docs/HARDWARE.md) treats Probe IO as an optional junction box only |
 | 4 | Arduino WisBlock-API-V2 vs RUI3 | **Closed** — neither. [ADR-0003](../docs/decisions/ADR-0003-firmware-framework.md), superseded in part by [ADR-0005](../docs/decisions/ADR-0005-direct-sx126x.md): direct SX126x via `LoRaWan-Arduino`, with the loop owned in-repo |
 | 5 | Same TTN app `my-app-tobi` vs new app | **Closed by observation** — the node is live in `my-app-tobi` as `puma-concolor-001`, DevEUI `42BB96EF76E200F1`, plan `US_902_928_FSB_2`. The `middle-fork-area` application is empty |
-| 6 | Battery current sign convention | **Open and blocking the payload freeze** — [ADR-0002](../docs/decisions/ADR-0002-payload-contract-conflicts.md) |
+| 6 | Battery current sign convention | **Closed 2026-08-13** — positive = charging, negative = discharging, per the pack's own telemetry. No longer blocks the payload freeze. [ADR-0002](../docs/decisions/ADR-0002-payload-contract-conflicts.md) |
 | 7 | Buck converter part | **Open.** Must be chosen on *no-load quiescent current*: a part idling at milliamps exceeds the node's whole average draw ([`docs/POWER_BUDGET.md`](../docs/POWER_BUDGET.md)) |
 
 ## Cloud-agent notes

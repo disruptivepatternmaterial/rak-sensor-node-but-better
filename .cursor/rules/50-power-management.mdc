@@ -74,8 +74,11 @@ largest current draw and a brownout mid-flash-write corrupts the stored interval
 sagging battery are the classic way to lose a node permanently.
 
 The pack reports voltage, current, and SoC over the BMS link (§2.2), so the threshold is
-measurable — but note the **unresolved sign convention for battery current**, logged in
-ADR-0002. Do not write charge/discharge logic against the sign until that ADR is closed.
+measurable. The **battery current sign convention is decided** — positive = charging,
+negative = discharging (ADR-0002, 2026-08-13), matching the pack's own telemetry. Charge and
+discharge logic may now read the sign, but none exists today and adding any is a change with
+its own gates: the convention has not yet been confirmed against a real charge current, only
+against a one-LSB discharge reading.
 
 ## Changing anything power-related
 

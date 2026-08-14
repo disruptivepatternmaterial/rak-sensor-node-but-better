@@ -157,12 +157,6 @@ Open issues from this pass: [#62](https://github.com/disruptivepatternmaterial/r
 
 ## Open blockers
 
-- [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) — battery current sign
-  is contradictory between the spec and the live decoder. Blocks the payload freeze. Do not
-  guess it. The six code paths whose meaning depends on it are enumerated in
-  [`docs/reviews/2026-08-12_spec_drift.md`](docs/reviews/2026-08-12_spec_drift.md) §2.2 —
-  none of them is a *control* decision, so resolving it wrongly inverts the record without
-  stranding the node.
 - **Sleep current is unmeasured and cannot be measured from the pack.** Its telemetry LSB is
   10 mA; [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md) turns on ~1 mA. Do not quote a sleep
   current from pack telemetry — it is a resolution floor, not a measurement
@@ -180,9 +174,11 @@ Open issues from this pass: [#62](https://github.com/disruptivepatternmaterial/r
   [round 3](docs/reviews/2026-08-12_adversarial_review_round3.md),
   [deferred cruft pass](docs/reviews/2026-08-12_cruft_plan.md) ([#52](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/52)).
 - **`scripts/preflight.sh` no longer prints `PREFLIGHT OK` over an unresolved payload field.**
-  A `BLOCKED` entry in `payload/schema.yaml` — today `batt_current`, per ADR-0002 — now ends the
-  run with `=== PREFLIGHT BLOCKED ===`. Exit stays 0 so routine CI is not red for a deliberately
-  open conflict; `--strict` exits 2 for the release checklist. Two scans (secrets, null policy)
+  A `BLOCKED` entry in `payload/schema.yaml` ends the run with `=== PREFLIGHT BLOCKED ===`.
+  Exit stays 0 so routine CI is not red for a deliberately open conflict; `--strict` exits 2
+  for the release checklist. **No field is BLOCKED as of 2026-08-13** — `batt_current` was the
+  last one and ADR-0002 closed it, so the run reaches `PREFLIGHT OK` again. If it says
+  `BLOCKED`, something new opened; read the named field rather than assuming it is the old one. Two scans (secrets, null policy)
   were also *never executing* — `xargs` aborts with `sysconf(_SC_ARG_MAX) failed` here and empty
   output was read as clean. They use `git grep` now, and the null-policy heuristic is too broad
   on first real execution — six counter resets flagged as fabricated zeros, `radio.h:98` among

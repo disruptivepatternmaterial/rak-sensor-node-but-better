@@ -68,6 +68,12 @@ the one thing this gate exists to prevent.
   places double-corrects by 230° and looks plausible enough to ship.
 - **Zero-wind null policy is the decoder's job.** It nulls `wind_direction` when
   `wind_speed === 0`. Firmware does not pre-null it.
-- **Battery current sign is unresolved.** The decoder header says positive = charging;
-  `FIRMWARE_SPEC.md` §2.2 says negative = charging. See ADR-0002 — do not encode either
-  convention until it is closed with bench evidence.
+- **Battery current sign is decided, and neither side transforms it.** Positive = charging,
+  negative = discharging (ADR-0002, 2026-08-13) — the pack's own convention, adopted so that
+  no sign transform exists anywhere between the pack's register and the TTN record. The
+  decoder only sign-extends and divides (`WX_TYPES[185]`: signed, divisor 100), and the
+  firmware emits the parsed word verbatim. **Do not add an inversion on either side.** A
+  flip applied to one repo and not the other does not throw and does not drop the uplink —
+  it silently reverses charge and discharge in the record, which is worse, because nothing
+  fails visibly. `FIRMWARE_SPEC.md` §2.2's old "negative = charging" field note was the
+  claim that lost; the conflict stays documented in ADR-0002 rather than erased.

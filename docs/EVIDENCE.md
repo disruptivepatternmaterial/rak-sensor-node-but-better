@@ -546,7 +546,10 @@ Traps that cost real time here:
   pre-latch announcements; no capture window was ever long enough to show what followed.
 - **Does not change project status.** `🚧 NOT YET DEPLOYED` stands — H1-H8 and the ≥24 h
   soak / ≥7 d shadow are untouched by this. Temperature scale remains UNCONFIRMED
-  (issue #4) and the current-sign conflict in ADR-0002 is still open.
+  (issue #4) and the current-sign conflict in ADR-0002 is still open. **[Update 2026-08-13:
+  ADR-0002's current-sign conflict is now closed by operator decision — positive = charging,
+  negative = discharging, matching the pack. Not by a measurement; nothing in this entry or
+  any other observed a charge current. The statement above was accurate on its date.]**
 
 ### 2026-08-12 — Transmit timing is within async tolerance. The 11.4% overshoot is legal inter-character idle, not a stretched bit period
 
@@ -1078,6 +1081,13 @@ re-attempt it.
 frame is not a soak: H8 still requires ≥24 h on the bench and ≥7 d of field shadow, and H7
 (BMS silent → no livelock) has not been exercised. **ADR-0002 stays open** — `+0.00 A` at rest
 settles no sign convention, and a resting pack is precisely the reading that cannot.
+
+**[Update 2026-08-13 — ADR-0002 is closed, and this entry is still not the reason.]** The
+current-sign conflict was resolved by operator decision on 2026-08-13: positive = charging,
+negative = discharging, adopting the pack's own telemetry convention so that no code in the
+path inverts a hardware-reported value. That is a decision about which convention the project
+records, **not** a bench result. The sentence above stands unamended: no capture in this file
+has ever observed the pack under a real charge current, and none claims to.
 
 Two High findings are open against this path and are deliberately not fixed in this entry's
 commits:

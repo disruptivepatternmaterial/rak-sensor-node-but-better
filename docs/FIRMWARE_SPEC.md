@@ -86,7 +86,7 @@ below is retained only so a future 4-pin harness does not have to rediscover it.
 | Reg | Field | Scale |
 |---|---|---|
 | 0x6000 | Pack V | ×0.01 V |
-| 0x6001 | Current | ×0.01 A (signed; **negative = charging** per field docs) |
+| 0x6001 | Current | ×0.01 A (signed; **positive = charging**, negative = discharging — [ADR-0002](decisions/ADR-0002-payload-contract-conflicts.md), decided 2026-08-13) |
 | 0x6002 | SoC | ×1 % |
 | 0x6009 | Batt T | ×1 °C |
 

@@ -213,9 +213,11 @@ the first thing to go.
 Confirm the cutoff voltage on the bench and revisit both numbers. Tracked in issue #7.
 
 Pack voltage, current, and SoC are readable over the BMS link (`FIRMWARE_SPEC.md` §2.2), so
-these are measurable rather than guessed. The **battery current sign convention is
-unresolved** — see [ADR-0002](decisions/ADR-0002-payload-contract-conflicts.md). Do not
-write charge/discharge logic until it is closed.
+these are measurable rather than guessed. The **battery current sign convention is decided**:
+positive = charging, negative = discharging, matching the pack's own telemetry — see
+[ADR-0002](decisions/ADR-0002-payload-contract-conflicts.md) (2026-08-13). It has not yet been
+confirmed against a real charge current, so treat charge/discharge logic written against it as
+resting on a decision rather than a measurement.
 
 ## Changing anything power-related
 

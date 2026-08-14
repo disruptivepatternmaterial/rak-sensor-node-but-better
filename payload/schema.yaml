@@ -118,12 +118,31 @@ fields:
     unit: A
     decoded_key: batt_current
     source: FIRMWARE_SPEC.md §2.2 reg 0x6001
-    status: BLOCKED
+    status: proposed
+    sign_convention: positive-is-charging
     notes: >
-      Sign convention is contradictory across sources. FIRMWARE_SPEC.md §2.2 states
-      negative = charging; the decoder header states positive = charging. See
-      docs/decisions/ADR-0002. Do not encode either convention until closed with
-      bench evidence.
+      SIGN CONVENTION, decided 2026-08-13 by the operator (docs/decisions/ADR-0002,
+      "Resolution - conflict 1"): a POSITIVE value means the pack is CHARGING, a
+      NEGATIVE value means the pack is DISCHARGING. Zero means neither, within one
+      LSB of 0.01 A.
+
+      This is the pack's own native telemetry convention, so NOTHING in the path
+      applies a sign transform. The pack's two's-complement word is parsed verbatim
+      (src/sensors/battery_frame.cpp), emitted verbatim (src/payload.cpp put_s16),
+      and the decoder only sign-extends and divides by 100 - WX_TYPES[185] is
+      signed: true, divisor: 100, and arrayToDecimal performs no negation. The
+      decoder header at :16 documents the same convention in words. If you are
+      reading this because you are about to add an inversion somewhere: do not. An
+      inversion on either side alone silently reverses the record.
+
+      The former contradiction is preserved in ADR-0002 rather than erased:
+      FIRMWARE_SPEC.md §2.2 previously claimed "negative = charging per field docs".
+      That claim lost - it was a field note describing the RAK2560 Hub's re-encoding,
+      never a measurement of the pack - and §2.2 is corrected to match.
+
+      NOT yet confirmed on hardware under a real charge current. The one bench
+      reading (2026-08-12, -0.01 A on a discharging pack) is one LSB and is
+      consistent with this convention without proving it.
 
   - name: batt_soc
     channel: 23

@@ -84,12 +84,16 @@ void Payload::add(const BatteryReading &b)
         put_u16(kChBattVolts, kTyBattVolts, b.voltage.value);
     }
 
-    // Encoded exactly as the pack reported it. Whether a negative number means charging
-    // or discharging is genuinely unsettled — the firmware spec and the decoder's own
-    // header state opposite conventions (ADR-0002). That is a question about what the
-    // number means, not about what to transmit, so the value goes out unmodified and the
-    // interpretation gets resolved once the pack has been watched through a charge cycle.
-    // Nothing on the node makes a decision from this field until then.
+    // Encoded exactly as the pack reported it, and that is now the decided convention
+    // rather than a deferral: POSITIVE = charging, NEGATIVE = discharging (ADR-0002,
+    // 2026-08-13). Adopting the pack's own convention means no sign transform exists
+    // anywhere between the pack's register and the TTN record, so there is no site at
+    // which the record can be silently inverted. Do not add one here.
+    // CITE(spec): [CIT-CAYENNE-LPP] Cayenne LPP — type 185 signed 16-bit, 0.01 A units.
+    // CITE(sibling): [CIT-FWM-DECODER] rak-wx-station-default.js @
+    //   efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32 — WX_TYPES[185] signed, divisor 100,
+    //   no negation in arrayToDecimal; header :16 documents positive = charging. The
+    //   decoder therefore needed no change to match this decision.
     if (b.current.valid) {
         put_s16(kChBattAmps, kTyBattAmps, b.current.value);
     }
