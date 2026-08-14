@@ -126,11 +126,24 @@ def main() -> int:
                 # correctly pinned. A false warning is worse than no warning: it is what teaches
                 # a reviewer to skim past the one that matters. Fold indented continuation lines
                 # into the body, stopping at the next citation or the next unindented line.
+                #
+                # A continuation inside a SOURCE FILE is not indented -- it starts at column 0
+                # with the comment marker, `#   the shell as it goes...` or `//   ...`. Only
+                # markdown continuations are whitespace-indented, so requiring leading
+                # whitespace made every wrapped citation in a .sh, .py, .c or .h file read as
+                # unsourced. That is what failed scripts/push.sh:106 with "has no URL" over a
+                # URL sitting one line below it. Strip an optional comment marker first, then
+                # require the indent that distinguishes a continuation from a new statement.
                 tail = []
                 for cont in all_lines[n:]:
-                    if not cont.strip() or not cont[:1].isspace() or CITE_RE.search(cont):
+                    body_after_marker = re.sub(r"^\s*(?:#+|//+|\*)", "", cont, count=1)
+                    if cont.strip().startswith(("#", "//", "*")):
+                        rest = body_after_marker
+                    else:
+                        rest = cont
+                    if not rest.strip() or not rest[:1].isspace() or CITE_RE.search(cont):
                         break
-                    tail.append(cont.strip())
+                    tail.append(rest.strip())
                 cite_count += 1
                 cat, body = m.group(1), " ".join([m.group(2).strip()] + tail)
                 if cat not in CATEGORIES:
