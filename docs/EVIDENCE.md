@@ -82,7 +82,7 @@ implementing lines for each gate.
 | H5 | Interval + keys survive power loss | ✅ interval and session over `InternalFS`; keys are compiled into the image, so "keys survive" is true trivially rather than by storage | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
 | H6 | RK900 absent → no livelock | ✅ bounded 1000 ms reply timeout; caller tolerates failure without retrying forever | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
 | H7 | BMS silent → no livelock | ✅ bounded first-byte and inter-byte timeouts, bounded provisioning window. Bounded but **long** — `acquire_pid()` measured at 45.4 s of a 50.5 s wake, inside the 120 s WDT window with less margin than it sounds | Unplug BMS data → cycle continues | ⬜ none |
-| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | 🟨 **started but not met.** First real soak hours exist: **19.03 h on `572bcfa` with 76 uplinks and 0 anomalies**, 2026-08-13/14, stopped deliberately short of 24 h to ship the `#75` battery fix (entry below). 19.03 h < 24 h, and a partial run on one image cannot be topped up by another, so **H8 is still open** and the ≥7 d field shadow has not begun. The earlier 2026-08-12 attempt at `f626698` never attached and logged 140 bytes in 180 s |
+| H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | 🟨 **started but not met, on both halves.** Bench: the longest run is **19.03 h on `572bcfa`, 76 uplinks, 0 anomalies**, 2026-08-13/14, **stopped deliberately** short of 24 h to ship the `#75` battery fix. The run on the shipping image `1c2df3c` had a **deliberate RESET inside its window** at 17:50Z (`resets=1`), so it is not an uninterrupted 24 h either. 19.03 h < 24 h, and a partial run on one image cannot be topped up by another. Shadow: the field deployment on **2026-08-14** is **day zero of seven — a beginning, not an achievement**. The earlier 2026-08-12 attempt at `f626698` never attached and logged 140 bytes in 180 s. **H8 stays open** |
 
 The [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §9 first-light list is now **closed**, and closing
 it changes nothing about the status above:
@@ -107,6 +107,146 @@ Newest first, by the date the entry was committed (`git log --format='%ad' -- do
 not by the date embedded in its heading — two 2026-08-03 entries and two 2026-07-31 entries each
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
+
+### 2026-08-14 — `1c2df3c` **read back from the board's own banner**, and six unattended 900 s cycles
+
+**Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`. **Commit, asserted from the device:**
+`1c2df3c`. **Environment:** `env:soak` (byte-identical to `env:rak4631`,
+[ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)). **Raw capture:** `/tmp/banner.log`
+on the build host, 81 lines. **Verdict: pass — image identity confirmed, cadence confirmed, both
+sensors confirmed.**
+
+**This closes the one gap the entry below leaves open.** That entry recorded, correctly, that the
+running image's SHA was asserted only by the build-and-flash tooling and never read off the
+device — `239A:8029` proves *an* application is running, not *which*. The operator pressed RESET
+**once** at 10:50:12 build-host local (UTC-7) = **17:50:12Z** while a capture was held open,
+specifically to make the board print its banner. It did:
+
+```
+2026-08-14 10:50:12 === rak-sensor-node ===
+2026-08-14 10:50:12 firmware : 0.4.3
+2026-08-14 10:50:12 commit   : 1c2df3c
+2026-08-14 10:50:12 built    : Aug 14 2026 09:00:34
+2026-08-14 10:50:12 features : rk900=1 battery=1 radio=1 sleep=1 wdt=1
+2026-08-14 10:50:12 interval : bench=0, bounds 900-86400 s, default 3600 s
+2026-08-14 10:50:12 region   : US915 sub-band 2
+2026-08-14 10:50:12    config  : interval 900 s, boot #3
+2026-08-14 10:50:12    session : restored 0x260CE734, counter 2496
+```
+
+`commit   : 1c2df3c` **matches the SHA that was flashed**, with no `-dirty` suffix and not
+`unknown`, so per the table at the top of this file the SHA is **asserted, not inferred**. This is
+the **third distinct commit** ever to name itself off the board — after `d568574` (the first, and
+the first entry here that did not have to infer a SHA) and `65f8615`. It is *not* the second; the
+`65f8615` entry below is banner-asserted too, and any later document saying "second" is wrong.
+
+**Six consecutive unattended cycles on the 900 s cadence.** Cycles 3 through 8 ran with nobody
+touching the board, spanning 09:33:04 → 10:48:51 local (16:33:04Z → 17:48:51Z), about **1 h 15 m
+of continuous correct cycling**. Wake-to-wake spacing measured from the `[cycle N]` stamps is
+908, 908, 907, 908, 908 s against a 900 s target — the ~8 s excess is the cycle's own awake time,
+which the `sleep : 900 s` line confirms is scheduled *after* the work, not inclusive of it. Two
+representative cycles verbatim, first and last of the unattended run:
+
+```
+2026-08-14 09:33:04 [cycle 3]
+2026-08-14 09:33:04    RK900   : raw 0x0000-0x0004 = 0000 0000 00FD 0254 2727
+2026-08-14 09:33:04    RK900   : wind 0.00 m/s @ 0 deg, 25.3 C, 59.6 %RH, 1002.3 hPa
+2026-08-14 09:33:04    battery : pack answered at 0x01 — skipping provisioning
+2026-08-14 09:33:04    battery : 11.76 V  -0.01 A  78%  23.0 C
+2026-08-14 09:33:04    radio   : sent 35 bytes on port 2
+2026-08-14 09:33:12    sleep   : 900 s
+
+2026-08-14 10:48:43 [cycle 8]
+2026-08-14 10:48:43    RK900   : raw 0x0000-0x0004 = 0000 0000 00EB 0289 2728
+2026-08-14 10:48:43    RK900   : wind 0.00 m/s @ 0 deg, 23.5 C, 64.9 %RH, 1002.4 hPa
+2026-08-14 10:48:43    battery : pack answered at 0x01 — skipping provisioning
+2026-08-14 10:48:43    battery : 11.75 V  -0.01 A  78%  23.0 C
+2026-08-14 10:48:43    radio   : sent 35 bytes on port 2
+2026-08-14 10:48:51    sleep   : 900 s
+```
+
+**Every one of the eight cycles in the capture closed `sleep : 900 s`** — the field sleep path,
+never `wait : N s (sleep disabled)` — and every one sent `35 bytes on port 2`. The sensors track
+a real afternoon rather than repeating a cached value: RK900 25.3 → 25.4 → 25.3 → 24.3 → 23.1 →
+23.5 °C and 59.6 → 64.9 %RH across the six cycles, pressure steady at 1002.3–1002.4 hPa, wind
+calm throughout. The pack reads 11.76 → 11.75 V, −0.01 A, 78 %, 23.0 °C, latched at `0x01` on
+every single cycle.
+
+**The RESET was deliberate and is recorded as an interruption, not as uptime.** The 24 h soak on
+this image was already running when the button was pressed, so this run is **not** 24 h of
+uninterrupted runtime and must never be read as such. The soak's own `events.log` caught the same
+event independently:
+
+```
+2026-08-14T17:50:21Z SOAK UPLINK f_cnt=2496 delta=26 gap=971s total=7
+2026-08-14T17:50:21Z SOAK NOTE  counter-step +26 in 971s within the 32-frame reset reserve --
+2026-08-14T17:50:21Z     one uplink after a reset, not 26 transmissions (session.cpp:278); resets=1
+2026-08-14T17:50:21Z === SOAK HEARTBEAT 20 === elapsed=6064s of 86400s uplinks=7 f_cnt=2496 resets=1 anomalies=0 query_failures=0
+```
+
+Two things fall out of that, both new. First, the network-side `f_cnt=2496` is the **same number**
+the banner printed as `session : restored ... counter 2496` nine seconds earlier — serial and TTN
+agree on the counter across a reset, from two independent observers. Second, **the frame-counter-step
+fix `7b03d3a` is now observed on hardware**: it classified the +26 jump as one uplink after a reset
+consuming the 32-frame reset reserve, and held `anomalies=0`, rather than reporting 26 phantom
+transmissions. That fix was previously "believed correct, unobserved."
+
+**Post-reset cycle 1 spent no BOOT on a healthy pack**, which is the behaviour `ec9725a` (the #75
+fix) was written to produce:
+
+```
+2026-08-14 10:50:12 [cycle 1]
+2026-08-14 10:50:12    RK900   : wind 0.00 m/s @ 0 deg, 23.6 C, 65.1 %RH, 1002.4 hPa
+2026-08-14 10:50:12    battery : pack answered at 0x01 — skipping provisioning
+2026-08-14 10:50:12    battery : sampling confirmed — pack is reporting live values
+2026-08-14 10:50:12    battery : 11.75 V  -0.01 A  78%  23.0 C
+2026-08-14 10:50:12    session : saved 0x260CE734, resume at 2528
+2026-08-14 10:50:12    radio   : sent 35 bytes on port 2
+2026-08-14 10:50:20    sleep   : 900 s
+```
+
+Note there is **no null cycle after this boot** — `sampling confirmed` on the very first cycle,
+because the pack was already sampling from the preceding run. The "expect ~2 null cycles after
+boot" note in `AGENTS.md` describes a pack that has just been powered, not one that has merely
+been reset.
+
+**What this run does NOT establish, and this is the honest limit of it.** A grep of the whole
+81-line capture for `brownout`, `provId`, `BOOT this`, `no confirmed latch`, `Unsampled`,
+`rejoin`, `keepalive` and `silent at` returns **nothing**. So:
+
+- **The `#75` defect condition never arose.** Every cycle got `pack answered at 0x01`; there was
+  not one transient probe miss in eight cycles. The run shows the healthy path working and the
+  BOOT correctly *unspent*, which is consistent with `ec9725a` — it does **not** exercise the
+  consecutive-miss counter the fix actually adds. The fix remains believed correct on its own
+  failure gate.
+- **The `#62` re-latch path was never entered.** No `provId 0xFF` anywhere, and the pack **kept**
+  its `0x01` latch straight through the RESET, so no re-latch was ever needed. `#62` stays open
+  and stays unproven.
+- **The brownout path (`#61`'s fix) was never entered.** No `brownout engaged` line, because the
+  pack sat at 11.75–11.76 V all afternoon. Nothing here speaks to it.
+- **The rejoin and keepalive paths were never entered.** The session was *restored*, not rejoined,
+  and every cycle produced a real uplink so no keepalive was due.
+
+**`H8` is NOT met and is not advanced by this entry.** The requirement is a **≥24 h uninterrupted
+bench soak** plus a **≥7 d field shadow**. The soak on this image stood at 6064 s (1.68 h) with a
+deliberate reset inside the window at the last read, and 1 h 15 m of clean cycling is not 24 h.
+The `572bcfa` run reached 19.03 h and was **stopped deliberately** to ship the `#75` fix — that
+outcome is recorded in its own entry below and is **not** restated as new evidence here, nor can a
+partial run on one image be topped up by another. The field deployment beginning today is the
+**start** of the 7 d shadow, day zero of seven, not its completion. Status stays
+`🚧 NOT YET DEPLOYED`.
+
+**Process note worth one sentence.** The capture opens with the harness refusing rather than
+producing garbage:
+
+```
+2026-08-14 09:26:55 === CAPTURE REFUSED /dev/cu.usbmodem31201 held by ...Python(31754) ===
+```
+
+Port contention has cost this project a great deal of time, usually by a second reader silently
+producing a truncated or interleaved log that then gets believed. `scripts/capture.py` naming the
+holding pid and declining is the correct behaviour; the fix is to kill the prior capture and
+**confirm it is gone** before reading a quiet log as silence.
 
 ### 2026-08-14 — `1c2df3c` flashed as `env:soak`; both sensors and `sleep : 900 s` observed. Banner SHA still NOT read back.
 
