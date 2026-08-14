@@ -62,8 +62,14 @@ fi
 # CITE(policy): docs/SOAK.md and FIRMWARE_SPEC.md §7 H8 -- deployment is gated on a >=24 h
 #   bench soak, so an interrupted soak has to be restarted from zero hours.
 if [[ "${ALLOW_FLASH_DURING_SOAK:-0}" != "1" ]]; then
+  # Keep only lines that are actually `<pid> <command>`. `remote.sh run` echoes the command it is
+  # about to run, so a bare `grep soak` matches that banner -- the pattern string appears in it --
+  # and the guard fires with no soak running at all. That misfire cost a flash window on
+  # 2026-08-14, and a guard that cries wolf on a deadline is worse than no guard, because the
+  # override becomes reflexive. Anchoring on a leading pid is what distinguishes pgrep output
+  # from anything else on the stream.
   SOAK_PS=$(scripts/remote.sh run 'pgrep -fl "soak(_ttn)?\.sh" 2>/dev/null || true' 2>/dev/null \
-    | tr -d '\r' | grep -E 'soak' || true)
+    | tr -d '\r' | grep -E '^[0-9]+[[:space:]]+.*soak' || true)
   if [[ -n "${SOAK_PS//[[:space:]]/}" ]]; then
     echo
     echo "${RED}=== REFUSING TO FLASH -- A SOAK IS RUNNING ===${NC}"
