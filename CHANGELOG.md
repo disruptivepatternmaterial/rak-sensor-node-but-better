@@ -10,19 +10,44 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [0.4.3] — 2026-08-14
 
-**Compile-verified only. Nothing in this release has run on hardware.** `env:rak4631`,
-`env:soak` and `env:battdiag` build `SUCCESS` on Heliotrope Ridge and that is the entire claim,
-exactly as it was for `0.4.1`. The board was deliberately not touched: a 24 h bench soak of
-`0.4.2` was in flight for the whole of this work, so flashing would have reset the node and
-thrown away the first soak hours this project has ever accumulated. **No tag is cut here** — the
-tag waits until the image has actually run on the board, so that a tag never names firmware
-nobody has seen boot.
+**This release has now run on hardware, and the board named itself.** `1c2df3c` was flashed as
+`env:soak` (byte-identical to `env:rak4631`,
+[ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)) and, after a single RESET press
+at 17:50:12Z with a capture held open, printed `commit   : 1c2df3c` in its own boot banner —
+matching what was flashed, with no `-dirty` suffix. That is the standard `AGENTS.md` requires: a
+SHA read off the device, not asserted by the tooling. It is the **third distinct commit** ever to
+do so, after `d568574` and `65f8615`. **The tag is cut on that basis** — the earlier text here said
+no tag would be cut until the image had run on the board, and it now has.
 
-`H8` is **still not met.** At the time of this entry the ≥24 h bench soak is *in flight, not
-complete*, and no ≥7 d field shadow has begun. [`docs/EVIDENCE.md`](docs/EVIDENCE.md) records no
-soak outcome, and deliberately so: `AGENTS.md` forbids recording a launch as if it were a
-result, after a "soak started" entry was once committed 92 seconds before the harness gave up.
-Sleep current remains unmeasured. Status stays `🚧 NOT YET DEPLOYED`.
+What was observed: **cycles 3 through 8 ran unattended on the 900 s cadence**, about 1 h 15 m of
+continuous correct cycling at ~908 s wake-to-wake, with **both sensors live on every cycle** (RK900
+23.1–25.4 °C / 56.3–64.9 %RH / 1002.3 hPa / calm; the RAK9154 pack latched at `0x01` reporting
+11.75–11.76 V, −0.01 A, 78 %, 23.0 °C) and **every cycle closing `sleep : 900 s`** and sending 35
+bytes on port 2. Full raw capture in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+
+`H8` is **still not met, and this release does not advance it.** The longest bench soak remains
+**19.03 h on `572bcfa`**, stopped deliberately short of 24 h to ship the `#75` fix in this release;
+the soak on `1c2df3c` had a **deliberate RESET inside its window** (`resets=1`), so it is not an
+uninterrupted 24 h either, and a partial run on one image cannot be topped up by another. The
+field deployment on 2026-08-14 is **day zero of the ≥7 d shadow — a beginning, not an
+achievement.** Sleep current remains unmeasured. Status stays `🚧 NOT YET DEPLOYED`.
+
+**Which of the `0.4.1`/`0.4.3` fixes this run actually exercised, and which it did not.** A grep of
+the capture for `brownout`, `provId`, `BOOT this`, `no confirmed latch`, `Unsampled`, `rejoin`,
+`keepalive` and `silent at` returns nothing at all, and that absence is the honest boundary:
+
+- **Exercised — the battery read path.** The pack answered `at 0x01` on all eight cycles and
+  reported live values with **no BOOT spent**, which is the outcome `ec9725a` was written to
+  produce. The healthy path is confirmed working end to end.
+- **Exercised — the soak reader's frame-counter-step fix (`7b03d3a`).** It classified the +26 jump
+  across the reset as one uplink consuming the 32-frame reset reserve and held `anomalies=0`,
+  rather than reporting 26 phantom transmissions. Previously believed correct, now observed.
+- **Not exercised, still believed correct — `ec9725a`'s own failure gate.** There was not one
+  transient probe miss in eight cycles, so the consecutive-miss counter the fix adds never ran.
+  A healthy pack cannot test it.
+- **Not exercised — the brownout, rejoin and keepalive paths.** The pack sat at 11.75 V so no
+  brownout engaged; the session was *restored*, not rejoined; every cycle produced a real uplink so
+  no keepalive was due. Compiling cannot reach these, and neither can one clean afternoon.
 
 Versioned **PATCH**: every change is a regression fix, a tooling fix, or documentation. No new
 firmware capability, and no payload channel or type changed, so
