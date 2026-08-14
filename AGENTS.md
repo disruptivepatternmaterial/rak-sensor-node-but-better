@@ -119,15 +119,29 @@ waits on a banner-verified run, not on minutes of uptime.
 read back off this board.** `FLASH OK` plus USB `239A:8029` prove *an* application is running,
 not *which* — a resident older image enumerates identically. A 24 h soak on the new image
 started 16:09:16Z and its first uplink (`f_cnt=2465`, `resets=0`) is real, which proves the
-board joins and transmits, and still does not identify the image. Neither sensor has been
-observed reading on `1c2df3c`, and `sleep : 900 s` has not been observed on it
-([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
+board joins and transmits, and still does not identify the image.
+
+**Both sensors and `sleep : 900 s` have since been observed** on the running image — a 1500 s
+`scripts/capture.py` run caught a full cycle at 16:17:56Z: RK900 at 25.1 °C / 59.7 %RH /
+1002.2 hPa calm, the RAK9154 pack live at 11.76 V, −0.01 A, 79 %, 23.0 °C already latched at
+`0x01` with no BOOT spent, and the cycle closing `sleep : 900 s`. That same cycle is the uplink
+the soak logged as `f_cnt=2465`, so serial and network agree. **It still does not identify the
+image**: the capture shows `[cycle 2]`, a *wake* rather than a boot, and the banner prints only
+at boot — so no wake will ever supply it ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
 
 To close it: hold a **>900 s** capture open and have the operator press RESET **once** (a single
-press reboots the app; a double-tap enters DFU and will not run it). Three traps already burned
+press reboots the app; a double-tap enters DFU and will not run it). Four traps already burned
 this session and are written up in the evidence entry — `pio device monitor` cannot run
-non-interactively, a 100–200 s capture lands inside the 900 s sleep and reads 0 bytes, and a
-`nohup` capture backgrounded over SSH does not survive the session. Use `screen` and >900 s.
+non-interactively, a 100–200 s capture lands inside the 900 s sleep and reads 0 bytes, a
+`nohup` capture backgrounded over SSH does not survive the session (use `screen`), and
+`scripts/capture.py` refuses the port while a previous capture still holds it, so kill the old
+one and confirm it is gone before reading the new log as silence.
+
+**Check for a running soak before starting one.** Two workers each launched `soak_ttn.sh`
+against the same device 14 minutes apart on 2026-08-14; two pollers on one device double the
+query rate and are not additive evidence. The later run was killed, `latest-ttn` repointed at the
+earlier and longer one, and the abandoned directory kept. A `pgrep` taken minutes earlier is
+stale — re-check immediately before launching.
 
 Everything since `572bcfa` remains **believed correct, unobserved on this image**: the #75 fix
 (`ec9725a`), the frame-counter-step fix in the soak reader (`7b03d3a`), the overridable
