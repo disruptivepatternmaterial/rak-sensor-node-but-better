@@ -59,6 +59,21 @@ Host wx3-harness                                # ~/.ssh/config — preferred, p
     User ntableman
 ```
 
+**As of 2026-08-14 the `wx3-harness` alias on the workstation is a trap, not the fix.** Its
+`HostName` is still the dead LAN address `192.168.10.223`, so falling back to the alias fails
+with `No route to host` — which reads as "the build host is down" and is the exact
+misdiagnosis that has already cost two sessions. Until someone repoints that `HostName` at the
+current address, **always `export RAK_BUILD_HOST=ntableman@<address>` explicitly** and confirm
+with one `hostname` call before diagnosing anything else. The agent sandbox cannot fix this:
+`$HOME` is read-only, so `~/.ssh/config` can only be edited by the operator.
+
+Separately, the build host does go away without warning. On 2026-08-14 it answered normally at
+15:12Z and 15:19Z, then stopped answering both SSH and ICMP by 15:36Z (100% packet loss) with a
+24 h soak still in flight. A workstation session that loses the host mid-task cannot push at
+all — `git push origin` is 403 for the work account (see below), and the relay needs the host
+that just vanished. The correct move is to leave the work **committed locally** and say so,
+never to improvise around the credential boundary.
+
 `scripts/push.sh`, `scripts/remote.sh`, `scripts/build.sh`, `scripts/flash.sh` and
 `scripts/soak.sh` all resolve the host as
 `${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}` — so `BUILD_HOST` still works for existing
