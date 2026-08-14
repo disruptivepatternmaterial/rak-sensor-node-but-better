@@ -2688,6 +2688,50 @@ on it. No background processes were left running.
   coulomb-counting integration over a long window. Tracked in
   [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
 
+### 2026-08-14 — H8 bench soak of `rc-v0.4.2` ran 19 h 02 m with zero anomalies, then was deliberately stopped short of 24 h
+
+- **Commit:** tree `572bcfa`; the running image's banner was captured at the `dcd6807` flash and
+  `572bcfa` is `dcd6807` plus documentation only, with no source change. Firmware `0.4.2`,
+  `env:soak` — which [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md) makes
+  byte-identical to `env:rak4631`, so this is evidence about the shipped image.
+- **Host:** Heliotrope Ridge (`scripts/soak_ttn.sh 24h rc-v0.4.2`, pid 76549)
+- **Measured:** network-side uplink arrival at TTN over a continuous unattended run — cadence,
+  frame-counter continuity, and resets. Device `puma-concolor-001`, application `my-app-tobi`.
+- **Observation** — first and last lines of
+  `~/soak-runs/20260813T202735Z_ttn_rc-v0.4.2/events.log`, verbatim:
+
+  ```
+  2026-08-13T20:27:35Z === SOAK TTN START === label=rc-v0.4.2 duration=86400s device=puma-concolor-001 app=my-app-tobi
+  2026-08-13T20:27:36Z     baseline   : last_f_cnt_up=2272
+  2026-08-14T15:29:28Z SOAK UPLINK f_cnt=2398 delta=1 gap=969s total=76
+  2026-08-14T15:29:28Z === SOAK HEARTBEAT 228 === elapsed=68511s of 86400s uplinks=76 f_cnt=2398 anomalies=0 query_failures=1
+  ```
+
+  Final numbers: **elapsed 68511 s (19 h 02 m) of the 86400 s target · 76 uplinks ·
+  `f_cnt` 2272 → 2398 · anomalies 0 · query failures 1.**
+
+- **What this establishes.** Across 19 h unattended, every uplink stepped the frame counter by
+  exactly 1 (`delta=1` on all 76) and no gap exceeded the 2700 s anomaly threshold, so **no reset
+  and no missed cycle occurred**. The sleep, radio and power paths held for 19 continuous hours on
+  the shipped image. The single query failure was a TTN API read that returned nothing on one
+  poll; the following poll recovered with the counter intact, so it is a harness-side network blip
+  and not a node event.
+
+- **What this does NOT establish.** **H8 is not satisfied.** `FIRMWARE_SPEC.md` §7 H8 requires
+  ≥24 h; this run reached 19 h 02 m — 79 % of the gate, and a gate is not a percentage. Do not
+  record this as a passed soak anywhere.
+
+- **Why it was stopped:** deliberately, by the operator, at 2026-08-14 ~15:33Z. The node is going
+  to the woods at 21:00Z the same day, and the choice was between shipping this image — which has
+  the 19 clean hours above but **not** the `ec9725a` battery BOOT-allowance fix — or flashing the
+  fix and accepting only a few hours of soak on it. He chose the fix, knowingly. The run directory
+  is preserved on the build host and was not deleted.
+
+- **Verdict:** **INCONCLUSIVE for H8 — PASS on everything it did cover.** 19 h 02 m of clean
+  unattended operation at 0 anomalies is real evidence about the sleep, radio and power paths, and
+  it carries forward to the successor image only insofar as those paths are unchanged in it. It
+  closes no deployment gate.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary
