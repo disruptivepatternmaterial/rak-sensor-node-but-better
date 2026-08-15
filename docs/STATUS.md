@@ -11,7 +11,7 @@ afternoon. **The identity gap is closed:** a single RESET press at 17:50:12Z wit
 open produced `commit   : 1c2df3c` in the boot banner, matching what was flashed, no `-dirty`. That
 is the **third distinct commit** ever banner-asserted, after `d568574` and `65f8615` — it is *not*
 the second, and any document saying so is wrong. The tag was cut on that basis, per
-[`docs/RELEASE.md`](docs/RELEASE.md).
+[`docs/RELEASE.md`](RELEASE.md).
 
 **What the run establishes:** cycles 3–8 ran **unattended on the 900 s cadence**, ~1 h 15 m of
 continuous correct cycling at ~908 s wake-to-wake (the ~8 s excess is awake time), both sensors
@@ -20,7 +20,7 @@ live on **every** cycle (RK900 23.1–25.4 °C / 56.3–64.9 %RH / 1002.3 hPa ca
 `sleep : 900 s` and sending 35 bytes on port 2. The soak independently logged the same reset as
 `f_cnt=2496` — the number the banner printed as its restored counter — which also **observes the
 `7b03d3a` counter-step fix on hardware** for the first time: +26 classified as one uplink inside the
-32-frame reset reserve, `anomalies=0`, not 26 phantom transmissions ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
+32-frame reset reserve, `anomalies=0`, not 26 phantom transmissions ([`docs/EVIDENCE.md`](EVIDENCE.md)).
 
 **What it does not establish, and do not let this erode.** A grep of the 81-line capture for
 `brownout`, `provId`, `BOOT this`, `no confirmed latch`, `Unsampled`, `rejoin`, `keepalive` and
@@ -62,7 +62,7 @@ their override. `scripts/remote.sh sync` already refused on a dirty tree at eith
 `v0.4.1` (2026-08-12) is **ten fixes, compile-verified only.** No hardware ran any of them — the
 board was asleep with USB detached all session. `env:rak4631`, `env:soak` and `env:battdiag` build
 `SUCCESS` on Heliotrope Ridge and that is the whole claim
-([`docs/EVIDENCE.md`](docs/EVIDENCE.md), 2026-08-12 night).
+([`docs/EVIDENCE.md`](EVIDENCE.md), 2026-08-12 night).
 
 What changed: the no-evidence brownout hold that disabled its own exit ([#61](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/61), **closed**),
 keepalive frame-counter starvation, an ungated boot-counter flash write, sub-band re-selection
@@ -85,14 +85,14 @@ conditions never arise. `e070708` was not exercised because the capture had **ze
 not exercised because the RK900 read a real `999.2 hPa`. A **new** defect did surface:
 [#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75), one
 transient probe miss spending the power cycle's only BOOT on a healthy pack
-([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
+([`docs/EVIDENCE.md`](EVIDENCE.md)).
 
 **Treat everything not named above as *believed correct, unobserved*.** Several sit on the sleep, brownout and
 rejoin paths, which are exactly what compiling cannot exercise. Do not describe any of them as
 working until a bench capture says so.
 
 **Bench fact you will otherwise lose twenty minutes to:** the field image detaches USB 180 s after
-boot ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)). A board left running past
+boot ([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)). A board left running past
 that grace has no serial port and **cannot be flashed — press RESET once**, then flash inside the
 fresh window.
 

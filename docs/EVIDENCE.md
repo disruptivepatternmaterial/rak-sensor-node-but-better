@@ -296,7 +296,8 @@ CITE(policy): CIT-TTN-FUP, [`CITATIONS.md`](CITATIONS.md) — the 900 s cadence 
 what keeps the node inside the 30 s/24 h uplink airtime budget.
 CITE(prior-art): `src/session.h:41` `kCounterMargin = 32` — the reserve that makes a counter step
 of +18 or +26 one uplink after a reset rather than 18 or 26 transmissions.
-CITE(bench): this entry — `dev_addr 260CE734`, `last_f_cnt_up` 2464 → 2600 observed at TTN.
+CITE(bench): `docs/EVIDENCE.md` 2026-08-15, this entry — `dev_addr 260CE734`, `last_f_cnt_up`
+2464 → 2600 observed at TTN, and `f_cnt 2600` at 2026-08-15T17:04:14Z as the newest uplink.
 
 ### 2026-08-14 — `1c2df3c` **read back from the board's own banner**, and six unattended 900 s cycles
 
