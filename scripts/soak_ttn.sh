@@ -59,9 +59,15 @@ case "$dur" in
   *)  SECS="$dur" ;;
 esac
 
-OUT="${SOAK_OUT:-$HOME/soak-runs/$(date -u +%Y%m%dT%H%M%SZ)_ttn_${label}}"
+# Run artifacts live inside the repository, matching scripts/soak.sh (SOAK_ROOT=soak-runs)
+# and the `soak-runs/` entry in .gitignore. They used to land in $HOME/soak-runs, which put
+# project evidence outside the project where it read as junk during a tidy-up and was
+# deleted -- taking a completed 24 h run's log with it (docs/EVIDENCE.md 2026-08-15).
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SOAK_ROOT="${SOAK_ROOT:-$REPO/soak-runs}"
+OUT="${SOAK_OUT:-$SOAK_ROOT/$(date -u +%Y%m%dT%H%M%SZ)_ttn_${label}}"
 mkdir -p "$OUT"
-ln -sfn "$OUT" "$HOME/soak-runs/latest-ttn"
+ln -sfn "$OUT" "$SOAK_ROOT/latest-ttn"
 LOG="$OUT/events.log"
 echo $$ > "$OUT/soak.pid"
 

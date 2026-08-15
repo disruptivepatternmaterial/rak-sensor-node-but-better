@@ -108,6 +108,196 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-15 — First >24 h continuous field runtime. **And the node has been silent since 17:04:14Z.** Watcher log deleted; raw transcripts permanently lost
+
+**Host:** Heliotrope Ridge, network side only — `ttn-lw-cli` against `my-app-tobi` /
+`puma-concolor-001`. **Nothing was attached to the node**: it is at the field site and was not
+flashed, reset, or read over serial for this entry. **Commit:** `1c2df3c` (`v0.4.3`), asserted
+from the board's own boot banner 2026-08-14T17:50:12Z and unchanged since.
+
+Three separate things are recorded here and they must not be collapsed into one another: a
+completed 24 h watcher run, an **ongoing silence that the watcher never saw**, and the loss of
+the raw logs.
+
+#### 1. The 24 h network-side run completed. It did not die
+
+The earlier reading that the watcher "fell over" is **wrong, and the correction matters** — the
+process was absent because it **finished**, having written its summary. Verbatim from
+`summary.md`, recovered before the loss described in §3:
+
+```
+### Soak (network side) — rc-v0.4.3-1c2df3c
+- Device `puma-concolor-001` / app `my-app-tobi`, observed only at TTN
+- Image: firmware `UNKNOWN`, banner commit `NOT OBSERVED`.
+- Duration: 86405 s of 86400 s requested.
+- Uplinks observed: 89 · frame counter 2464 → 2596
+- Counter steps explained by a reset (≤ 32, the stored reserve): 3
+- Anomalies: 1 · TTN query failures: 2
+```
+
+Header and closing line, verbatim:
+
+```
+2026-08-14T16:09:16Z === SOAK TTN START === label=rc-v0.4.3-1c2df3c duration=86400s
+2026-08-14T16:09:16Z     tree       : 1c2df3c
+2026-08-14T16:09:18Z     baseline   : last_f_cnt_up=2464
+2026-08-15T16:09:21Z === SOAK TTN DONE === elapsed=86405s uplinks=89 resets=3 anomalies=1 query_failures=2 f_cnt=2464->2596
+```
+
+Every non-routine line in the 374-line log, verbatim — this is the complete set:
+
+```
+2026-08-14T17:50:21Z SOAK NOTE  counter-step +26 in 971s within the 32-frame reset reserve
+2026-08-14T20:58:47Z SOAK WARN ttn query failed (1 so far) -- no statement about the node
+2026-08-14T21:01:17Z SOAK WARN ttn query failed (2 so far) -- no statement about the node
+2026-08-14T22:10:01Z SOAK ANOMALY silence 2788s with no counter advance (limit 2700s)
+2026-08-14T22:56:29Z SOAK NOTE  counter-step +18 in 2789s within the 32-frame reset reserve
+2026-08-15T15:24:53Z SOAK NOTE  counter-step +2 in 2005s within the 32-frame reset reserve
+```
+
+The `+26` at 17:50:21Z is the operator's single deliberate RESET, the same press that produced
+the banner — already recorded in the 2026-08-14 entry below. **The `+18` at 22:56:29Z is not
+explained by anything anybody did.** It follows a 5539 s silence and the node was already at the
+field site by then. The watcher classified it as a reset because the step fits inside the
+32-frame reserve (`session.cpp:278`), which is the correct classification for *airtime* purposes
+and is **not** a statement that the reset was expected. Treat it as one unexplained field reboot.
+
+#### 2. Independent TTN record, and the silence — the part the watcher's clean exit hides
+
+Pulled from TTN's storage integration, which is a separate record from the watcher's polling and
+supersedes it for per-uplink history:
+
+```
+ttn-lw-cli end-devices storage get my-app-tobi puma-concolor-001 \
+    --last 32h --type uplink_message --order received_at --limit 400 --stream-output
+
+107 stored uplinks
+first  2026-08-14T13:41:45Z  f_cnt 2391
+last   2026-08-15T17:04:14Z  f_cnt 2600
+span   98549 s = 27.37 h
+```
+
+Discontinuities across that whole span — again, the complete set:
+
+```
+gap=  96s  2026-08-14T15:57:56 f=2400 -> 15:59:32 f=2432  delta=32
+gap= 197s  2026-08-14T15:59:32 f=2432 -> 16:02:49 f=2464  delta=32
+gap=  89s  2026-08-14T17:48:44 f=2471 -> 17:50:13 f=2496  delta=25
+gap=5539s  2026-08-14T21:22:13 f=2510 -> 22:54:32 f=2528  delta=18
+```
+
+The first three are bench-era: sub-200 s gaps with full-reserve steps, i.e. reflash/reset
+turnarounds on the bench before the node was carried out. The fourth is the field event from §1.
+
+**Session was restored, never rejoined,** for the entire period:
+
+```
+"dev_addr": "260CE734"
+"started_at": "2026-07-31T14:33:20.636657834Z"
+"last_f_cnt_up": 2600
+```
+
+A `started_at` of 2026-07-31 with the counter at 2600 is the definition of a restored session —
+a rejoin would have reset both.
+
+**Recency — this is the finding that matters most.** The newest uplink TTN holds is
+**`f_cnt 2600` at `2026-08-15T17:04:14Z`**. Queried at **`2026-08-15T21:34:45Z`**,
+`last_f_cnt_up` was **still 2600**. That is **4 h 30 m of silence, roughly 18 missed 900 s
+cycles** — far past the 2700 s anomaly threshold and past the 24-cycle bar in F6.
+
+The cadence immediately before it stopped was metronomic, which makes the stop look like an
+event rather than a drift:
+
+```
+2026-08-15T15:18:14Z f_cnt 2593        2026-08-15T16:18:50Z f_cnt 2597
+2026-08-15T15:33:27Z f_cnt 2594        2026-08-15T16:33:58Z f_cnt 2598
+2026-08-15T15:48:35Z f_cnt 2595        2026-08-15T16:49:06Z f_cnt 2599
+2026-08-15T16:03:43Z f_cnt 2596        2026-08-15T17:04:14Z f_cnt 2600   <-- last heard
+2026-08-15T14:47:58Z f_cnt 2591  ...   ~908 s wake-to-wake throughout
+```
+
+The watcher's run ended at 16:09:21Z and the silence began at 17:04:14Z, **55 minutes after the
+window closed.** The run's `anomalies: 1` is therefore true of its own window and says nothing
+about the node's present state. This is exactly the failure the monitoring gap was going to
+produce, and it produced it on the first try.
+
+**Cause is not established and must not be guessed.** Nothing here distinguishes a brownout
+hold, a hang the watchdog did not catch, a gateway-side outage, or a pack collapse. The node
+must not be disturbed to find out; the restarted watcher (§4) is what will tell us whether it
+returns on its own.
+
+#### 3. What was lost — a monitoring failure recorded as an outcome
+
+`$HOME/soak-runs` was deleted by the operator during a tidy-up, deliberately and reasonably:
+project data had no business living in a home folder, where it is indistinguishable from junk.
+The directory was found in `~/.Trash` and copied out intact — both run directories, the
+abandoned duplicate, correct sizes and line counts. **It was then lost anyway**, and the honest
+sequence is:
+
+```
+14:33Z  ~/.Trash/soak-runs copied to ~/soak-runs.recovered — intact, verified by listing
+        20260813T202735Z_ttn_rc-v0.4.2         events.log 33745 B, 308 lines
+        20260814T160916Z_ttn_rc-v0.4.3-1c2df3c events.log 43343 B, 374 lines, summary.md 864 B
+        ABANDONED_duplicate_20260814T162332Z   events.log   404 B,   5 lines
+~14:35Z the Trash was emptied
+14:36Z  the recovered copies were removed by an agent before the copy into the repo was
+        confirmed — the copy had failed, because its source in the Trash was already gone
+```
+
+Recovery was then attempted and **failed**: `tmutil listlocalsnapshots /` holds only
+`com.apple.os.update-*` snapshots with no data snapshot, and `tmutil listbackups` returns
+`Failed to mount destination`. **The raw `events.log` files are permanently gone.**
+
+What survives, and it is most of the value:
+
+| Artifact | State |
+|---|---|
+| `rc-v0.4.3-1c2df3c` summary, header, closing line, all 6 non-routine lines | **Preserved verbatim above** |
+| Its ~360 routine `SOAK UPLINK` / `SOAK HEARTBEAT` lines | **Lost.** Superseded by the TTN storage series in §2, which is independent and finer-grained |
+| `rc-v0.4.2` (`572bcfa`) 19.03 h run — 308-line `events.log` | **Lost in full.** Its measured result survives in the 2026-08-14 entry below (19.03 h, 76 uplinks, 0 anomalies); the transcript does not |
+| TTN-side history | **Never at risk** — held by TTN, re-pullable |
+
+The lesson is in the code now, not in a caveat: `scripts/soak_ttn.sh` writes to
+`<repo>/soak-runs/` as of this commit, matching `scripts/soak.sh` and the existing `.gitignore`
+entry. A prior worker documented the `$HOME` path as a gotcha instead of fixing it.
+
+#### 4. Monitoring restarted
+
+A 7 d field-shadow watcher was started from the repo-local path under `screen`, so it survives an
+SSH disconnect, and **verified by reading its `events.log`, not by observing a live process** —
+the check that the 2026-08-12 false-start entry taught. See the restart record in the same
+commit's issue link.
+
+#### Verdict
+
+- **First >24 h of continuous field runtime this project has had — real, and worth having.**
+  27.37 h of TTN-recorded uplinks on the shipped image, session restored not rejoined, one
+  unexplained reboot, cadence metronomic at ~908 s while running.
+- **FAIL on recency as of this entry.** The node has been silent 4 h 30 m. F6 ("no period of
+  silence longer than 24 cycles") is at 18 cycles and climbing; F1's 7 consecutive days has not
+  started over but is not accruing while the node is quiet.
+- **The ≥24 h *bench* half of H8 is NOT met, and this run does not move it.** H8 wants ≥24 h on
+  the bench *and* ≥7 d of field shadow. This was in the field, with nothing attached — so of the
+  ten bench criteria in [`SOAK.md`](SOAK.md), only B1 (full duration) and part of B5 (frame
+  counter continuity) can be evaluated at all. B2 watchdog resets, B3 unexpected reboots, B4
+  cycles seen, B6 cycles without battery, B7 pack voltage and brownout, B9 keepalive — **all
+  need the console, and there was no console.** B8 sleep current remains unmeasured
+  ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)).
+  The prior bench run reached 19.03 h on `572bcfa`, a **superseded image**, and was stopped
+  deliberately; a partial run on one image cannot be topped up by a different run on another.
+  **Zero completed bench soak hours exist on `1c2df3c`.** Anyone reading "24 h" off this entry
+  and calling H8's bench half closed is misreading it.
+- **Project status stays `🚧 NOT YET DEPLOYED`.** Both halves of H8 are open, and the node is
+  currently not transmitting.
+
+CITE(spec): `docs/FIRMWARE_SPEC.md` §7 H8 — ≥24 h bench soak **and** ≥7 d field shadow before
+field trust; this entry is measured against that bar and does not close it.
+CITE(policy): CIT-TTN-FUP, [`CITATIONS.md`](CITATIONS.md) — the 900 s cadence observed here is
+what keeps the node inside the 30 s/24 h uplink airtime budget.
+CITE(prior-art): `src/session.h:41` `kCounterMargin = 32` — the reserve that makes a counter step
+of +18 or +26 one uplink after a reset rather than 18 or 26 transmissions.
+CITE(bench): this entry — `dev_addr 260CE734`, `last_f_cnt_up` 2464 → 2600 observed at TTN.
+
 ### 2026-08-14 — `1c2df3c` **read back from the board's own banner**, and six unattended 900 s cycles
 
 **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`. **Commit, asserted from the device:**

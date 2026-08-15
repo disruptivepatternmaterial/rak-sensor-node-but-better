@@ -16,6 +16,20 @@ and [#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-bette
 Status stays **🚧 NOT YET DEPLOYED** until a completed run is recorded in
 [`EVIDENCE.md`](EVIDENCE.md). Nothing in this document closes a gate by itself.
 
+## Where run artifacts live
+
+**`<repo>/soak-runs/` on the build host — inside the project, never in `$HOME`.** Both
+harnesses anchor the path to the repository root, so it does not depend on your working
+directory, and `soak-runs/` is in `.gitignore`: the directory is a location, its contents
+are never committed. The measured result belongs in [`EVIDENCE.md`](EVIDENCE.md); the
+transcript stays on the build host.
+
+`scripts/soak_ttn.sh` wrote to `$HOME/soak-runs` until 2026-08-15. **Evidence entries and
+transcripts written before that date name `$HOME/soak-runs` and are not wrong about their
+own era** — the path simply moved. It moved because project data sitting in a home folder
+is indistinguishable from junk during a tidy-up, and a completed 24 h run's log was deleted
+for exactly that reason ([`EVIDENCE.md`](EVIDENCE.md) 2026-08-15).
+
 ## Run it
 
 ```bash
@@ -173,9 +187,12 @@ variant of the image rather than the one that ships.
 the frame counter, so the node is observed without anything being attached to it:
 
 ```bash
-nohup scripts/soak_ttn.sh 24h bench >/dev/null 2>&1 &
-grep -E 'SOAK HEARTBEAT|SOAK UPLINK|SOAK ANOMALY' ~/soak-runs/latest-ttn/events.log | tail
+screen -dmS raksoak zsh -lc 'cd <repo> && scripts/soak_ttn.sh 168h field-shadow'
+grep -E 'SOAK HEARTBEAT|SOAK UPLINK|SOAK ANOMALY' soak-runs/latest-ttn/events.log | tail
 ```
+
+A backgrounded `nohup` started over SSH does not reliably outlive the session; `screen -dmS`
+does, and is what the field-shadow run uses.
 
 Choose it when the question is *does the shipped image keep waking and transmitting for a day*.
 Choose the serial harness when the question needs console detail — a boot banner, a watchdog

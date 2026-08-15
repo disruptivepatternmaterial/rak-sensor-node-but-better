@@ -106,110 +106,17 @@ Each stage adds exactly one new failure domain, so a failure has a short suspect
 | 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | Downlink matrix: all eight command cases | **8/8 PASS on hardware 2026-08-13** (inferred `f15a983`, `stage3`, sleep disabled) — valid `0x01` set-interval (1800 s → 900 s, persisted across a reflash), valid `0x03` status, wrong-length `0x01` and `0x03` both rejected as *wrong length* not *unknown opcode* ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63), [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)), unknown opcode `0x7F` ignored, valid command on the wrong FPort ignored by port, two queued commands drained one per cycle, and cycles 18–26 monotonic with no reset. `take_downlink()` observed for the first time, closing [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
 | — | Field image on the board, sleep reached | `env:soak` (byte-identical to `env:rak4631`) flashed 2026-08-13 at **`d568574`, asserted from the banner** — the first board to name its own commit. One cycle: both sensors read, uplink sent, and the cycle closed `sleep   : 900 s`, not `wait    : N s (sleep disabled)`. One cycle is not a soak. Repeated 2026-08-13 at **`65f8615`**, banner-asserted again: both sensors, session `0x260CE734` restored not rejoined, 35 bytes on port 2, `sleep   : 900 s`. **Repeated and extended 2026-08-14 at `1c2df3c`** (`v0.4.3`, the field-bound image), banner-asserted — so **three distinct commits** have now named themselves, and this time it was **six unattended cycles** (3–8) on the 900 s cadence rather than one, both sensors live and `sleep   : 900 s` every cycle. Still not a soak ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **STILL OPEN on both halves. Real hours exist; 24 uninterrupted ones do not.** The `rc-v0.4.2` run reached **19.03 h / 76 uplinks / 0 anomalies** on `572bcfa` and was stopped deliberately at 15:30Z to ship the #75 fix — a partial run on one image cannot be topped up by another ([`docs/EVIDENCE.md`](docs/EVIDENCE.md); data preserved at `~/soak-runs/20260813T202735Z_ttn_rc-v0.4.2/`). The soak on `1c2df3c` started 16:09:16Z (pid 28695, label `rc-v0.4.3-1c2df3c`) and **had a deliberate RESET inside its window at 17:50Z** — the operator's single press to make the board print its banner — logged by the soak itself as `resets=1`, `f_cnt=2496`, `anomalies=0`. **So it is not 24 h of uninterrupted runtime either, and must never be read as such.** Separately, six unattended 900 s cycles (cycles 3–8, ~1 h 15 m) were captured on that image with both sensors live and `sleep : 900 s` every cycle — real, and still not a soak. **The ≥7 d field shadow began 2026-08-14** when the node went to the woods: **day zero of seven, a beginning, not an achievement.** Everything below this sentence describes the harness, which predates any accumulated hour. The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. The one 2026-08-12 attempt at `f626698` waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
+| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **STILL OPEN on both halves. Real hours exist; 24 uninterrupted ones do not.** The `rc-v0.4.2` run reached **19.03 h / 76 uplinks / 0 anomalies** on `572bcfa` and was stopped deliberately at 15:30Z to ship the #75 fix — a partial run on one image cannot be topped up by another ([`docs/EVIDENCE.md`](docs/EVIDENCE.md); data preserved at `~/soak-runs/20260813T202735Z_ttn_rc-v0.4.2/`). The soak on `1c2df3c` started 16:09:16Z (pid 28695, label `rc-v0.4.3-1c2df3c`) and **had a deliberate RESET inside its window at 17:50Z** — the operator's single press to make the board print its banner — logged by the soak itself as `resets=1`, `f_cnt=2496`, `anomalies=0`. **So it is not 24 h of uninterrupted runtime either, and must never be read as such.** That
+ watcher **completed its full 24 h** (86405 s of 86400 s) at 2026-08-15T16:09:21Z and exited
+ normally — an absent process here means finished, not dead. **The node then went silent at
+ `f_cnt 2600`, 2026-08-15T17:04:14Z, 55 min after the window closed, and was still silent
+ 4 h 30 m later.** Cause unestablished; do not guess it. **The ≥24 h bench half is still not
+ met** — this runtime was in the field with no console, so seven of the ten bench criteria in
+ [`docs/SOAK.md`](docs/SOAK.md) could not be evaluated at all ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-15). Separately, six unattended 900 s cycles (cycles 3–8, ~1 h 15 m) were captured on that image with both sensors live and `sleep : 900 s` every cycle — real, and still not a soak. **The ≥7 d field shadow began 2026-08-14** when the node went to the woods, and day one produced the project's **first >24 h of continuous field runtime**: 27.37 h of TTN-recorded uplinks, `f_cnt` 2391 → 2600, session restored not rejoined, one unexplained field reboot (a +18 counter step after a 5539 s gap on 2026-08-14T22:54Z). **Then it stopped.** Day one is not seven, and a shadow does not accrue while the node is quiet. Everything below this sentence describes the harness, which predates any accumulated hour. The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. The one 2026-08-12 attempt at `f626698` waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
 
-## Where v0.4.3 leaves things
+## Release status
 
-**`1c2df3c` is in the field, tagged `v0.4.3`, and it named itself off the board.** The operator
-chose on 2026-08-14 to ship the `#75` BOOT-allowance fix (`ec9725a`) rather than the longer-soaked
-`572bcfa`, trading soak hours for the battery fix, and the node went to the woods the same
-afternoon. **The identity gap is closed:** a single RESET press at 17:50:12Z with a capture held
-open produced `commit   : 1c2df3c` in the boot banner, matching what was flashed, no `-dirty`. That
-is the **third distinct commit** ever banner-asserted, after `d568574` and `65f8615` — it is *not*
-the second, and any document saying so is wrong. The tag was cut on that basis, per
-[`docs/RELEASE.md`](docs/RELEASE.md).
-
-**What the run establishes:** cycles 3–8 ran **unattended on the 900 s cadence**, ~1 h 15 m of
-continuous correct cycling at ~908 s wake-to-wake (the ~8 s excess is awake time), both sensors
-live on **every** cycle (RK900 23.1–25.4 °C / 56.3–64.9 %RH / 1002.3 hPa calm; the pack latched at
-`0x01`, 11.75–11.76 V, −0.01 A, 78 %, 23.0 °C, **no BOOT spent**), every cycle closing
-`sleep : 900 s` and sending 35 bytes on port 2. The soak independently logged the same reset as
-`f_cnt=2496` — the number the banner printed as its restored counter — which also **observes the
-`7b03d3a` counter-step fix on hardware** for the first time: +26 classified as one uplink inside the
-32-frame reset reserve, `anomalies=0`, not 26 phantom transmissions ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
-
-**What it does not establish, and do not let this erode.** A grep of the 81-line capture for
-`brownout`, `provId`, `BOOT this`, `no confirmed latch`, `Unsampled`, `rejoin`, `keepalive` and
-`silent at` returns **nothing**. So `#75`'s own failure gate never ran (not one probe miss in eight
-cycles — the healthy path is confirmed, the consecutive-miss counter is not), `#62`'s re-latch path
-was never entered (the pack *kept* its latch through the reset), and the brownout, rejoin and
-keepalive paths were never reached. **Six clean cycles are not a soak.**
-
-**Serial-capture traps, all four still true and all four cost time here:** `pio device monitor`
-cannot run non-interactively (`termios.error` when stdout is redirected — use a raw `cat` or
-`scripts/capture.py`), a 100–200 s capture lands inside the 900 s sleep and reads 0 bytes so a
-capture must span **>900 s**, a `nohup` capture backgrounded over SSH does not survive the session
-(use `screen`), and `scripts/capture.py` **refuses** the port while a previous capture holds it —
-it names the holding pid, so kill the old one and confirm it is gone before reading a quiet log as
-silence. The banner prints **only at boot**, so no wake will ever supply it; getting one needs a
-single RESET press (a double-tap enters DFU and will not run the app).
-
-**Check for a running soak before starting one.** Two workers each launched `soak_ttn.sh`
-against the same device 14 minutes apart on 2026-08-14; two pollers on one device double the
-query rate and are not additive evidence. The later run was killed, `latest-ttn` repointed at the
-earlier and longer one, and the abandoned directory kept. A `pgrep` taken minutes earlier is
-stale — re-check immediately before launching.
-
-Of the work since `572bcfa`, `7b03d3a` (the soak reader's counter-step fix) is now **observed on
-hardware**, and the `#75` fix `ec9725a` is observed **only on the healthy path** — it does not
-misfire on a good pack and leaves the BOOT unspent, but its miss counter has never run. The
-overridable build-host address (`81285eb`) and the ADR-0002 sign closure (`e8002d9`, no wire
-change) remain **believed correct, unobserved**; so does a real charge current, which would settle
-ADR-0002 empirically and has still never been captured.
-
-Two guards were added after two workers died mid-task overnight, one leaving a dirty tree that
-blocked a scheduled flash: `scripts/flash.sh` refuses to flash while a soak runs, and
-`scripts/push.sh` refuses a fast-forward that would rewrite the running soak's own script
-(a shell reads a script incrementally, so replacing it mid-run executes a fragment). Both name
-their override. `scripts/remote.sh sync` already refused on a dirty tree at either end.
-
-## Where v0.4.1 leaves things
-
-`v0.4.1` (2026-08-12) is **ten fixes, compile-verified only.** No hardware ran any of them — the
-board was asleep with USB detached all session. `env:rak4631`, `env:soak` and `env:battdiag` build
-`SUCCESS` on Heliotrope Ridge and that is the whole claim
-([`docs/EVIDENCE.md`](docs/EVIDENCE.md), 2026-08-12 night).
-
-What changed: the no-evidence brownout hold that disabled its own exit ([#61](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/61), **closed**),
-keepalive frame-counter starvation, an ungated boot-counter flash write, sub-band re-selection
-after the rejoin escape, downlink length checking ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63),
-[#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)), a
-set-interval downlink applied during a brownout hold ([#65](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/65)),
-the backoff first step raised to the fair-use floor, the pack no longer rebooted on every re-latch
-attempt ([#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62)
-root cause — **#62 stays open**, the re-latch is unproven), empty pack records no longer counted as
-silence, an all-zero RK900 span refused instead of encoded as weather, and a bounded Modbus drain
-that feeds the watchdog.
-
-**2026-08-13 update: `65f8615` has now run on hardware, and the picture is partly better and
-partly unchanged.** `env:battdiag` at `65f8615` ran 20 consecutive cycles with the pack live every
-cycle (`11.92 V  -0.01 A  84%  24.0 C`) and no reset, and `env:soak` at `65f8615` read both
-sensors, uplinked, and reached `sleep   : 900 s`. That is a **survival** result for the eleven
-fixes as a set. It is not a per-fix result: the two that sit on the battery path had their defect
-conditions never arise. `e070708` was not exercised because the capture had **zero** post-boot
-`Unsampled` cycles — the pack was already sampling from the preceding flash — and `da655e9` was
-not exercised because the RK900 read a real `999.2 hPa`. A **new** defect did surface:
-[#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75), one
-transient probe miss spending the power cycle's only BOOT on a healthy pack
-([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
-
-**Treat everything not named above as *believed correct, unobserved*.** Several sit on the sleep, brownout and
-rejoin paths, which are exactly what compiling cannot exercise. Do not describe any of them as
-working until a bench capture says so.
-
-**Bench fact you will otherwise lose twenty minutes to:** the field image detaches USB 180 s after
-boot ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)). A board left running past
-that grace has no serial port and **cannot be flashed — press RESET once**, then flash inside the
-fresh window.
-
-Open issues from this pass: [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62),
-[#66](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/66),
-[#67](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/67),
-[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68),
-[#69](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/69),
-[#70](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/70),
-[#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71),
-[#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75).
+Per-release detail — what each version establishes on hardware and what it does not — lives in [`docs/STATUS.md`](docs/STATUS.md). Read it before making any claim about what a build has proven.
 
 ## Open blockers
 
