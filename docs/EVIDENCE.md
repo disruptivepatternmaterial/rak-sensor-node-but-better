@@ -108,7 +108,18 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
-### 2026-08-15 — First >24 h continuous field runtime. **And the node has been silent since 17:04:14Z.** Watcher log deleted; raw transcripts permanently lost
+### 2026-08-15 — First >24 h continuous field runtime, ended by the operator picking the node up. Watcher log deleted; raw transcripts permanently lost
+
+> **Corrected 2026-08-15, later the same day.** This entry first recorded the silence from
+> 17:04:14Z as an unexplained field anomaly with four live hypotheses. **It is explained:** the
+> operator packed the node into a bag and moved it at approximately that time, which ended its RF
+> path to the gateway. The silence is operator handling, not node behavior, and **no firmware
+> defect is implicated.** The observations below are unchanged and stand as recorded; the
+> interpretation of the silence is corrected in place, because a wrongly-recorded unexplained
+> field silence sitting in this ledger is exactly the kind of false claim `AGENTS.md` warns
+> propagates. The one thing that remains genuinely unexplained is the **earlier** reboot at
+> 2026-08-14T22:54:32Z, which predates any handling and is split out as
+> [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82).
 
 **Host:** Heliotrope Ridge, network side only — `ttn-lw-cli` against `my-app-tobi` /
 `puma-concolor-001`. **Nothing was attached to the node**: it is at the field site and was not
@@ -116,8 +127,8 @@ flashed, reset, or read over serial for this entry. **Commit:** `1c2df3c` (`v0.4
 from the board's own boot banner 2026-08-14T17:50:12Z and unchanged since.
 
 Three separate things are recorded here and they must not be collapsed into one another: a
-completed 24 h watcher run, an **ongoing silence that the watcher never saw**, and the loss of
-the raw logs.
+completed 24 h watcher run, a **silence beginning 55 minutes after that run closed, caused by the
+operator picking the node up**, and the loss of the raw logs.
 
 #### 1. The 24 h network-side run completed. It did not die
 
@@ -157,10 +168,19 @@ Every non-routine line in the 374-line log, verbatim — this is the complete se
 
 The `+26` at 17:50:21Z is the operator's single deliberate RESET, the same press that produced
 the banner — already recorded in the 2026-08-14 entry below. **The `+18` at 22:56:29Z is not
-explained by anything anybody did.** It follows a 5539 s silence and the node was already at the
-field site by then. The watcher classified it as a reset because the step fits inside the
-32-frame reserve (`session.cpp:278`), which is the correct classification for *airtime* purposes
-and is **not** a statement that the reset was expected. Treat it as one unexplained field reboot.
+explained by anything anybody did**, and unlike the 17:04Z silence it is **not** accounted for by
+handling: it predates the packing by nearly 18 h. It follows a 5539 s silence, and the frame that
+ended it (`f_cnt 2528`) was heard by `3356-gateway-002` at RSSI −59 dBm, SNR 14.5 dB — a strong
+link, so the gap is not a coverage story.
+
+The step size is fully accounted for by the stored reserve and is **not** 18 transmissions. The
+node had restored at 2496 after the 17:50Z press, and its first uplink then wrote the ceiling at
+2496 + `kCounterMargin` = **2528**. It transmitted through 2510, went quiet, and reappeared at
+**exactly 2528** — the stored ceiling, i.e. the value a reset resumes from (`session.cpp:278`).
+TTN's storage holds exactly one message at 2528, and frames never sent cannot be stored. So the
++18 is the counter-margin artifact of one reset, and **what is unexplained is the reset itself and
+why the node took 5539 s — about six 908 s cycles — to reappear** rather than one. Carried forward
+as [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82).
 
 #### 2. Independent TTN record, and the silence — the part the watcher's clean exit hides
 
@@ -218,13 +238,33 @@ event rather than a drift:
 
 The watcher's run ended at 16:09:21Z and the silence began at 17:04:14Z, **55 minutes after the
 window closed.** The run's `anomalies: 1` is therefore true of its own window and says nothing
-about the node's present state. This is exactly the failure the monitoring gap was going to
-produce, and it produced it on the first try.
+about what followed.
 
-**Cause is not established and must not be guessed.** Nothing here distinguishes a brownout
-hold, a hang the watchdog did not catch, a gateway-side outage, or a pack collapse. The node
-must not be disturbed to find out; the restarted watcher (§4) is what will tell us whether it
-returns on its own.
+**Cause: operator handling — the node was packed into a bag and moved at approximately
+17:04:14Z (10:04 local), which ended its RF path to the gateway.** Operator-confirmed. The node
+was never at a field site during this period; it was in a vehicle. **No firmware defect is
+implicated, and the brownout, watchdog-loop, backoff and counter-ceiling hypotheses are all
+withdrawn.**
+
+Two network-side observations recorded here are consistent with that and inconsistent with the
+node having protected itself or failed:
+
+- **The pack was healthy and charging at the moment it went quiet.** `f_cnt 2600` decodes to
+  `batt_voltage 11.77 V`, `batt_capacity 78 %`, `batt_current +0.02 A`. The transmit-inhibit
+  threshold in `src/power.h:63` is `kTxInhibitCentivolts = 960`, i.e. **9.60 V** — the pack was
+  **2.17 V above it** and rising, so `power::Brownout` cannot have engaged. The four preceding
+  frames read 11.75, 11.75, 11.76, 11.76, 11.77 V: flat, not sagging.
+- **The next flash write was not due.** `session.cpp:278` stores `uplink_counter + kCounterMargin`
+  (32), and `counter_headroom_ok()` only writes when the live counter reaches that ceiling. Ceiling
+  writes therefore landed at `f_cnt` **2528, 2560 and 2592**, the last at 15:03:06Z; the next was due
+  at **2624**. The node stopped at 2600, **24 frames short of any flash write**, so the permanent-mute
+  paths in [#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74)
+  and [#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68) —
+  both of which require a failing session write — were not reachable at that frame.
+
+The link was also strong right up to the stop: `f_cnt 2600` was heard by `3356-gateway-002` at
+**RSSI −76 dBm, SNR 13.75 dB, SF7BW125**, matching the preceding frames (−75 to −77 dBm, 9.75 to
+14 dB). There was no degradation before the silence.
 
 #### 3. What was lost — a monitoring failure recorded as an outcome
 
@@ -281,23 +321,32 @@ The file grew from 5 lines to 6 across two reads six minutes apart, so it is rec
 now **names the image it is soaking** — `firmware=v0.4.3 banner_commit=1c2df3c` instead of the
 `UNKNOWN` / `NOT OBSERVED` the previous run recorded.
 
-**It has not yet logged an uplink, and that is the point:** `uplinks=0` with `f_cnt=2600`
-unchanged is the watcher correctly reporting the silence in §2. A "prove it recorded a real
-uplink" check cannot pass while the node is quiet, and claiming otherwise would be the exact
-failure this ledger exists to prevent. The first `SOAK UPLINK` line will be the moment the node
-comes back, and its absence is currently the most informative thing in the file.
+**It had not yet logged an uplink when started:** `uplinks=0` with `f_cnt=2600` unchanged is the
+watcher correctly reporting the §2 silence. A "prove it recorded a real uplink" check cannot pass
+while the node is off the air, and claiming otherwise would be the exact failure this ledger
+exists to prevent. Given the §2 correction, this watcher was started against a node that was in a
+bag rather than at a field site — so **the 7 d field-shadow clock does not start from this run's
+header.** F1 begins when the node is actually deployed and transmitting again.
 
 `git status --porcelain` on the build host is **empty with this run live** — the artifacts are
 inside the repo and ignored, not scattered and not committed.
 
 #### Verdict
 
-- **First >24 h of continuous field runtime this project has had — real, and worth having.**
-  27.37 h of TTN-recorded uplinks on the shipped image, session restored not rejoined, one
-  unexplained reboot, cadence metronomic at ~908 s while running.
-- **FAIL on recency as of this entry.** The node has been silent 4 h 30 m. F6 ("no period of
-  silence longer than 24 cycles") is at 18 cycles and climbing; F1's 7 consecutive days has not
-  started over but is not accruing while the node is quiet.
+- **First >24 h of continuous runtime this project has had — real, and the headline of this
+  entry.** 27.37 h of TTN-recorded uplinks on banner-verified `1c2df3c`, `f_cnt` 2391 → 2600,
+  107 stored uplinks, cadence metronomic at ~908 s throughout, session `started_at 2026-07-31`
+  restored and never rejoined. **It ended by being picked up, not by failing.**
+- **No recency FAIL, because the run was ended by handling.** The silence from 17:04:14Z is the
+  operator packing the node into a bag; F6 ("no period of silence longer than 24 cycles") is not
+  assessable across an interval when the node was in a vehicle, and neither is F1. **The 7 d
+  field-shadow half of H8 has not started** — day one has yet to be run with the node actually
+  deployed.
+- **One thing here remains unexplained and it is not the silence:** the reboot at
+  2026-08-14T22:54:32Z. Split out as
+  [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82) so it
+  survives the closure of
+  [#80](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/80).
 - **The ≥24 h *bench* half of H8 is NOT met, and this run does not move it.** H8 wants ≥24 h on
   the bench *and* ≥7 d of field shadow. This was in the field, with nothing attached — so of the
   ten bench criteria in [`SOAK.md`](SOAK.md), only B1 (full duration) and part of B5 (frame
@@ -309,8 +358,8 @@ inside the repo and ignored, not scattered and not committed.
   deliberately; a partial run on one image cannot be topped up by a different run on another.
   **Zero completed bench soak hours exist on `1c2df3c`.** Anyone reading "24 h" off this entry
   and calling H8's bench half closed is misreading it.
-- **Project status stays `🚧 NOT YET DEPLOYED`.** Both halves of H8 are open, and the node is
-  currently not transmitting.
+- **Project status stays `🚧 NOT YET DEPLOYED`.** Both halves of H8 are open: the bench half has
+  zero completed hours on `1c2df3c`, and the field-shadow half has not begun.
 
 CITE(spec): `docs/FIRMWARE_SPEC.md` §7 H8 — ≥24 h bench soak **and** ≥7 d field shadow before
 field trust; this entry is measured against that bar and does not close it.
