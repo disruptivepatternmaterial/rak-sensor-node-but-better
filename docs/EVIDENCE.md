@@ -265,8 +265,30 @@ entry. A prior worker documented the `$HOME` path as a gotcha instead of fixing 
 
 A 7 d field-shadow watcher was started from the repo-local path under `screen`, so it survives an
 SSH disconnect, and **verified by reading its `events.log`, not by observing a live process** —
-the check that the 2026-08-12 false-start entry taught. See the restart record in the same
-commit's issue link.
+the check the 2026-08-12 false-start entry taught.
+
+```
+soak-runs/20260815T214053Z_ttn_field-shadow-1c2df3c/events.log
+
+2026-08-15T21:40:53Z === SOAK TTN START === label=field-shadow-1c2df3c duration=604800s
+2026-08-15T21:40:53Z     image      : firmware=v0.4.3 banner_commit=1c2df3c
+2026-08-15T21:40:53Z     tree       : b063567
+2026-08-15T21:40:54Z     baseline   : last_f_cnt_up=2600
+2026-08-15T21:46:59Z === SOAK HEARTBEAT 1 === elapsed=365s of 604800s uplinks=0 f_cnt=2600 ...
+```
+
+The file grew from 5 lines to 6 across two reads six minutes apart, so it is recording. It also
+now **names the image it is soaking** — `firmware=v0.4.3 banner_commit=1c2df3c` instead of the
+`UNKNOWN` / `NOT OBSERVED` the previous run recorded.
+
+**It has not yet logged an uplink, and that is the point:** `uplinks=0` with `f_cnt=2600`
+unchanged is the watcher correctly reporting the silence in §2. A "prove it recorded a real
+uplink" check cannot pass while the node is quiet, and claiming otherwise would be the exact
+failure this ledger exists to prevent. The first `SOAK UPLINK` line will be the moment the node
+comes back, and its absence is currently the most informative thing in the file.
+
+`git status --porcelain` on the build host is **empty with this run live** — the artifacts are
+inside the repo and ignored, not scattered and not committed.
 
 #### Verdict
 
