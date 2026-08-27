@@ -249,6 +249,24 @@ up_formatter           : FORMATTER_JAVASCRIPT
 updated_at             : 2026-08-27T22:01:57.922922751Z
 ```
 
+Read back **out of TTN** and compared byte-for-byte against the source file, rather than
+trusting the write:
+
+```
+up_formatter        : FORMATTER_JAVASCRIPT
+stored at TTN sha256: 717afcebeebd0a3d219aad5249bee04c0ddbcfd43059dae2a792bede4e91058b
+local file    sha256: 717afcebeebd0a3d219aad5249bee04c0ddbcfd43059dae2a792bede4e91058b
+BYTE IDENTICAL      : True
+CHANNELS map present: True
+WIND_DIR_OFFSET     : ['var WIND_DIR_OFFSET = 230;']
+```
+
+**That `230` is 001's site correction, not a statement about 002's orientation**, and it is
+the one value in this file that is per-install. It only affects `wind_direction`
+(formatter :219-221), and 002 has no RK900 attached so no heading has been recorded wrong —
+but it must be set before 002 is installed or the heading arrives rotated and plausible.
+Filed as [#84](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/84).
+
 The parity gate that §6 recorded as bypassed is **no longer bypassed**. It was fixed rather
 than re-pinned around, in this order:
 
