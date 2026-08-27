@@ -234,6 +234,35 @@ def parse_wx_types(js: str) -> dict:
 
 
 def parse_channel_names(js: str) -> dict:
+    """Map the decoder's `"typeName_channel"` key to the field name it decodes to.
+
+    Two upstream shapes exist and both are read, because the formatter is in another
+    repo and this gate must not go blind the next time it is restructured:
+
+        CHANNELS      = { "wind_speed_1": { name: "wx_wind_speed", probe: "wx" }, ... }
+        CHANNEL_NAMES = { "wind_speed_1": "wx_wind_speed", ... }
+
+    `CHANNELS` is checked first because it is the current form; forest-weather-machines
+    `3cfd281` replaced the flat string map with objects carrying `name`, `probe`, and
+    `isSerial`. Only `name` is part of this firmware's contract: `probe` and `isSerial`
+    exist to label the per-probe serial on channel 0, which this device never emits.
+
+    CITE(sibling): forest-weather-machines @ 058bd69 —
+      LoRaWAN/payload/rak-wx-station-default.js:52-75, the CHANNELS object map.
+    CITE(sibling): forest-weather-machines @ 058bd69 —
+      LoRaWAN/payload/rak-wx-station-default.js:223-243, lppDecodeToFlat() reads only
+      `mapping.name` for a non-serial channel, so name is the whole contract here.
+    """
+    block = re.search(r"var\s+CHANNELS\s*=\s*\{(.*?)\n\};", js, re.S)
+    if block:
+        return {
+            m.group(1): m.group(2)
+            for m in re.finditer(
+                r"\"([^\"]+)\"\s*:\s*\{[^{}]*?\bname\s*:\s*\"([^\"]+)\"",
+                block.group(1),
+            )
+        }
+
     block = re.search(r"var\s+CHANNEL_NAMES\s*=\s*\{(.*?)\n\};", js, re.S)
     if not block:
         return {}
@@ -309,8 +338,24 @@ def main() -> int:
 
     wx_types = parse_wx_types(js)
     channel_names = parse_channel_names(js)
-    if not wx_types or not channel_names:
-        failures.append("Could not parse WX_TYPES / CHANNEL_NAMES — decoder structure changed.")
+
+    # Named separately. A combined "could not parse WX_TYPES / CHANNEL_NAMES" message sent
+    # issue #83 looking at both halves when only the channel map had moved, and it gave no
+    # hint that the gate had stopped checking rather than found a mismatch.
+    if not wx_types:
+        failures.append(
+            "Could not parse WX_TYPES from the formatter — its structure changed.\n"
+            "        This gate is now BLIND to type/size/signedness/divisor drift.\n"
+            "        Teach parse_wx_types() the new shape; do not re-pin around it."
+        )
+    if not channel_names:
+        failures.append(
+            "Could not parse a channel map (CHANNELS or CHANNEL_NAMES) from the "
+            "formatter.\n"
+            "        This gate is now BLIND to decoded_key drift.\n"
+            "        Teach parse_channel_names() the new shape; do not re-pin around it."
+        )
+    if failures and (not wx_types or not channel_names):
         _report(failures, warnings, blocked)
         return 1
 

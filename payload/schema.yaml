@@ -14,9 +14,20 @@ decoder:
   path: LoRaWAN/payload/rak-wx-station-default.js
   # Default lookup path; override with the FWM_REPO environment variable.
   local_path: ~/Documents/GitHub/forest-weather-machines
-  pinned_commit: efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32
-  pinned_sha256: 9c58c2b92193d412958401c9182109495ff748ff502b9d76369dc1f93a85777c
-  pinned_on: 2026-07-30
+  pinned_commit: 058bd69acf07552c90da81122eaad2274a85a42a
+  pinned_sha256: 717afcebeebd0a3d219aad5249bee04c0ddbcfd43059dae2a792bede4e91058b
+  pinned_on: 2026-08-27
+  # Re-pinned from efc0e3c/9c58c2b9 after the formatter was restructured upstream
+  # (3cfd281 replaced the flat CHANNEL_NAMES string map with a CHANNELS map of
+  # objects). Parity was re-verified BEFORE this re-pin, not assumed:
+  #   - scripts/check_decoder_parity.py, taught the CHANNELS shape, passes all 9
+  #     emitted fields against the live file.
+  #   - scripts/check_golden_vectors.py PASSED 21 decoded values across 5 vectors
+  #     with source "live" on the build host — real encoder bytes through this
+  #     exact formatter in node, which is the check a field-by-field comparison
+  #     cannot make.
+  # Refs #83. Every emitted (channel,type) kept its decoded_key; no firmware change
+  # was needed.
   # Re-pin ONLY after re-verifying parity. Re-pinning to silence the gate is the
   # exact failure this gate exists to prevent.
 
@@ -56,8 +67,14 @@ fields:
     notes: >
       Emit the RAW heading. The decoder applies WIND_DIR_OFFSET = 230 for the site
       installation. Applying the offset in firmware as well double-corrects by 230
-      degrees. The decoder also nulls this field when wind_speed is 0 — firmware
-      must not pre-null it.
+      degrees.
+
+      The decoder NO LONGER nulls this field when wind_speed is 0. Upstream
+      169e865 removed that behavior on the same no-fabricated-data grounds this
+      repo applies: nulling stripped a heading the vane actually reported. The
+      firmware instruction is unchanged — emit the raw heading and do not pre-null
+      it — but the reason is now "the decoder passes it through", not "the decoder
+      nulls it for you". Any calm-air interpretation belongs downstream of ingest.
 
   - name: temperature
     channel: 3
@@ -83,9 +100,13 @@ fields:
     notes: >
       TRAP: FIRMWARE_SPEC.md §6 lists "Humidity 104/112" as if interchangeable. They
       are not. Type 112 decodes to name "humidity_prec", giving key humidity_prec_4,
-      which CHANNEL_NAMES maps to wx_humidity. Type 104 decodes to name "humidity"
-      (1 byte, divisor 2), giving key humidity_4 — which is NOT in CHANNEL_NAMES and
-      falls through as a raw key, missing every downstream consumer. Use 112.
+      which the decoder's CHANNELS map maps to wx_humidity. Type 104 decodes to name
+      "humidity" (1 byte, divisor 2), giving key humidity_4 — which is NOT in CHANNELS
+      and falls through as a raw key, missing every downstream consumer. Use 112.
+
+      Since upstream 3cfd281 an unmapped key is passed through under its raw name with
+      a decoder warning rather than dropped, so this mistake now costs the field's
+      downstream consumers instead of the whole uplink. It is still a mistake.
 
   - name: pressure
     channel: 5

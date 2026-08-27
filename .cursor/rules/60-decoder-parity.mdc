@@ -26,10 +26,18 @@ produce partial data or an obvious error; it produces silence, from a node that 
 transmitting perfectly, on a battery you cannot recharge. The failure is invisible until
 someone notices the dashboard has been flat for a week.
 
-Channel numbers are equally load-bearing. `CHANNEL_NAMES` maps `name_channel` pairs
-(`wind_speed_1`, `temperature_3`, `dc_voltage_batt_21`, …). Emit the right type on the
-wrong channel and the value decodes but lands under a raw key like `temperature_9`,
-missing every downstream consumer. **Channel and type IDs are contract, not preference.**
+Channel numbers are equally load-bearing. The decoder's `CHANNELS` map keys `name_channel`
+pairs (`wind_speed_1`, `temperature_3`, `dc_voltage_batt_21`, …) to a decoded field name.
+Emit the right type on the wrong channel and the value decodes but lands under a raw key
+like `temperature_9`, missing every downstream consumer. **Channel and type IDs are
+contract, not preference.**
+
+The map was named `CHANNEL_NAMES` and held plain strings until upstream `3cfd281` made it
+`CHANNELS` holding `{ name, probe, isSerial }`. Only `name` is part of this firmware's
+contract — `probe` and `isSerial` label the per-probe serial on channel 0, which this
+device does not emit. The gate reads both shapes so it does not go blind on the next
+restructure; if it ever cannot parse the map at all it now says so as its own failure,
+because a gate that has stopped checking must not look like a gate that found nothing.
 
 ## The gate
 
@@ -37,7 +45,8 @@ missing every downstream consumer. **Channel and type IDs are contract, not pref
 and CI. It:
 
 1. Locates the decoder (`FWM_REPO` env var, else the default sibling path).
-2. Parses `WX_TYPES` and `CHANNEL_NAMES` out of the JavaScript.
+2. Parses `WX_TYPES` and the channel map (`CHANNELS`, or legacy `CHANNEL_NAMES`) out of
+   the JavaScript.
 3. Compares them against `payload/schema.yaml`, the firmware-side source of truth.
 4. Compares the decoder's current content hash against the hash pinned in the schema.
 
@@ -66,8 +75,12 @@ the one thing this gate exists to prevent.
 - **Wind direction offset is the decoder's job.** It applies `WIND_DIR_OFFSET = 230`.
   Firmware sends the **raw** heading (`FIRMWARE_SPEC.md` §2.1). Applying the offset in both
   places double-corrects by 230° and looks plausible enough to ship.
-- **Zero-wind null policy is the decoder's job.** It nulls `wind_direction` when
-  `wind_speed === 0`. Firmware does not pre-null it.
+- **Nobody nulls wind direction on calm air — not any more.** The decoder used to null
+  `wind_direction` when `wind_speed === 0`; upstream `169e865` removed that, on the same
+  no-fabricated-data grounds this repo applies. Firmware still emits the raw heading and
+  still does not pre-null it, so no firmware change was needed — but do not write that the
+  decoder nulls it, and do not add the nulling here to "restore" behavior that was
+  deliberately deleted. Calm-air interpretation belongs downstream of ingest.
 - **Battery current sign is decided, and neither side transforms it.** Positive = charging,
   negative = discharging (ADR-0002, 2026-08-13) — the pack's own convention, adopted so that
   no sign transform exists anywhere between the pack's register and the TTN record. The

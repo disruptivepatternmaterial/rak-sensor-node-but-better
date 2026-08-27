@@ -227,17 +227,87 @@ once — and the checker fix, the corrections to the now-stale zero-wind notes i
 nulling), and the re-pin are tracked in
 [#83](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/83).
 
+#### 7. The device had NO uplink payload formatter. Now it does, and parity is gated again
+
+Found later the same day, and it is the defect that would have mattered most: `ttn-lw-cli
+end-devices get my-app-tobi puma-concolor-002 --formatters` returned **no `formatters`
+block at all**, and `applications get my-app-tobi --formatters` returned **empty**. TTN
+formatters on this application are set **per device** (the header of the formatter says so —
+`WIND_DIR_OFFSET` differs per install), so there was no inheritance to fall back on. Every
+uplink from `002` would have landed with `frm_payload` and **no `decoded_payload`**, from a
+node that looked perfectly healthy.
+
+`001` did have one, but a **stale** revision — its header is the old single-probe
+"RAK2560 WisNode Sensor Hub + RK900-09" text, predating the unified formatter.
+
+Set from the live file, by path rather than by shell interpolation
+(`--formatters.up-formatter-parameter-local-file`), and read back:
+
+```
+source formatter sha256: 717afcebeebd0a3d219aad5249bee04c0ddbcfd43059dae2a792bede4e91058b
+up_formatter           : FORMATTER_JAVASCRIPT
+updated_at             : 2026-08-27T22:01:57.922922751Z
+```
+
+The parity gate that §6 recorded as bypassed is **no longer bypassed**. It was fixed rather
+than re-pinned around, in this order:
+
+1. `scripts/check_decoder_parity.py` now reads the `CHANNELS` object map *and* the legacy
+   `CHANNEL_NAMES` string map, and reports an unparseable map as its own named failure — a
+   gate that has stopped checking must not look like a gate that found nothing.
+2. All **9** emitted fields re-verified against the live map: every `(channel, type)` keeps
+   its `decoded_key`, every size/signedness/divisor still matches. **No firmware change was
+   needed.**
+3. `scripts/check_golden_vectors.py` PASSED **21 decoded values across 5 vectors** with
+   `source: live` — real encoder bytes through this exact formatter in node v26. This is the
+   check a field-by-field comparison cannot make, and it is why the re-pin is not a
+   hand-check.
+4. Only then re-pinned to `058bd69` / `717afceb…`. `scripts/preflight.sh` reaches
+   `=== PREFLIGHT OK ===`, exit 0.
+
+**The build host had no `forest-weather-machines` clone at all**, which is why its golden-vector
+run reported `source: pinned` and could never have detected upstream drift. Cloned via `gh`
+(not copied between machines) and confirmed byte-identical at `717afceb…`. Closes
+[#83](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/83).
+
+**Still NOT observed:** no uplink from `002` has been decoded, because none has been sent —
+see the verdict row below. The formatter is correct by construction and by golden vector, not
+by a decoded frame from this node.
+
+#### 8. Why `002` has not uplinked — designed behavior, not a fault
+
+`last_f_cnt_up` is still absent. The one stored record is the **join**, identifiable because
+its inner `received_at` is byte-identical to the session `started_at`
+(`2026-08-27T21:47:19.090255124Z`); it carries no `f_port`, `f_cnt`, or `frm_payload`.
+
+The node is **incomplete by design at this stage — no RK900 and no RAK9154 pack attached.**
+With no pack reading, `power::Brownout` engages without evidence after
+`kInvalidReadsBeforeInhibit = 4` cycles and `main.cpp:373` holds the uplink
+(`uplink : held — no pack voltage evidence`) until
+`power::kNoEvidenceKeepaliveCycles = 24` cycles have passed, at which point it sends one
+*empty* keepalive. A fresh board also has no stored interval, so it runs
+`kIntervalDefaultSeconds = 3600 s`, not the 900 s of the field-configured `001`.
+
+So: nothing to diagnose here, and **a decodable uplink from this node requires the pack to be
+attached.** Recorded so a later session does not read the silence as a radio or key fault.
+
+Link margin at join is worth noting for when it is installed: **RSSI −109 dBm, SNR −0.5 dB**
+to `3356-gateway-002` at SF7 — joined fine, but far weaker than `001`'s field readings of
+−59 dBm / 14.5 dB.
+
 #### Verdict
 
 | Claim | Verdict |
 |---|---|
 | `puma-concolor-002` registered on TTN, distinct identity, `001` unaffected | **PASS** |
+| Uplink payload formatter present on `002` and byte-identical to the live formatter | **PASS** — set 22:01:57Z, `717afceb…` |
+| Payload parity by gate, against the live formatter | **PASS** — 9 fields, plus 21 golden-vector values through node |
 | Field image uploaded to the new board | **PASS** |
 | Board running an application (`239A:8029`) | **PASS** |
 | OTAA join by `puma-concolor-002` | **PASS** |
 | Which commit is executing, from the board | **NOT OBSERVED** — banner never read |
-| Sensors, payload, uplink contents, sleep, power on this node | **NOT OBSERVED** |
-| Decoder parity by gate | **NOT RUN** — bypassed; hand-checked only ([#83](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/83)) |
+| Sensors, payload, uplink contents, sleep, power on this node | **NOT OBSERVED** — no sensors attached; §8 |
+| A decoded uplink from `002` | **NOT OBSERVED** — none sent, and none will be until the pack is attached (§8) |
 
 **Status is unchanged: `🚧 NOT YET DEPLOYED`.** A second node that joins once is not a second
 node that has been soaked, and none of the H1–H8 gates moved.

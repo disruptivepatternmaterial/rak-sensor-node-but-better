@@ -20,6 +20,9 @@
 
 set -euo pipefail
 
+# The build host's address is NOT stable and no literal address belongs in this file --
+# the repository is public. Override it per shell, or define the ssh alias once:
+#
 #   export RAK_BUILD_HOST=ntableman@<address>     # this shell only
 #   Host wx3-harness                              # ~/.ssh/config, persistent -- preferred
 #       HostName <address>
@@ -43,6 +46,22 @@ rsh() { ssh "${SSH_OPTS[@]}" "$BUILD_HOST" "zsh -l -c $(printf '%q' "$1")"; }
 # Run a command inside the remote repo.
 rrepo() { rsh "cd $REMOTE_REPO && $1"; }
 
+# "cannot reach the build host. On the VPN/LAN?" was the wrong advice for the wrong
+# failure: the address had changed, not the network, and a session acting on that hint
+# concluded the host was down. Say which address was tried and how to change it.
+unreachable() {
+  echo "${RED}ERROR${NC} cannot reach the build host at '${BUILD_HOST}'." >&2
+  echo "       The address is NOT stable and has moved before. Do not conclude the" >&2
+  echo "       host is down until you have tried the current address. Override it:" >&2
+  echo "         export RAK_BUILD_HOST=ntableman@<address>" >&2
+  echo "       or define the 'wx3-harness' alias in ~/.ssh/config (preferred, persists)." >&2
+  echo "       Ask the operator for the address -- it is deliberately not recorded in" >&2
+  echo "       this repository, which is public. See docs/ENVIRONMENTS.md." >&2
+  echo "       Confirm reachability in one command:" >&2
+  echo "         ssh -o ConnectTimeout=8 -o BatchMode=yes \"\$RAK_BUILD_HOST\" 'zsh -l -c \"hostname\"'" >&2
+  echo "       (BatchMode is on, so a host that wants a password also lands here.)" >&2
+  exit 1
+}
 
 cmd_check() {
   info "Build host: $BUILD_HOST_NAME ($BUILD_HOST)"
