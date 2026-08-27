@@ -24,9 +24,7 @@ cd "$(dirname "$0")/.."
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; DIM=$'\033[2m'; NC=$'\033[0m'
 die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 
-# No literal address here on purpose. The LAN address this used to default to
-# (192.168.10.223) is currently unreachable, and the address that does work is a public one
-# that must not live in a tracked file. Point BUILD_HOST at the host, or better, define an
+# No literal address here on purpose. Point BUILD_HOST at the host, or better, define an
 # ssh alias so the address stays in ~/.ssh/config where it belongs:
 #
 #   export RAK_BUILD_HOST=ntableman@<address>    # one shell
@@ -73,9 +71,7 @@ if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$BUILD_HOST" true 2>/dev/null; t
   echo "${RED}ERROR${NC} cannot reach build host '${BUILD_HOST}'." >&2
   echo "       Set RAK_BUILD_HOST to the current address, or add an ssh alias:" >&2
   echo "         export RAK_BUILD_HOST=ntableman@<address>" >&2
-  echo "       The address is not stable: the LAN address 192.168.10.223 stopped" >&2
-  echo "       answering on 2026-08-12. The working address is public and is" >&2
-  echo "       deliberately not recorded in this repository — see docs/ENVIRONMENTS.md." >&2
+  echo "       The address is not stable" >&2
   echo "       (BatchMode is on here, so a host needing a password also lands here;" >&2
   echo "        load the key into the agent or use an alias with IdentityFile.)" >&2
   exit 1

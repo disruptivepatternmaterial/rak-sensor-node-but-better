@@ -36,9 +36,8 @@ Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment pro
 Two machines, and they are not interchangeable. Full detail in [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 
 - **This workstation** — author code and docs. No PlatformIO, no device on USB.
-- **Heliotrope Ridge** (`$RAK_BUILD_HOST`, ssh alias `wx3-harness`) — compile, flash, soak.
-  The RAK4631 lives here. The address is not stable and is not recorded in this repo; the
-  old `192.168.10.223` is dead. See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
+- **Heliotrope Ridge** (`$RAK_BUILD_HOST`) — compile, flash, soak.
+  The RAK4631 lives here at 130.111.32.11 See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 - **Git is the only transport between them.**
 
 ```bash

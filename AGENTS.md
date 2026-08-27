@@ -69,10 +69,8 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   read-only. Everything that touches hardware runs on Heliotrope Ridge — and remote commands
   need `zsh -l -c` or `pio` will look like it is not installed. Use `scripts/remote.sh`.
 
-- **The build host address is not stable, and the one in old transcripts is dead.**
-  `192.168.10.223` was correct until 2026-08-12 and now returns `No route to host`; the host
-  since answers on a **public** address kept deliberately out of this public repo. Two
-  sessions have been burned concluding the host was down when it was not. Ask the operator
+- **The build host address is not stable**
+  If you are confused ask the operator
   for the address, `export RAK_BUILD_HOST=ntableman@<address>`, and confirm in one command
   before diagnosing anything:
   `ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'` →

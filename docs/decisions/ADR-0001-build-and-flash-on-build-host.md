@@ -13,7 +13,7 @@ down: the agent sandbox denies writes outside the workspace, so `$HOME` is read-
 `~/.platformio` cannot be created. It also has no RAK4631 on USB — only
 `/dev/cu.Bluetooth-Incoming-Port` and `/dev/cu.debug-console`.
 
-**Heliotrope Ridge** (`192.168.10.223`, ssh alias `wx3-harness`) already has PlatformIO
+**Heliotrope Ridge** already has PlatformIO
 6.1.19, `gh`, `GITHUB_TOKEN`, PyYAML, a clone at
 `~/Documents/GitHub/lorawan/rak-sensor-node-but-better`, and — decisively — it is where the
 hardware physically connects.
