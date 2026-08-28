@@ -1,0 +1,33 @@
+# Install at rak-sensor-node-but-better/.github/wiki-sync.yml
+# Default branch: main
+#
+# This repo is PUBLIC, so its wiki is public and the network-identifier scan
+# applies. Issue #87 tracks internal addresses already committed to docs/;
+# publishing stays blocked until that is redacted, which is the scan doing its
+# job rather than a problem with this config.
+acronyms: [ADR, RAK, RK900, BMS, SX126X, RAK9154, LoRaWAN, TTN, ABP, OTAA]
+
+pages:
+  - source: docs/STATUS.md
+    page: Home
+  - source: docs/FIRMWARE_SPEC.md
+    page: Firmware-Specification
+
+auto:
+  - glob: 'docs/*.md'
+  - glob: 'docs/decisions/*.md'
+    prefix: ADR
+    exclude:
+      # A directory index and a blank form; the sidebar already lists the ADRs.
+      - 'docs/decisions/README.md'
+      - 'docs/decisions/TEMPLATE.md'
+  - glob: 'docs/research/*.md'
+    prefix: Research
+  - glob: 'docs/reviews/*.md'
+    prefix: Review
+
+# Deliberately not published:
+#   plans/**      in-flight working documents, superseded often.
+#   TODO.md       work tracking belongs in issues, not a wiki page.
+#   AGENTS.md     machine-read at every turn; a wiki copy would be a second
+#                 source of truth for behavior that must have exactly one.
