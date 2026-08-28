@@ -15,7 +15,7 @@
 # So the useful thing to automate is not the clicking. It is the three checks in issue #23,
 # which were a human checklist and are now machine-checkable:
 #
-#   verify  src/secrets.h DevEUI reads left-to-right identically to the TTN console
+#   verify  src/secrets.h DevEUI and JoinEUI read left-to-right identically to the TTN console
 #   banner  the boot banner deveui line matches the console exactly
 #   session the Network Server reports a session after the first uplink
 #
@@ -40,7 +40,7 @@
 #   scripts/register_device.sh gen                      generate MSB-order keys for a new node
 #   scripts/register_device.sh create <device-id>       create it on TTN (needs ttn-lw-cli login)
 #   scripts/register_device.sh verify <device-id>       TTN vs src/secrets.h, reversal-aware
-#   scripts/register_device.sh check <deveui>           same check fully offline, no credentials
+#   scripts/register_device.sh check <deveui> [joineui] same check fully offline, no credentials
 #   scripts/register_device.sh banner <capture.log>     boot banner vs src/secrets.h
 #   scripts/register_device.sh session <device-id>      has it ever joined?
 #
@@ -80,17 +80,24 @@ require_secrets() {
      point SECRETS= at the header to check. secrets.h is gitignored by design."
 }
 
-# Pull a #define'd byte array out of a C header and return it as flat lowercase hex.
-# Handles backslash continuation, which OTAA_APPKEY uses.
+# Pull an active #define'd byte array out of a C header and return it as flat lowercase hex.
+#
+# Do not parse the source text. The first version matched the substring "#define OTAA_DEVEUI"
+# inside comments, so a stale commented credential before the active one could make verification
+# pass for a value the firmware did not compile. Ask the C++ preprocessor instead: `-dM` emits
+# exactly the active macro table after comments, continuations and conditionals have been
+# resolved. The checker then sees the same definition the firmware compiler sees.
 secrets_bytes() {
   local macro="$1"
-  awk -v m="$macro" '
-    index($0, "#define " m) { collecting = 1 }
-    collecting {
-      buf = buf $0
-      if ($0 !~ /\\[[:space:]]*$/) { print buf; exit }
-    }
-  ' "$SECRETS" \
+  local cxx="${CXX:-c++}"
+  command -v "$cxx" >/dev/null 2>&1 || {
+    echo "no C++ preprocessor found at '$cxx'" >&2
+    return 1
+  }
+
+  "$cxx" -dM -E -x c++ "$SECRETS" 2>/dev/null \
+    | awk -v m="$macro" '$1 == "#define" && $2 == m { $1 = ""; $2 = ""; print; found = 1 }
+                         END { if (!found) exit 1 }' \
     | grep -oE '0x[0-9A-Fa-f]{1,2}' \
     | sed 's/0x//' \
     | awk '{ if (length($0) == 1) printf "0%s", tolower($0); else printf "%s", tolower($0) }'
@@ -118,18 +125,18 @@ ttn_field() { # $1 = device id, $2 = field path, prints flat hex
     | grep -oE '"[0-9A-Fa-f]+"$' | tr -d '"' | tr 'A-F' 'a-f'
 }
 
-# The whole point of the script. Compares two DevEUIs and names byte-reversal as byte-reversal.
-compare_deveui() { # $1 = source label, $2 = source hex, $3 = local label, $4 = local hex
-  local src_label="$1" src="$2" loc_label="$3" loc="$4"
+# The whole point of the script. Compares two EUIs and names byte-reversal as byte-reversal.
+compare_eui() { # $1 = field name; $2/$3 = source label/hex; $4/$5 = local label/hex
+  local field="$1" src_label="$2" src="$3" loc_label="$4" loc="$5"
 
-  [[ -n "$src" ]] || die "could not read a DevEUI from $src_label"
-  [[ -n "$loc" ]] || die "could not read a DevEUI from $loc_label"
+  [[ -n "$src" ]] || die "could not read a $field from $src_label"
+  [[ -n "$loc" ]] || die "could not read a $field from $loc_label"
 
   if [[ ${#src} -ne 16 ]]; then
-    die "$src_label DevEUI is ${#src} hex digits, expected 16 (8 bytes): $(pretty "$src")"
+    die "$src_label $field is ${#src} hex digits, expected 16 (8 bytes): $(pretty "$src")"
   fi
   if [[ ${#loc} -ne 16 ]]; then
-    die "$loc_label DevEUI is ${#loc} hex digits, expected 16 (8 bytes): $(pretty "$loc")"
+    die "$loc_label $field is ${#loc} hex digits, expected 16 (8 bytes): $(pretty "$loc")"
   fi
 
   echo "   $src_label : $(pretty "$src")"
@@ -140,18 +147,20 @@ compare_deveui() { # $1 = source label, $2 = source hex, $3 = local label, $4 = 
     # no local-admin bit, and a real assigned block would not set it. Worth saying, since this
     # application has no assigned block, so an unset bit here means the value came from
     # somewhere unexpected.
-    local first=$(( 0x${src:0:2} ))
-    if (( (first & 0x02) == 0 )); then
-      echo "   note      : first byte 0x${src:0:2} has the locally-administered bit clear."
-      echo "               Fine if this DevEUI came from an assigned EUI-64 block; suspicious"
-      echo "               if it was generated, since 'gen' always sets it."
+    if [[ "$field" == "DevEUI" ]]; then
+      local first=$(( 0x${src:0:2} ))
+      if (( (first & 0x02) == 0 )); then
+        echo "   note      : first byte 0x${src:0:2} has the locally-administered bit clear."
+        echo "               Fine if this DevEUI came from an assigned EUI-64 block; suspicious"
+        echo "               if it was generated, since 'gen' always sets it."
+      fi
     fi
-    green "PASS DevEUI matches, same order, no reversal"
+    green "PASS $field matches, same order, no reversal"
     return 0
   fi
 
   if [[ "$src" == "$(reverse_bytes "$loc")" ]]; then
-    red "FAIL DevEUI is BYTE-REVERSED — this is the 2026-07-31 mistake, issue #23"
+    red "FAIL $field is BYTE-REVERSED — this is the 2026-07-31 mistake, issue #23"
     cat <<EOF
 
    The two values are the same eight bytes in opposite order, so this is not the wrong
@@ -163,7 +172,7 @@ compare_deveui() { # $1 = source label, $2 = source hex, $3 = local label, $4 = 
 
    Fix $loc_label to read left-to-right exactly as $src_label does:
 
-       #define OTAA_DEVEUI {$(printf '0x%s, ' $(echo "$src" | sed 's/../& /g') | sed 's/, $//')}
+       $(if [[ "$field" == "DevEUI" ]]; then printf '#define OTAA_DEVEUI'; else printf '#define OTAA_APPEUI'; fi) {$(printf '0x%s, ' $(echo "$src" | sed 's/../& /g') | sed 's/, $//')}
 
    Left unfixed, this node will transmit join requests forever and the console will show no
    join attempt, no error, and nothing to bisect.
@@ -171,7 +180,7 @@ EOF
     return 2
   fi
 
-  red "FAIL DevEUI mismatch, and not a reversal either — these are different devices"
+  red "FAIL $field mismatch, and not a reversal either"
   echo "   Reversing $loc_label would give $(pretty "$(reverse_bytes "$loc")"), which still does not match."
   echo "   Check that '$src_label' names the device you meant."
   return 3
@@ -214,14 +223,17 @@ cmd_create() {
   [[ -n "$dev" ]] || die "usage: register_device.sh create <device-id>"
   need_cli
   require_secrets
-  local deveui appkey
-  deveui=$(secrets_bytes OTAA_DEVEUI)
-  appkey=$(secrets_bytes OTAA_APPKEY)
+  local deveui joineui appkey
+  deveui=$(secrets_bytes OTAA_DEVEUI) || die "could not read active OTAA_DEVEUI from $SECRETS"
+  joineui=$(secrets_bytes OTAA_APPEUI) || die "could not read active OTAA_APPEUI from $SECRETS"
+  appkey=$(secrets_bytes OTAA_APPKEY) || die "could not read active OTAA_APPKEY from $SECRETS"
   [[ ${#deveui} -eq 16 ]] || die "OTAA_DEVEUI in $SECRETS is ${#deveui} hex digits, expected 16"
+  [[ ${#joineui} -eq 16 ]] || die "OTAA_APPEUI in $SECRETS is ${#joineui} hex digits, expected 16"
   [[ ${#appkey} -eq 32 ]] || die "OTAA_APPKEY in $SECRETS is ${#appkey} hex digits, expected 32"
 
   bold "== creating $dev in $APP =="
   echo "   DevEUI      : $(pretty "$deveui")"
+  echo "   JoinEUI     : $(pretty "$joineui")"
   echo "   frequency   : $FREQ_PLAN"
   echo "   versions    : $MAC_VER / $PHY_VER"
   echo "   servers     : identity eu1, network/application/join nam1"
@@ -233,7 +245,7 @@ cmd_create() {
   # different claims.
   ttn-lw-cli end-devices create "$APP" "$dev" \
     --dev-eui "$deveui" \
-    --join-eui "0000000000000000" \
+    --join-eui "$joineui" \
     --root-keys.app-key.key "$appkey" \
     --frequency-plan-id "$FREQ_PLAN" \
     --lorawan-version "$MAC_VER" \
@@ -251,10 +263,13 @@ cmd_verify() {
   need_cli
   require_secrets
   bold "== $dev at TTN vs $SECRETS =="
-  local remote local_h
-  remote=$(ttn_field "$dev" "ids.dev_eui")
-  local_h=$(secrets_bytes OTAA_DEVEUI)
-  compare_deveui "TTN     " "$remote" "secrets " "$local_h"
+  local remote_dev remote_join local_dev local_join
+  remote_dev=$(ttn_field "$dev" "ids.dev_eui")
+  remote_join=$(ttn_field "$dev" "ids.join_eui")
+  local_dev=$(secrets_bytes OTAA_DEVEUI) || die "could not read active OTAA_DEVEUI from $SECRETS"
+  local_join=$(secrets_bytes OTAA_APPEUI) || die "could not read active OTAA_APPEUI from $SECRETS"
+  compare_eui "DevEUI" "TTN     " "$remote_dev" "secrets " "$local_dev" || return $?
+  compare_eui "JoinEUI" "TTN     " "$remote_join" "secrets " "$local_join"
 }
 
 cmd_check() {
@@ -264,8 +279,14 @@ cmd_check() {
   bold "== pasted console value vs $SECRETS (offline) =="
   local remote local_h
   remote=$(printf '%s' "$pasted" | norm_hex)
-  local_h=$(secrets_bytes OTAA_DEVEUI)
-  compare_deveui "console " "$remote" "secrets " "$local_h"
+  local_h=$(secrets_bytes OTAA_DEVEUI) || die "could not read active OTAA_DEVEUI from $SECRETS"
+  compare_eui "DevEUI" "console " "$remote" "secrets " "$local_h" || return $?
+
+  if [[ -n "${2:-}" ]]; then
+    remote=$(printf '%s' "$2" | norm_hex)
+    local_h=$(secrets_bytes OTAA_APPEUI) || die "could not read active OTAA_APPEUI from $SECRETS"
+    compare_eui "JoinEUI" "console " "$remote" "secrets " "$local_h"
+  fi
 }
 
 cmd_banner() {
@@ -276,10 +297,14 @@ cmd_banner() {
   # The banner prints the DevEUI the firmware actually compiled in, which is the only value
   # that matters -- src/secrets.h could have been edited after the flash.
   local banner local_h
-  banner=$(grep -iE 'deveui' "$log" | head -1 | grep -oE '[0-9A-Fa-f]{2}([: ]?[0-9A-Fa-f]{2}){7}' | head -1 | norm_hex)
+  banner=$(grep -iE '^[[:space:]]*deveui[[:space:]]*:' "$log" \
+           | tail -1 \
+           | grep -oE '[0-9A-Fa-f]{2}([: ]?[0-9A-Fa-f]{2}){7}' \
+           | head -1 \
+           | norm_hex)
   [[ -n "$banner" ]] || die "no deveui line found in $log — was FEATURE_CONSOLE on, and did the capture catch the boot?"
-  local_h=$(secrets_bytes OTAA_DEVEUI)
-  compare_deveui "banner  " "$banner" "secrets " "$local_h"
+  local_h=$(secrets_bytes OTAA_DEVEUI) || die "could not read active OTAA_DEVEUI from $SECRETS"
+  compare_eui "DevEUI" "banner  " "$banner" "secrets " "$local_h"
 }
 
 cmd_session() {
@@ -309,24 +334,58 @@ cmd_session() {
 # whole job is to catch one specific mistake has to demonstrate it catches it. Needs no
 # credentials, no network and no board, so preflight runs it.
 cmd_selftest() {
-  local tmp rc=0
+  local tmp rc=0 cases_run=0
+  local expected_cases=17
   tmp=$(mktemp -d) || die "mktemp failed"
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
 
   cat > "$tmp/ok.h" <<'EOF'
 #define OTAA_DEVEUI {0x02, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67}
+#define OTAA_APPEUI {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80}
+#define OTAA_APPKEY {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, \
+                     0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
 EOF
   cat > "$tmp/short.h" <<'EOF'
 #define OTAA_DEVEUI {0x02, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45}
 EOF
+  cat > "$tmp/commented.h" <<'EOF'
+/*
+#define OTAA_DEVEUI {0x67, 0x45, 0x23, 0x01, 0xEF, 0xCD, 0xAB, 0x02}
+*/
+#if 0
+#define OTAA_DEVEUI {0x67, 0x45, 0x23, 0x01, 0xEF, 0xCD, 0xAB, 0x02}
+#endif
+#define OTAA_DEVEUI {0x02, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67}
+#define OTAA_APPEUI {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80}
+EOF
   printf '  deveui   : 02ABCDEF01234567\n' > "$tmp/good.log"
   printf '  deveui   : 67:45:23:01:EF:CD:AB:02\n' > "$tmp/rev.log"
+  printf 'ordinary log line with no identity\n' > "$tmp/none.log"
+  printf 'deveui   : 02ABCDEF01234567\ndeveui   : 0212345678901234\n' > "$tmp/multi.log"
+  mkdir "$tmp/bin"
+  cat > "$tmp/bin/ttn-lw-cli" <<'EOF'
+#!/usr/bin/env bash
+set -u
+if [[ "${1:-} ${2:-}" == "end-devices create" ]]; then
+  [[ " $* " == *" --join-eui 1020304050607080 "* ]] || exit 9
+  exit 0
+fi
+for arg in "$@"; do
+  case "$arg" in
+    --ids.dev_eui)  printf '{"dev_eui":"02ABCDEF01234567"}\n'; exit 0 ;;
+    --ids.join_eui) printf '{"join_eui":"%s"}\n' "${FAKE_JOIN_EUI:-1020304050607080}"; exit 0 ;;
+  esac
+done
+exit 8
+EOF
+  chmod +x "$tmp/bin/ttn-lw-cli"
 
   # name : expected exit : command
   run_case() {
     local name="$1" want="$2"; shift 2
     local got
+    cases_run=$((cases_run + 1))
     "$@" >/dev/null 2>&1; got=$?
     if [[ "$got" == "$want" ]]; then
       printf '   ok   %-38s exit %s\n' "$name" "$got"
@@ -340,11 +399,19 @@ EOF
   SECRETS="$tmp/ok.h"    run_case "identical DevEUI passes"        0 "${BASH_SOURCE[0]}" check "02ABCDEF01234567"
   SECRETS="$tmp/ok.h"    run_case "reversed DevEUI is caught"      2 "${BASH_SOURCE[0]}" check "6745230 1EFCDAB02"
   SECRETS="$tmp/ok.h"    run_case "different device is caught"     3 "${BASH_SOURCE[0]}" check "0212345678901234"
+  SECRETS="$tmp/ok.h"    run_case "DevEUI and JoinEUI both pass"    0 "${BASH_SOURCE[0]}" check "02ABCDEF01234567" "1020304050607080"
+  SECRETS="$tmp/ok.h"    run_case "reversed JoinEUI is caught"      2 "${BASH_SOURCE[0]}" check "02ABCDEF01234567" "8070605040302010"
+  SECRETS="$tmp/commented.h" run_case "comments cannot spoof DevEUI" 0 "${BASH_SOURCE[0]}" check "02ABCDEF01234567"
+  SECRETS="$tmp/ok.h" PATH="$tmp/bin:$PATH" run_case "create uses firmware JoinEUI" 0 "${BASH_SOURCE[0]}" create "test-device"
+  SECRETS="$tmp/ok.h" PATH="$tmp/bin:$PATH" run_case "verify checks both EUIs" 0 "${BASH_SOURCE[0]}" verify "test-device"
+  SECRETS="$tmp/ok.h" PATH="$tmp/bin:$PATH" FAKE_JOIN_EUI="8070605040302010" \
+    run_case "verify catches server JoinEUI reversal" 2 "${BASH_SOURCE[0]}" verify "test-device"
   SECRETS="$tmp/short.h" run_case "wrong-length secrets is caught" 1 "${BASH_SOURCE[0]}" check "02ABCDEF01234567"
   SECRETS="$tmp/nope.h"  run_case "missing secrets file is caught" 1 "${BASH_SOURCE[0]}" check "02ABCDEF01234567"
   SECRETS="$tmp/ok.h"    run_case "banner match passes"            0 "${BASH_SOURCE[0]}" banner "$tmp/good.log"
   SECRETS="$tmp/ok.h"    run_case "reversed banner is caught"      2 "${BASH_SOURCE[0]}" banner "$tmp/rev.log"
-  SECRETS="$tmp/ok.h"    run_case "banner with no deveui line"     1 "${BASH_SOURCE[0]}" banner "$tmp/short.h"
+  SECRETS="$tmp/ok.h"    run_case "latest banner wins"             3 "${BASH_SOURCE[0]}" banner "$tmp/multi.log"
+  SECRETS="$tmp/ok.h"    run_case "banner with no deveui line"     1 "${BASH_SOURCE[0]}" banner "$tmp/none.log"
   run_case               "no arguments prints usage"               2 "${BASH_SOURCE[0]}"
 
   # The reversal branch must not fire on a palindrome-free value by accident, and must fire on
@@ -354,11 +421,19 @@ EOF
   gen_deveui=$("${BASH_SOURCE[0]}" gen 2>/dev/null | grep -m1 '#define OTAA_DEVEUI' \
                | grep -oE '0x[0-9a-f]{2}' | sed 's/0x//' | tr -d '\n')
   if [[ ${#gen_deveui} -eq 16 && $(( 0x${gen_deveui:0:2} & 0x02 )) -ne 0 ]]; then
+    cases_run=$((cases_run + 1))
     printf '   ok   %-38s %s\n' "gen emits a locally-administered EUI" "${gen_deveui:0:2}..."
   else
+    cases_run=$((cases_run + 1))
     printf '   FAIL %-38s got %s\n' "gen emits a locally-administered EUI" "${gen_deveui:-empty}"
     rc=1
   fi
+
+  if [[ $cases_run -ne $expected_cases ]]; then
+    printf '   FAIL expected %u cases, ran %u\n' "$expected_cases" "$cases_run"
+    rc=1
+  fi
+  printf '=== REGISTER SELFTEST CASES %u/%u ===\n' "$cases_run" "$expected_cases"
 
   if [[ $rc -eq 0 ]]; then green "PASS register_device.sh selftest"; else red "FAIL register_device.sh selftest"; fi
   return $rc

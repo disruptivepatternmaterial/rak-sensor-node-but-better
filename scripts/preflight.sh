@@ -254,7 +254,12 @@ fi
 step "key byte order checker"
 if [[ -x scripts/register_device.sh ]]; then
   if SELFTEST_OUT=$(scripts/register_device.sh selftest 2>&1); then
-    ok "register_device.sh catches a reversed DevEUI ($(grep -c '^   ok ' <<< "$SELFTEST_OUT") cases)"
+    if grep -q '^=== REGISTER SELFTEST CASES 17/17 ===$' <<< "$SELFTEST_OUT"; then
+      ok "register_device.sh checks both EUIs, active macros, TTN create/verify, and the latest banner (17 cases)"
+    else
+      echo "$SELFTEST_OUT" | grep -E '^=== REGISTER SELFTEST CASES|^   FAIL' || true
+      bad "register_device.sh selftest exited 0 without proving all 17 cases ran"
+    fi
   else
     echo "$SELFTEST_OUT" | grep -E '^   FAIL|^FAIL' || true
     bad "register_device.sh selftest failed -- the DevEUI reversal check is not trustworthy"

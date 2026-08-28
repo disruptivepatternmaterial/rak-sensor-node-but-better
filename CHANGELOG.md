@@ -63,6 +63,15 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The registration verifier could approve credentials the firmware did not use.** Its source
+  parser matched a commented-out `OTAA_DEVEUI` before the active definition, `create` hardcoded
+  an all-zero JoinEUI instead of reading `OTAA_APPEUI`, `verify` checked only DevEUI, and
+  `banner` checked the oldest identity in a capture spanning multiple boots. It now reads the
+  C++ preprocessor's active macro table, creates and verifies both EUIs, and checks the latest
+  boot banner. The selftest grows from 10 to 17 cases, including mocked TTN create/get calls;
+  preflight requires the exact `17/17` completion sentinel rather than printing an unchecked
+  count. Found by the multi-model deployment review.
+  ([#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23))
 - **A pack oscillating across the 9.60 V inhibit floor could suppress the keepalive forever.**
   Every measured-low cycle disarmed the keepalive and reset its clock; the next in-band cycle
   re-armed it at zero. A 9.5 V / 9.7 V pattern therefore never reached the 24-cycle bound, so
