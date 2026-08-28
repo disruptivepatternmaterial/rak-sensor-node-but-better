@@ -254,12 +254,34 @@ bool restore()
     return true;
 }
 
+// Why this is three outcomes and not a bool.
+//
+// "The gate withheld the write" and "the write was attempted and failed" are different facts
+// with opposite handling, and collapsing them into false made the escape ladder in
+// counter_headroom_ok() depend on a guard in another translation unit. Today a brownout-gated
+// skip cannot reach that ladder -- main.cpp:368 declines to send at all while a hold is active
+// unless a keepalive is due, and a keepalive always grants the checkpoint permit at
+// main.cpp:414, so every false the ladder can observe is a real write failure. That is correct
+// and it is also fragile: it holds because of a caller's structure, not because of anything
+// here. A future send path that transmits during a hold without granting the permit would feed
+// gate skips into the three-strike budget and discard a perfectly good session, costing a
+// rejoin for a pack that was merely low.
+//
+// So the distinction is made where it is known. A withheld write is a temporary condition the
+// keepalive already bounds; only a failed write is evidence of a filesystem that will not
+// recover.
+enum class WriteOutcome {
+    Ok,
+    GateWithheld, // H3 declined it; nothing is broken and nothing should be counted
+    Failed,       // the write was attempted and did not land
+};
+
 // The whole of save(), plus the one way past the H3 gate. File-local: nothing outside this
 // translation unit may choose to bypass the gate.
 //
 // checkpoint_permitted is granted only for an authorized keepalive, and only for the write that
 // keeps the frame counter ahead of the wire. Everything else still obeys the gate.
-static bool write_session(bool checkpoint_permitted)
+static WriteOutcome write_session(bool checkpoint_permitted)
 {
     // H3: no flash writes while the pack is held below cutoff. Both paths into this function
     // run during a brownout hold — radio.cpp after a join, and counter_headroom_ok() below
@@ -287,13 +309,17 @@ static bool write_session(bool checkpoint_permitted)
     // commits atomically and the RAM ceiling below advances only after the write returned.
     if (!checkpoint_permitted && s_flash_write_gate != nullptr && !s_flash_write_gate()) {
         LOGLN(F("   session : skipping save — brownout hold, flash writes withheld"));
-        return false;
+        return WriteOutcome::GateWithheld;
     }
 
     Stored s = {};
     if (!collect(s)) {
         LOGLN(F("   session : could not read session from the MAC"));
-        return false;
+        // Failed, not withheld: the MAC would not report its own session. Flash was never
+        // reached, so this says nothing about the filesystem — but it does mean the ceiling
+        // cannot be advanced, and a MAC that cannot describe its session is not a condition
+        // waiting to clear on its own either.
+        return WriteOutcome::Failed;
     }
 
     // Store a counter deliberately ahead of the live one. After a reset the node resumes
@@ -302,7 +328,7 @@ static bool write_session(bool checkpoint_permitted)
 
     if (!write_file(s)) {
         LOGLN(F("   session : write failed"));
-        return false;
+        return WriteOutcome::Failed;
     }
 
     // Only now. Both early returns above — the brownout gate and a failed write — leave the
@@ -317,12 +343,14 @@ static bool write_session(bool checkpoint_permitted)
 
     LOGF("   session : saved 0x%08lX, resume at %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
-    return true;
+    return WriteOutcome::Ok;
 }
 
 bool save()
 {
-    return write_session(false);
+    // Callers of save() only need to know whether the session is on flash. The distinction
+    // between withheld and failed matters to the escape ladder, not here.
+    return write_session(false) == WriteOutcome::Ok;
 }
 
 void permit_counter_checkpoint()
@@ -362,13 +390,29 @@ bool counter_headroom_ok()
     // The wire has caught up with flash. save() is the only thing that moves the ceiling, and
     // it moves it only when the write landed — so this answers false exactly when the stored
     // value cannot be advanced, which during a brownout hold is the case issue #51 created.
-    if (write_session(permitted)) {
+    const WriteOutcome outcome = write_session(permitted);
+    if (outcome == WriteOutcome::Ok) {
         return true;
     }
 
-    // The write did not land. Refusing costs one interval of data, which is the right price for
-    // a transient -- but refusing forever is the permanent mute of #74/#68, so the refusal is
-    // now a ladder with an exit rather than a terminal state.
+    if (outcome == WriteOutcome::GateWithheld) {
+        // H3 declined the write; the filesystem is not broken. Refuse this uplink without
+        // spending a strike, because the condition is temporary by construction: the hold lifts
+        // on a recovered reading, and while it holds the keepalive is what keeps the node
+        // reachable and carries the one permitted checkpoint write. Counting this would let a
+        // low pack -- the thing the hold is protecting -- cost a rejoin.
+        //
+        // Not reachable from main.cpp today (see WriteOutcome). Handled anyway, because "not
+        // reachable" is a property of the current caller and this is where the fact is known.
+        LOGF("   session : uplink withheld — counter %lu reached the stored ceiling %lu and the "
+             "brownout hold withholds the write that would advance it\n",
+             (unsigned long)req.Param.UpLinkCounter, (unsigned long)s_saved_counter_ceiling);
+        return false;
+    }
+
+    // The write was attempted and did not land. Refusing costs one interval of data, which is
+    // the right price for a transient -- but refusing forever is the permanent mute of
+    // #74/#68, so the refusal is a ladder with an exit rather than a terminal state.
     if (s_ceiling_write_failures < kCeilingWriteFailuresBeforeForget) {
         ++s_ceiling_write_failures;
         LOGF("   session : uplink withheld — counter %lu reached the stored ceiling %lu and the "
