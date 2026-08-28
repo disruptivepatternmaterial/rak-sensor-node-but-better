@@ -19,8 +19,14 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   purge of just the public addresses would rewrite 85 of 252 commits and invalidate 34 commit
   SHAs cited in this project's own documentation, including `1c2df3c`, `d568574` and
   `65f8615` — the only three commits a board has ever asserted from its own boot banner — and
-  `572bcfa`, the 19.03 h soak. Reasoning and the alternative mitigation in
+  `572bcfa`, the 19.03 h soak. The decision, the options rejected, and the mitigation that
+  does address the exposure are recorded in
+  [ADR-0009](docs/decisions/ADR-0009-address-exposure-rotate-not-rewrite.md); tracking in
   [#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85).
+- **`scripts/preflight.sh` now also verifies that the irreplaceable evidence commits still
+  resolve** — the three banner-asserted SHAs plus `572bcfa` and `4510763`. It is the tripwire
+  for ADR-0009: if anyone ever does rewrite history, the broken evidence chain fails the gate
+  immediately instead of being discovered later by a reader who cannot find `1c2df3c`.
 
 ### Fixed
 

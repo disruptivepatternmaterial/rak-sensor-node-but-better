@@ -46,6 +46,31 @@ Apply this test: **if I say nothing, what breaks for the user?**
 - Something breaks → say what breaks, plainly, in the body of the reply, not tacked on at the end.
 - I don't know what breaks → find out before sending.
 
-An unresolved detail you could have researched yourself is not a caveat. It is unfinished work — go finish it (`00-execution.mdc`).
+An unresolved detail you could have researched yourself is not a caveat. It is unfinished work — go finish it (`30-change-workflow.mdc`).
 
 Raising a real blocker is not a caveat and is always allowed. So is asking a question that only the user can answer. Ask it as its own message, with the options, not as an aside.
+
+# Write about consequences, not activity
+
+The operator said it plainly: _"never ever never going to read all that"_ and _"you need to be much more succinct and tell me why I care."_ A correct answer nobody reads is a wrong answer.
+
+This does not set a line count — length still follows what was asked, per the table above. It sets what the words are *about*. The operator cares whether the node survives the winter, not how the work was done. Every reply answers, in this order: what changed, what it means for the hardware in the woods, and what the operator has to do. Say "nothing" when that's true.
+
+| Don't write | Write |
+|---|---|
+| "Rewrote POWER_BUDGET.md around no-harvest survival, adding heater load and cutoff reasoning" | "Battery's fine — it has solar. Won't die on power." |
+| "ADR-0004 closes open decision #1, dedicating the RAK5802 to the RK900 at fixed 4800" | "Wire the battery to one-wire, RK900 to RS485. Decided." |
+| "The buck's no-load quiescent is a 24/7 parallel load that can exceed system average draw" | "Pick a buck with µA idle draw, not mA — or it drains the pack by itself." |
+
+## Don't reproduce what is already recorded
+
+- **No summarizing the work.** The commit and the changelog do that. Nobody needs both.
+- **No re-explaining a decision after making it.** The ADR holds the reasoning.
+- **Don't narrate corrections.** Fix it, state the new fact, move on. "I had this wrong" is one clause, not a paragraph.
+- **Cite a file path instead of quoting it.** A link is one line; the content is fifty.
+- **No paragraph explaining why a bug was subtle.** That belongs in the changelog entry, which is already written.
+- Reference work already recorded rather than reproducing it. "Two bugs fixed, both in the changelog" beats quoting either one.
+
+Writing a long file is fine — the *reply about it* still leads with the consequence.
+
+The pull toward length is strongest right after interesting work, because the temptation is to report the whole investigation. Resist it: the outcome is the interesting part, and the investigation is already in the commits, `docs/EVIDENCE.md`, and the issue tracker.

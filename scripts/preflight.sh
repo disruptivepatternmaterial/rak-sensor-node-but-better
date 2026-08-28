@@ -78,6 +78,33 @@ else
   ok "no IPv4 literals in tracked files"
 fi
 
+# --------------------------------------------------------------- evidence SHAs
+# docs/EVIDENCE.md: a result without a host and a commit SHA is not evidence. These SHAs are
+# the ones that cannot be regenerated -- three were read back from a board's own boot banner,
+# and that board is in the field. Anything that rewrites history (a filter-repo purge, a
+# rebase of an old commit) renames them and silently breaks every claim that cites them.
+# ADR-0009 chose not to rewrite history for exactly this reason; this gate is the tripwire
+# that makes a reversal announce itself instead of being found later by a confused reader.
+step "evidence SHAs"
+SHA_MISSING=""
+for entry in \
+  "1c2df3c:banner-asserted 2026-08-14, v0.4.3, the field-bound image" \
+  "d568574:banner-asserted 2026-08-13, first board to name its own commit" \
+  "65f8615:banner-asserted 2026-08-13" \
+  "572bcfa:the 19.03 h soak run" \
+  "4510763:Stage 4, both sensors in one field-image cycle"
+do
+  s="${entry%%:*}"
+  git cat-file -e "${s}^{commit}" 2>/dev/null || SHA_MISSING="$SHA_MISSING
+  $s -- ${entry#*:}"
+done
+if [[ -n "$SHA_MISSING" ]]; then
+  echo "$SHA_MISSING"
+  bad "irreplaceable evidence commit(s) no longer resolve -- history was rewritten; see ADR-0009 before proceeding"
+else
+  ok "all irreplaceable evidence SHAs resolve"
+fi
+
 # --------------------------------------------------------------- decoder parity
 # Every build verifies the TTN formatter is current and calls out drift.
 step "TTN formatter parity"
