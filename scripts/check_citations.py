@@ -75,11 +75,25 @@ def git(*args: str) -> str:
 
 
 def tracked_files() -> list[Path]:
-    return [
-        REPO_ROOT / p
-        for p in git("ls-files").splitlines()
-        if p and (REPO_ROOT / p).is_file()
-    ]
+    """Tracked files, plus files that are new but not ignored.
+
+    The second half is not a nicety. `git ls-files` alone lists only tracked paths, so a
+    brand-new file's citations were invisible to this gate until *after* it was committed --
+    which is exactly the moment they stop being cheap to fix. On 2026-08-28 that let
+    `scripts/register_device.sh` pass a local preflight with an unsourced CITE marker in it,
+    because `git add` ran after the check in the same command; the same tree then turned CI red
+    twice in a row on a fault the gate was built to catch and had already been shown the file
+    for.
+
+    `--others --exclude-standard` is the addition: untracked but not gitignored. Ignored files
+    stay out, so build output and `src/secrets.h` are not scanned.
+    """
+    seen: dict[str, Path] = {}
+    for listing in (git("ls-files"), git("ls-files", "--others", "--exclude-standard")):
+        for rel in listing.splitlines():
+            if rel and rel not in seen and (REPO_ROOT / rel).is_file():
+                seen[rel] = REPO_ROOT / rel
+    return list(seen.values())
 
 
 def load_registry() -> set[str]:
@@ -172,7 +186,7 @@ def main() -> int:
                         f"{rel}:{n}: [{key}] is not defined in docs/CITATIONS.md"
                     )
 
-    print(f"{DIM}   found {cite_count} CITE marker(s) in tracked files{RESET}")
+    print(f"{DIM}   found {cite_count} CITE marker(s) in tracked and new files{RESET}")
 
     # --- 3: every registry entry must be verified.
     # An unverified source does not get committed -- it gets verified or left out.
