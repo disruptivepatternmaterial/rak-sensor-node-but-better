@@ -1,6 +1,7 @@
 #include "config.h"
 
 #include "build_features.h"
+#include "storage.h"
 
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
@@ -178,45 +179,15 @@ bool Config::save()
     // the fail-open hole #38 closed, reopened by a failed write. It also carries the interval, so
     // a downlink-set 900 s would silently revert to the compiled default.
     //
-    // The leading remove was there for a reason and is preserved on the temp file instead:
-    // FILE_O_WRITE is LFS_O_RDWR | LFS_O_CREAT with no truncation and the library seeks to the
-    // end on open, so an open-and-write appends. truncate(0) + seek(0) covers a temp left behind
-    // by an interrupted write -- which would otherwise be appended to, and since write() would
-    // still report sizeof(s) bytes the length check below would pass while read() later got the
-    // stale leading copy.
-    //
     // Cost is one extra littlefs block while the write is in flight; Stored is a few dozen bytes
     // against a 28 KB partition shared only with /session.bin.
     //
-    // CITE(prior-art): [CIT-ADA-LITTLEFS] Adafruit_LittleFS_File.cpp:56-57,77 -- FILE_O_WRITE is
-    //   LFS_O_RDWR|LFS_O_CREAT then a seek to LFS_SEEK_END, so writing to an open file appends
     // CITE(prior-art): [CIT-LITTLEFS-DESIGN] remove and rename are atomic even on power loss, so
     //   kPath is always either the previous config or the new one
     // CITE(spec): docs/FIRMWARE_SPEC.md §7 H5 -- "Interval + keys path survives power loss"; a
     //   failed write that erases the interval does not survive it
-    File f(InternalFS);
-    if (!f.open(kTmpPath, FILE_O_WRITE)) {
-        LOGLN(F("   config  : write failed"));
-        return false;
-    }
-
-    if (!f.truncate(0) || !f.seek(0)) {
-        f.close();
-        InternalFS.remove(kTmpPath);
-        LOGLN(F("   config  : write failed — could not clear the staging file"));
-        return false;
-    }
-
-    const size_t written = f.write((const uint8_t *)&s, sizeof(s));
-    f.close();
-    if (written != sizeof(s)) {
-        InternalFS.remove(kTmpPath);
-        return false;
-    }
-
-    if (!InternalFS.rename(kTmpPath, kPath)) {
-        InternalFS.remove(kTmpPath);
-        LOGLN(F("   config  : write failed — staged record could not be moved into place"));
+    if (!storage::atomic_write(kPath, kTmpPath, &s, sizeof(s))) {
+        LOGLN(F("   config  : write failed — old record preserved"));
         return false;
     }
 

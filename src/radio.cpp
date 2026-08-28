@@ -243,6 +243,9 @@ bool Radio::ensure_joined()
     if (m_joined) {
         return true;
     }
+    if (!session::prepare_fresh_join()) {
+        return false;
+    }
 
     s_joined      = false;
     s_join_failed = false;
@@ -365,16 +368,32 @@ bool Radio::send(const Payload &p)
         // Several in a row is different: that pattern does suggest the network has
         // forgotten the session, and a rejoin is the only way out.
         if (m_failures >= kFailuresBeforeRejoin) {
-            LOGF("   radio   : %lu failures in a row — dropping the session and rejoining\n",
+            LOGF("   radio   : %lu failures in a row — attempting to drop the session\n",
                  (unsigned long)m_failures);
-            m_joined = false;
-            session::forget();
+            if (session::forget()) {
+                m_joined = false;
+                LOGLN(F("   radio   : stored session is gone — rejoining"));
+            } else {
+                // Do not join a fresh network session while a stale one is still the session
+                // restore() will load after the next reset. If the new session save then fails,
+                // this run appears healthy but the reset silently returns to credentials TTN
+                // invalidated when it accepted the rejoin. Unconfirmed uplinks on that stale
+                // session report local success, so the failure counter never gets another
+                // chance to escape.
+                //
+                // Keep the current session, reset its negotiated MAC parameters below, and give
+                // it three fresh attempts. A later successful removal permits the rejoin; a
+                // failed removal no longer creates two contradictory sessions.
+                m_failures = 0;
+                LOGLN(F("   radio   : stored session could not be removed — retaining it "
+                        "instead of creating an unpersistable replacement"));
+            }
 
-            // Reset the MAC's negotiated parameters as well as dropping the session. Dropping
-            // the session alone leaves those parameters in whatever state produced three
-            // failures in a row, and RAK's own framework ships this call specifically because
-            // rejoining on top of that was not enough: re_init_lorawan() is titled "Workaround
-            // for bug after NAK" and its whole body is lmh_reset_mac().
+            // Reset the MAC's negotiated parameters whether or not the stored session could be
+            // dropped. Leaving those parameters in whatever state produced three failures does
+            // not help either path, and RAK's own framework ships this call specifically
+            // because rejoining on top of that state was not enough: re_init_lorawan() is
+            // titled "Workaround for bug after NAK" and its whole body is lmh_reset_mac().
             //
             // What it actually does, because the name promises more than it delivers (#70):
             // `lmh_reset_mac()` is a one-line wrapper whose entire body is

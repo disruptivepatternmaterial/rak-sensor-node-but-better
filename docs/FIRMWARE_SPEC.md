@@ -287,23 +287,33 @@ mechanism. Every real fix has been specific to its hold.
 | Brownout hold, no evidence (`kInvalidReadsBeforeInhibit` = 4 unreadable cycles) | Uplinks, flash writes | Any valid reading | **No**, once bounded — but it *would* be terminal unbounded, since the pack may be full and the link simply broken | `kNoEvidenceKeepaliveCycles` = 24 cycles, then one uplink regardless (#45) |
 | Brownout hold, inside the hysteresis band (valid reading between inhibit and resume) | Uplinks, flash writes | A reading `≥ kTxResumeCentivolts` | **No**, once bounded. Reads as well-evidenced while being just as inescapable — a solar pack hovering in-band through short winter days parked the node permanently | Same keepalive. The clock measures total held cycles and is not reset by intervening measured-low cycles; transmission remains suppressed until the current reading is in-band |
 | Flash-write withholding under H3 | Config and session writes | The brownout hold lifting | **No.** Clearing a persisted hold is itself a write, but `Config` does not consult the gate, and a failed clear self-heals on the next valid reading | One documented exception: the counter checkpoint behind an armed keepalive |
-| **Frame-counter ceiling refusal** | Every uplink | A successful `write_session()` advancing the stored ceiling | **Yes — this was the terminal one.** The only exit was the write that was failing. Needs no brownout and no dead pack: a healthy node with a worn page reaches it ~32 uplinks after its last save, about 8 h at 900 s | Three failures, then `session::forget()`; if the removal also fails, transmit anyway — see below |
+| **Frame-counter ceiling refusal** | Every uplink | A successful checkpoint, proven removal, or safe filesystem rebuild | **Yes — this was the terminal one.** The original exit was the write that was failing. Needs no brownout and no dead pack: a healthy node with a failed persistence layer reaches it ~32 uplinks after its last save, about 8 h at 900 s | Three failures, then remove the stored session. If removal returns an I/O error while the pack is safe, format, rewrite Config, and re-anchor the live session; a failed format retries after 96 eligible calls, not every wake. During a brownout hold, never format: sparse keepalives retry the small operation and the first healthy cycle repairs |
 | Join backoff | Nothing; lengthens sleep only | A successful join | **No.** Checked because #66 flagged it as the likeliest offender: it does not gate the keepalive, and `note_keepalive_sent()` fires only after an uplink reaches the air, so a failed join cannot consume one | `kBackoffMaxSeconds` = 3600, the default reporting interval |
 | Quiet-cycle uplink suppression | Uplinks with no sensor data | Any sensor field, or the heartbeat | **No** | `heartbeat_due()` — first quiet cycle, then every `kQuietCyclesPerHeartbeat` |
 | Battery fallback-ladder suppression | The expensive re-latch ladder, not the read | The brownout hold lifting | **No.** `read()` issues its direct query *before* consulting the gate, so the read that detects recovery always happens | Inherits the hold's bound |
 
-**Why the ceiling refusal ends in transmitting rather than staying silent.** The two bad
-outcomes are not symmetric. Staying mute is terminal: nothing in the field repairs a worn
-flash page, and an uncommandable node cannot be told anything. Transmitting past the ceiling
-costs nothing until a reset happens, and after one the restored counter is behind what the
-network has already accepted, so frames are discarded until the counter climbs back past the
-highest value sent — bounded, then it heals unaided. A temporary outage beats a permanent one.
+**Why the ceiling refusal repairs storage rather than transmitting indefinitely.** Staying
+mute is terminal, but transmitting forever past a stale ceiling is not a bounded escape either.
+TTN ignores lower counters after a reset until `FCntUp` exceeds the highest value it previously
+accepted ([CITE(policy): TTN frame-counter security — `CIT-TTN-SECURITY`](CITATIONS.md)), so
+six months of post-ceiling transmissions can create six months of locally successful,
+network-discarded uplinks after one watchdog reset. On safe voltage, repeated checkpoint
+failure plus a removal I/O error therefore triggers one whole-filesystem format, followed by
+rewriting the in-RAM Config and re-anchoring the live session. If the session rewrite still
+fails, the stale file is nevertheless gone and the next reset joins fresh.
+
+During a brownout hold, the format is deliberately deferred: the one authorized checkpoint is
+a small bounded write, while erasing the whole filesystem on unknown voltage is not. Each sparse
+keepalive retries the small write/removal; the first cycle where the gate opens performs the
+repair. If raw flash cannot even format, software has no persistence operation left to make a
+reset replay-safe, so the firmware logs the physical failure and does not thrash the erase path
+on every wake.
 
 `session::forget()` returns whether the file is actually gone, and that return is load-bearing:
 removal is itself a write, so on the broken filesystem that makes the escape necessary it is
-the operation most likely to fail. Clearing the in-RAM state anyway would let the node run past
-a ceiling a reset still resumes from — the silent replay the ceiling exists to prevent,
-reintroduced by the code escaping it.
+the operation most likely to fail. It uses the raw `lfs_remove` status: the Adafruit `remove()`
+and `exists()` wrappers both collapse “absent” and I/O error to the same `false`, which can
+otherwise clear the in-RAM ceiling while a stale file survives.
 
 **Adding or widening a hold requires a row here** and an answer to the dependency column. See
 [`.cursor/rules/30-change-workflow.mdc`](../.cursor/rules/30-change-workflow.mdc).

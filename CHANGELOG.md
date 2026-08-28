@@ -63,6 +63,27 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **Transmitting indefinitely past an unremovable frame-counter ceiling made the next reset
+  outage grow without bound.** TTN ignores lower counters until `FCntUp` exceeds the highest
+  value previously accepted, so six months of post-ceiling uplinks could produce six months of
+  locally successful but network-discarded frames after one watchdog reset. Repeated checkpoint
+  failure plus a removal I/O error now triggers a safe-voltage filesystem format, rewrites the
+  in-RAM Config, and re-anchors the live session. A failed format retries behind a 96-call
+  cooldown rather than becoming a permanent hold or thrashing every wake. A brownout keepalive
+  never formats the whole filesystem: it retries only the small operation until a healthy cycle
+  can repair it.
+  ([#90](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/90))
+- **The filesystem wrappers hid the errors replay protection depends on.** `exists()` returns
+  false for both “absent” and I/O error, so `forget()` could clear its RAM ceiling while a stale
+  file survived. `File::flush()` and `File::close()` return void and discard commit errors, so
+  the atomic writer could rename an uncommitted staging file over a valid record. Config and
+  session now share one raw-LittleFS primitive that checks open, write, sync, close, and rename;
+  removal accepts only `OK` or `NOENT`. A failed attempt preserves the live record.
+- **Three local radio-send failures could create a fresh session while an old session remained
+  on flash.** If saving the rejoin then failed, the next reset restored credentials TTN had
+  invalidated, and unconfirmed sends looked locally successful forever. Rejoin now proceeds
+  only after the stored session is proven gone; otherwise the MAC parameters are reset while
+  retaining the one session the next boot will also restore.
 - **The registration verifier could approve credentials the firmware did not use.** Its source
   parser matched a commented-out `OTAA_DEVEUI` before the active definition, `create` hardcoded
   an all-zero JoinEUI instead of reading `OTAA_APPEUI`, `verify` checked only DevEUI, and

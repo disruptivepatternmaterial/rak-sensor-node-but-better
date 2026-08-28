@@ -49,10 +49,22 @@ using FlashWriteGateFn = bool (*)();
 // allowed — an un-wired gate must not silently disable session persistence.
 void set_flash_write_gate(FlashWriteGateFn gate);
 
+// Rewrites non-session state after the session module has had to format a corrupt filesystem.
+// Config owns that state and remains authoritative in RAM; injecting the callback keeps this
+// module from depending on Config while ensuring an emergency repair does not silently throw
+// away the interval or brownout state.
+using FilesystemRebuildFn = bool (*)();
+void set_filesystem_rebuild(FilesystemRebuildFn rebuild);
+
 // Pushes a stored session into the MAC and marks it joined. Returns false when there is
 // nothing stored, when it is unreadable, or when it belongs to different firmware — in
 // every case the caller should just join normally.
 bool restore();
+
+// Makes a fresh OTAA join safe after restore() rejected a stored session. Usually true
+// immediately; false only while a stale file could not be removed and the brownout gate makes a
+// whole-filesystem repair unsafe. Call before lmh_join(), and retry on later cycles.
+bool prepare_fresh_join();
 
 // Reads the live session out of the MAC and stores it. Call right after a successful join.
 bool save();
@@ -117,16 +129,15 @@ void permit_counter_checkpoint();
 // clearly stopped honoring the session, and as the escape from a stored ceiling that can no
 // longer be advanced (see counter_headroom_ok()).
 //
-// Returns whether the stored file is actually gone — established with exists(), not with the
-// return of remove(). This return is load-bearing and used to be absent: removing the file is
-// itself a filesystem write, so on the broken filesystem that makes this function necessary it
-// is exactly the operation most likely to fail. Clearing the in-RAM state anyway would leave a
-// stale file that a reset resumes from at a counter this node has already transmitted — the
-// silent replay the ceiling exists to prevent, reintroduced by the code meant to escape it.
+// Returns whether the stored file is actually gone, established from the raw lfs_remove status.
+// This return is load-bearing: removing the file is itself a filesystem write, so on the broken
+// filesystem that makes this function necessary it is exactly the operation most likely to
+// fail. Clearing the in-RAM state anyway would leave a stale file that a reset resumes from at a
+// counter this node has already transmitted.
 //
-// Do not "simplify" this back to `return InternalFS.remove(kPath)`. That reports false for a
-// file that was never there as well as for one that could not be removed, which are opposite
-// answers to the question being asked.
+// Neither wrapper is enough: InternalFS.remove() returns false for both "already absent" and
+// I/O error, while InternalFS.exists() returns false for every lfs_stat error and therefore
+// mistakes "cannot read flash" for "absent." Only LFS_ERR_OK and LFS_ERR_NOENT prove the promise.
 //
 // CITE(prior-art): [CIT-ADA-LITTLEFS] Adafruit_LittleFS.cpp:189-198 — remove() is
 //   `LFS_ERR_OK == err`, and lfs_remove returns LFS_ERR_NOENT for a missing path, so false
