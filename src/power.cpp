@@ -301,7 +301,7 @@ void Brownout::set_engaged(bool engaged, bool persist)
 
 void Brownout::note_keepalive_sent()
 {
-    m_silent_cycles = 0;
+    m_keepalive.note_sent();
 }
 
 void Brownout::update(bool voltage_valid, uint16_t centivolts)
@@ -325,8 +325,7 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
                 }
                 if (m_invalid_reads >= kInvalidReadsBeforeInhibit) {
                     m_without_evidence = true;
-                    m_keepalive_armed  = true;
-                    m_silent_cycles    = 0;
+                    m_keepalive.start(true);
                     LOGF("   power   : hold no longer backed by a reading after %u silent "
                          "cycles — keepalive in %u cycles\n",
                          (unsigned)kInvalidReadsBeforeInhibit,
@@ -335,9 +334,7 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
                 return;
             }
 
-            if (m_silent_cycles < kNoEvidenceKeepaliveCycles) {
-                ++m_silent_cycles;
-            }
+            m_keepalive.advance(true);
             return; // already holding; no news is certainly not good news
         }
 
@@ -355,8 +352,7 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
             // Bounded and self-correcting, which the old fail-open behavior was not.
             set_engaged(true, false);
             m_without_evidence = true;
-            m_keepalive_armed  = true;
-            m_silent_cycles    = 0;
+            m_keepalive.start(true);
             LOGF("   power   : pack silent for %u cycles — holding transmissions, no "
                  "voltage evidence (keepalive in %u cycles)\n",
                  (unsigned)kInvalidReadsBeforeInhibit,
@@ -370,53 +366,22 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
     // Any valid reading ends the no-evidence condition, whatever it says.
     m_without_evidence = false;
 
-    // Whether the keepalive clock runs now depends on *which* valid reading arrived, and the
-    // three cases genuinely want different answers.
-    //
-    // The reading at or below the inhibit threshold is the #38 case and keeps its behavior: no
-    // keepalive at all. The pack has said spending energy is the wrong move, and it is the one
-    // condition where staying quiet indefinitely is correct.
-    //
-    // The reading *between* the thresholds is the case this branch exists for, and resetting
-    // the clock on it was a hike waiting to happen. A pack answering every cycle from inside
-    // the hysteresis band is not below cutoff — it is simply not recovered — and the only exit
-    // from the hold is a reading at or above kTxResumeCentivolts, which nothing the node does
-    // can cause. Because the hold is persisted and survives every reset, a solar pack hovering
-    // in that band through short winter days parked the node permanently: mute, and being
-    // Class A, uncommandable, with no route left to tell it otherwise. Recoverable only by
-    // walking out there, which AGENTS.md rules out — "never let the pack reach a state it
-    // cannot recover from by itself." So the silence here is bounded exactly as the
-    // no-evidence silence is bounded.
-    //
-    // CITE(policy): docs/POWER_BUDGET.md — the pack must never reach a state it cannot recover
-    //   from unaided, which is the rule that decides this direction.
-    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — the brownout hold protects the pack; it is not
-    //   licensed to end the deployment.
-    // CITE(policy): [CIT-TTN-FUP] — 30 s of uplink airtime per node per 24 h. One keepalive a
-    //   day sits far inside the allowance, which is what makes bounding this affordable.
-    if (!m_engaged || centivolts <= kTxInhibitCentivolts) {
-        m_keepalive_armed = false;
-        m_silent_cycles   = 0;
-    } else if (!m_keepalive_armed) {
-        m_keepalive_armed = true;
-        m_silent_cycles   = 0;
-        LOGF("   power   : %u.%02u V — holding, above the %u.%02u V floor but below the "
-             "%u.%02u V resume point, so a keepalive is armed (in %u cycles)\n",
-             centivolts / 100, centivolts % 100, kTxInhibitCentivolts / 100,
-             kTxInhibitCentivolts % 100, kTxResumeCentivolts / 100, kTxResumeCentivolts % 100,
-             (unsigned)kNoEvidenceKeepaliveCycles);
-    } else if (m_silent_cycles < kNoEvidenceKeepaliveCycles) {
-        ++m_silent_cycles;
-    }
-
     if (!m_engaged && centivolts <= kTxInhibitCentivolts) {
         // Persisted, and this is the write the whole scheme is built around. It happens on
         // the transition into brownout, which by definition happens while the pack is still
         // answering and still above the threshold below which a write is unsafe — so it
         // costs exactly one write per brownout event, at the one moment it is affordable.
         set_engaged(true, true);
+        m_keepalive.start(false);
         LOGF("   power   : %u.%02u V — holding transmissions to protect the pack\n",
              centivolts / 100, centivolts % 100);
+        return;
+    }
+
+    if (!m_engaged) {
+        // A valid reading above the inhibit floor while no hold is active is the healthy path.
+        // There is no silence to remember and no keepalive to arm.
+        m_keepalive.clear();
         return;
     }
 
@@ -425,10 +390,45 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
         // silence a recovered node across its next reset, turning a protective measure into
         // the outage it exists to prevent.
         set_engaged(false, true);
-        m_keepalive_armed = false;
-        m_silent_cycles   = 0;
+        m_keepalive.clear();
         LOGF("   power   : %u.%02u V — recovered, resuming\n", centivolts / 100,
              centivolts % 100);
+        return;
+    }
+
+    // The hold remains engaged. The keepalive clock measures its total duration since the last
+    // keepalive, not a consecutive run in one voltage class. That distinction is load-bearing:
+    // the previous code reset this clock on every reading at or below the inhibit floor. A
+    // solar pack alternating 9.5 V / 9.7 V therefore disarmed at 9.5 V, re-armed at 9.7 V with
+    // the clock back at zero, and repeated forever. The keepalive could never become due, so
+    // the Class A node was permanently mute and uncommandable through exactly the threshold
+    // oscillation hysteresis is supposed to survive.
+    //
+    // Low evidence still wins for the *current* cycle: at or below the floor, armed is false
+    // and keepalive_due() cannot authorize a transmission. What low evidence may not do is
+    // erase elapsed hold time. Once a later reading is inside the hysteresis band, the node may
+    // use that accumulated time and transmit immediately if the bound has expired. Thus the
+    // pack is never charged a keepalive on a measured-low cycle, while no pattern of crossings
+    // can postpone the next reachable cycle forever.
+    //
+    // CITE(policy): docs/POWER_BUDGET.md — the pack must never reach a state it cannot recover
+    //   from unaided; erasing the reachability clock on every threshold crossing violates it.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — the brownout hold protects the pack; it is not
+    //   licensed to end the deployment.
+    // CITE(policy): [CIT-TTN-FUP] — one bounded keepalive sits far inside the airtime allowance.
+    const bool was_armed = m_keepalive.armed();
+    m_keepalive.advance(centivolts > kTxInhibitCentivolts);
+    if (!m_keepalive.armed()) {
+        return;
+    }
+
+    if (!was_armed) {
+        const uint16_t remaining = kNoEvidenceKeepaliveCycles - m_keepalive.held_cycles();
+        LOGF("   power   : %u.%02u V — holding, above the %u.%02u V floor but below the "
+             "%u.%02u V resume point, so a keepalive is armed (in %u cycles)\n",
+             centivolts / 100, centivolts % 100, kTxInhibitCentivolts / 100,
+             kTxInhibitCentivolts % 100, kTxResumeCentivolts / 100, kTxResumeCentivolts % 100,
+             (unsigned)remaining);
     }
 }
 

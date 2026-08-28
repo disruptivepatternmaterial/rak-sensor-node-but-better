@@ -63,6 +63,14 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **A pack oscillating across the 9.60 V inhibit floor could suppress the keepalive forever.**
+  Every measured-low cycle disarmed the keepalive and reset its clock; the next in-band cycle
+  re-armed it at zero. A 9.5 V / 9.7 V pattern therefore never reached the 24-cycle bound, so
+  the Class A node stayed mute and uncommandable for the entire low-voltage period. Low cycles
+  now suppress only the current transmission while preserving elapsed hold time; the first
+  later in-band cycle sends if the bound has expired. No keepalive is ever sent on a cycle
+  measured at or below the floor. Found by the unattended-year adversarial review.
+  ([#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45))
 - **The frame-counter ceiling was the one hold in this firmware with no exit at all, and it
   could mute a perfectly healthy node in about 8 hours.** `session::counter_headroom_ok()`
   refuses an uplink when the live counter reaches the stored ceiling and the write that would
