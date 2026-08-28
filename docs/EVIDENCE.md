@@ -79,9 +79,9 @@ implementing lines for each gate.
 | H2 | Deep sleep between cycles; radio sleeps | 🟡 radio + SPI + USB-detach sleep are real; the "deep" half is a `delay()` loop, not the chip's deepest state, and the code says so | Measured sleep current on battery — **and it must be a meter.** Pack telemetry cannot answer it: 10 mA LSB against a ~1 mA question (2026-08-12, `4510763`) | ⬜ none |
 | H3 | Brownout: no flash thrash, no TX when low | ✅ thresholds, TX gate and flash gate all wired; the ungated session writer found by the audit was closed in `378384e` | Sag the supply → observed skip | ⬜ none |
 | H4 | Bounded backoff; survives multi-day no-gateway | ✅ doubling, clamped | Gateway off ≥48 h → observed backoff | ⬜ none |
-| H5 | Interval + keys survive power loss | ✅ interval and session over `InternalFS`; keys are compiled into the image, so "keys survive" is true trivially rather than by storage | Set interval, cut power, confirm retained | 🟡 partial — session (DevAddr) restore observed 2026-07-31; interval-survives-power-loss not yet isolated |
-| H6 | RK900 absent → no livelock | ✅ bounded 1000 ms reply timeout; caller tolerates failure without retrying forever | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31; needs re-confirmation with sensor connected then removed |
-| H7 | BMS silent → no livelock | ✅ bounded first-byte and inter-byte timeouts, bounded provisioning window. Bounded but **long** — `acquire_pid()` measured at 45.4 s of a 50.5 s wake, inside the 120 s WDT window with less margin than it sounds | Unplug BMS data → cycle continues | ⬜ none |
+| H5 | Interval + keys survive power loss | ✅ interval and session over `InternalFS`; keys are compiled into the image, so "keys survive" is true trivially rather than by storage | Set interval, cut power, confirm retained | 🟡 partial — session restore observed 2026-07-31 and re-confirmed on node 002 at `9e2fcb4` on 2026-08-28, including TTN acceptance after reset; interval-survives-power-loss not yet isolated |
+| H6 | RK900 absent → no livelock | ✅ bounded 1000 ms reply timeout; caller tolerates failure without retrying forever | Unplug sensor → cycle continues | 🟡 partial — silent-sensor bounded timeout observed 2026-07-31 and re-confirmed on sensor-absent node 002 at `9e2fcb4` (three attempts, then cycle continued to uplink and sleep); still needs connected-then-removed fault injection |
+| H7 | BMS silent → no livelock | ✅ bounded first-byte and inter-byte timeouts, bounded provisioning window. Bounded but **long** — `acquire_pid()` measured at 45.4 s of a 50.5 s wake, inside the 120 s WDT window with less margin than it sounds | Unplug BMS data → cycle continues | 🟡 partial — sensor-absent node 002 at `9e2fcb4` completed the no-latch/no-reply path, sent proof of life, and slept; still needs connected-then-removed fault injection |
 | H8 | Bench soak ≥24 h, field shadow ≥7 d | n/a — a process gate; no code implements it and none can | Soak log + TTN ingest history | 🟨 **started but not met, on both halves.** Bench: the longest run is **19.03 h on `572bcfa`, 76 uplinks, 0 anomalies**, 2026-08-13/14, **stopped deliberately** short of 24 h to ship the `#75` battery fix. The run on the shipping image `1c2df3c` had a **deliberate RESET inside its window** at 17:50Z (`resets=1`), so it is not an uninterrupted 24 h either. 19.03 h < 24 h, and a partial run on one image cannot be topped up by another. Shadow: the field deployment on **2026-08-14** is **day zero of seven — a beginning, not an achievement**. The earlier 2026-08-12 attempt at `f626698` never attached and logged 140 bytes in 180 s. **H8 stays open** |
 
 The [`FIRMWARE_SPEC.md`](FIRMWARE_SPEC.md) §9 first-light list is now **closed**, and closing
@@ -107,6 +107,96 @@ Newest first, by the date the entry was committed (`git log --format='%ad' -- do
 not by the date embedded in its heading — two 2026-08-03 entries and two 2026-07-31 entries each
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
+
+### 2026-08-28 — Node 002 runs v0.4.4 without sensors: bounded failures, session checkpoint/restore, TTN delivery, sleep
+
+**Host:** Heliotrope Ridge. **Commit:** `9e2fcb4a14a6db21165ee2ce23502c544673d99d`
+(`v0.4.4`), asserted by the build/DFU inputs and immediate pinned-port capture, **not read
+back from the boot banner**. `capture.py` attached just after the banner and correctly reported
+`banner_commit=NOT OBSERVED`; this entry therefore does not claim a board-asserted SHA.
+**Physical state:** `puma-concolor-002` RAK4631 and LoRaWAN antenna only; no RK900, RAK9154,
+or completed field wiring.
+
+**What was measured:** the full `rak4631` image compiles with node 002's ignored credentials,
+the credentials match both TTN EUIs without reversal, DFU leaves the RAK application PID
+running, absent sensors do not livelock the wake path, a session checkpoint survives an
+identical reflash/reset, the post-reset proof-of-life uplink reaches TTN, and the node reaches
+sleep.
+
+#### Build and flash
+
+```
+=== BUILD OK ===
+host:   Heliotrope Ridge
+commit: 9e2fcb4a14a6db21165ee2ce23502c544673d99d
+36 test cases: 36 succeeded
+rak4631 SUCCESS
+
+Device programmed.
+USB 239A:8029 -- application running
+=== FLASH OK ===
+host:   Heliotrope Ridge
+commit: 9e2fcb4a14a6db21165ee2ce23502c544673d99d
+```
+
+Before the flash, the offline checker compared the build host's ignored `src/secrets.h`
+against the DevEUI and JoinEUI read from TTN for `puma-concolor-002` and returned
+`IDENTITY_OK`. No AppKey was printed or copied.
+
+#### First sensor-absent cycle
+
+```
+config  : interval 3600 s, boot #1
+session : restored 0x260CE002, counter 96
+[cycle 1]
+   modbus attempt 1/3 failed (timeout)
+   modbus attempt 2/3 failed (timeout)
+   modbus attempt 3/3 failed (timeout)
+RK900   : no data (timeout)
+battery : silent at its id 1 of 3 consecutive cycles — no BOOT yet
+battery : no confirmed latch — proceeding unprovisioned
+battery : no data (no reply, 0 bytes)
+uplink  : proof of life — no sensor data for 1 cycle(s)
+session : saved 0x260CE002, resume at 128
+radio   : sent 0 bytes on port 2
+sleep   : 3600 s
+```
+
+TTN remained at `last_f_cnt_up=96` after this cycle. That first frame reused the counter held
+by the pre-v0.4.4 session state and was not delivered; the new image nevertheless wrote the
+future ceiling 128 before transmitting.
+
+#### Reset/restore cycle and network result
+
+An identical DFU reset the board. The next pinned capture observed:
+
+```
+config  : interval 3600 s, boot #1
+session : restored 0x260CE002, counter 128
+[cycle 1]
+   modbus attempt 1/3 failed (timeout)
+   modbus attempt 2/3 failed (timeout)
+   modbus attempt 3/3 failed (timeout)
+RK900   : no data (timeout)
+battery : silent at its id 1 of 3 consecutive cycles — no BOOT yet
+battery : no confirmed latch — proceeding unprovisioned
+battery : no data (no reply, 0 bytes)
+uplink  : proof of life — no sensor data for 1 cycle(s)
+session : saved 0x260CE002, resume at 160
+radio   : sent 0 bytes on port 2
+sleep   : 3600 s
+```
+
+TTN then reported `last_f_cnt_up=128`, proving that the restored reserve produced a
+network-accepted post-reset uplink.
+
+**Verdict: PASS for the software-only node 002 baseline.** This strengthens H5/H6/H7 evidence:
+session checkpoint/restore and TTN acceptance occurred across reset; both absent sensor paths
+were bounded; sleep was reached twice. It does **not** exercise measured-low brownout,
+intermittent one-wire validity, failed LittleFS operations, connected sensors, sleep current,
+the 24 h bench soak, or the 7 d field shadow. Those remain open under
+[#55](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/55),
+[#90](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/90), and H8.
 
 ### 2026-08-27 — Second node exists: `puma-concolor-002` registered, flashed, and OTAA-joined. Board-side behavior NOT observed
 
