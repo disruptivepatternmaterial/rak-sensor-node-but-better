@@ -8,6 +8,59 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Security
+
+- **The build host's public IP was in tracked files and is now out, with a gate to keep it
+  out.** `README.md` carried it, and two `docs/EVIDENCE.md` entries carried a second public
+  address on the same subnet, one with the account name attached. The repository is public.
+  `scripts/preflight.sh` now fails on any IPv4 literal in a tracked file — the rule had been
+  written down in four places and enforced in none, and the new gate found the two
+  `EVIDENCE.md` leaks on its first execution. **History is deliberately not rewritten**: a
+  purge of just the public addresses would rewrite 85 of 252 commits and invalidate 34 commit
+  SHAs cited in this project's own documentation, including `1c2df3c`, `d568574` and
+  `65f8615` — the only three commits a board has ever asserted from its own boot banner — and
+  `572bcfa`, the 19.03 h soak. Reasoning and the alternative mitigation in
+  [#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85).
+
+### Fixed
+
+- **`scripts/soak.sh` usage text printed four lines of its own source**, including the host
+  fallback assignment, because `sed -n '2,28p'` ran past the header block.
+- **`scripts/soak.sh status` printed the anomaly count twice on every healthy run.**
+  `grep -c` prints `0` *and* exits 1, so the `|| echo 0` fallback fired on top of grep's own
+  output. The anomaly count is what an operator reads to decide a soak is healthy.
+- **The hint printed after `soak.sh start` was unreachable**, because `cmd_status` exits
+  inside `here_or_there` on the relay path.
+- `cmd_fetch` reported nothing when `scp` failed, and interpolated its run name into a remote
+  command unquoted.
+
+### Changed
+
+- **`wx3-harness` is gone.** It was the silent fallback for every remote operation in
+  `remote.sh`, `push.sh`, `soak.sh` and `build.sh`, and the operator does not recognize the
+  name. With no environment variable set — the state of a fresh shell — the scripts were
+  connecting to a host nobody could identify, and the failure was being reported as a dead
+  build host. There is now **no default**: `BUILD_HOST`, then `RAK_BUILD_HOST`, then the first
+  line of the untracked `~/.rak-build-host`, and with none set the scripts fail by name at
+  first remote use. Checked there rather than at parse time, so `soak.sh --local` on the build
+  host still starts. Stale `~/.ssh/config` entry tracked in
+  [#86](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/86).
+- **The "unstable address" doctrine is retired.** The build host is a laptop that is not
+  always on the same network. `10-environments.mdc`, `AGENTS.md` and `docs/ENVIRONMENTS.md`
+  said the address was "not stable", that "two sessions have been burned", and that the host
+  "vanishes without warning", which trained agents to open an investigation instead of asking
+  for an address.
+- **Corrected: this workstation can push to GitHub.** `gh` here is active as
+  `disruptivepatternmaterial`, and `git push --dry-run origin HEAD:refs/heads/main` resolves
+  cleanly. The 403 is real but belongs to the SSH keys, while `origin` uses the HTTPS
+  credential helper. Three files claimed flatly that pushing was impossible and that
+  `scripts/push.sh` was the only option, which made an unreachable build host look like it
+  stranded commits.
+- `docs/ENVIRONMENTS.md` "Known state (2026-07-30)" replaced with pointers to
+  [`docs/STATUS.md`](docs/STATUS.md) and [`docs/EVIDENCE.md`](docs/EVIDENCE.md). It still
+  claimed nothing had run on hardware and no RAK4631 was on the build host USB, long after two
+  nodes had been flashed and joined.
+
 ## [0.4.3] — 2026-08-14
 
 **This release has now run on hardware, and the board named itself.** `1c2df3c` was flashed as

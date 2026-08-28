@@ -56,14 +56,17 @@ scripts/preflight.sh          # all local gates (same as CI)
 scripts/remote.sh check       # build host reachability + toolchain
 scripts/build.sh              # preflight + sync + compile on the build host
 scripts/flash.sh              # build + USB flash on the build host (confirms first)
-scripts/push.sh               # push to GitHub (this machine cannot push directly)
+scripts/push.sh               # push to GitHub relayed via the build host (plain git push also works)
 ```
 
-- **Two GitHub identities, and this machine has the wrong one.** The git CLI, all three
-  SSH keys, and the keychain credential authenticate as the work account, which gets 403
-  on this repo. Use `scripts/push.sh`, which relays through the build host. Do not "fix"
-  the remote URL. Commits from the user that you did not write are **normal** — they push
-  from their IDE, which has a separate GitHub sign-in. Fetch and carry on.
+- **Two GitHub identities, and this machine can push.** Re-verified 2026-08-28: `gh` here is
+  active as `disruptivepatternmaterial` and `git push --dry-run origin HEAD:refs/heads/main`
+  resolves cleanly. The work account `ntableman_sfemu` still owns the **SSH** keys, which is
+  where the old "this machine cannot push" rule came from; `origin` uses the HTTPS credential
+  helper instead. Confirm with `--dry-run`, then push. `scripts/push.sh` remains available as
+  a relay and guards against pushing during a running soak. Do not "fix" the remote URL.
+  Commits from the user that you did not write are **normal** — they push from their IDE,
+  which has a separate GitHub sign-in. Fetch and carry on.
 
 - **This machine cannot compile or flash.** No PlatformIO, no device on USB, `$HOME` is
   read-only. Everything that touches hardware runs on Heliotrope Ridge — and remote commands

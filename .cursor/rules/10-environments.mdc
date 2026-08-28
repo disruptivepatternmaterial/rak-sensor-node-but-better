@@ -94,16 +94,21 @@ user's repository and they push to it directly.
 
 | Where | Authenticates as | Can push to `disruptivepatternmaterial`? |
 |---|---|---|
-| Workstation git CLI + all three SSH keys + keychain credential | `ntableman_sfemu` (work) | **No** — HTTP 403 |
+| Workstation `gh` + HTTPS credential helper | `disruptivepatternmaterial` | **Yes** — re-verified 2026-08-28 |
+| Workstation SSH keys (`ssh -T git@github.com`) | `ntableman_sfemu` (work) | No — HTTP 403 |
 | The user's IDE (its own GitHub sign-in, not shared with the git CLI) | personal | Yes |
 | Heliotrope Ridge build host | `disruptivepatternmaterial` | Yes |
 
-So an agent on the workstation **cannot** `git push origin`. This is a credential fact,
-not a broken remote — do not "fix" it by editing the remote URL or the git config.
+**This rule used to say the workstation could not push at all. That is stale.** The 403 is
+real but belongs to the **SSH** keys; `origin` is an HTTPS remote and uses the credential
+helper, which is signed in as `disruptivepatternmaterial`. Verify before relying on it —
+`git push --dry-run origin HEAD:refs/heads/main` authenticates fully and transfers nothing —
+then push. Do not "fix" anything by editing the remote URL or the git config.
 
-Use `scripts/push.sh`, which relays through the build host: it pushes the branch to a
-non-checked-out ref there, fast-forwards the build host's `main`, and pushes to GitHub
-over SSH as `disruptivepatternmaterial`.
+`scripts/push.sh` still works and is worth using when the credential helper is uncooperative
+or a soak is running: it pushes the branch to a non-checked-out ref on the build host,
+fast-forwards the build host's `main`, and pushes to GitHub over SSH. It is no longer the
+only way, so an unreachable build host does not strand a commit.
 
 Two consequences worth internalizing:
 
