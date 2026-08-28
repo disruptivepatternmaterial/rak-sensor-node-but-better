@@ -111,7 +111,7 @@ bool mib_get(Mib_t type, MibRequestConfirm_t &req)
 // the end on open, so writing to an existing file appends to it. That is handled here on the
 // temporary file, where a mistake costs nothing.
 //
-// CITE(prior-art): Adafruit_LittleFS_File.cpp:56-57,77 -- FILE_O_WRITE is
+// CITE(prior-art): [CIT-ADA-LITTLEFS] Adafruit_LittleFS_File.cpp:56-57,77 -- FILE_O_WRITE is
 //   LFS_O_RDWR|LFS_O_CREAT followed by a seek to LFS_SEEK_END, so an open-and-write appends
 // CITE(prior-art): [CIT-LITTLEFS-DESIGN] littlefs rename is atomic and replaces an existing
 //   destination, so kPath is always either the previous session or the new one

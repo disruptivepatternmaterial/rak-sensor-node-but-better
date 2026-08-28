@@ -128,8 +128,9 @@ void permit_counter_checkpoint();
 // file that was never there as well as for one that could not be removed, which are opposite
 // answers to the question being asked.
 //
-// CITE(prior-art): Adafruit_LittleFS.cpp:189-198 — remove() is `LFS_ERR_OK == err`, and
-//   lfs_remove returns LFS_ERR_NOENT for a missing path, so false does not mean "still there"
+// CITE(prior-art): [CIT-ADA-LITTLEFS] Adafruit_LittleFS.cpp:189-198 — remove() is
+//   `LFS_ERR_OK == err`, and lfs_remove returns LFS_ERR_NOENT for a missing path, so false
+//   does not mean "still there"
 // CITE(prior-art): [CIT-LITTLEFS-DESIGN] "All POSIX operations, such as remove and rename, are
 //   atomic, even in event of power-loss" — so the file is either gone or intact, never
 //   half-removed, which is what makes a boolean answer meaningful at all.

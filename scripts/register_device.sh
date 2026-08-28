@@ -31,8 +31,9 @@
 # CITE(policy): [CIT-TTN-FREQ] US915 uses FSB2; the Identity Server is eu1 while the Network,
 #   Application and Join Servers are nam1 -- getting this split wrong creates a device that
 #   exists but never joins
-# CITE(spec): IEEE EUI-64 -- bit 1 of the first byte marks a locally administered address,
-#   which is what a DevEUI must be without a TTN-assigned block
+# CITE(spec): [CIT-RFC7042] RFC 7042 2.1 -- "the Group bit (01) and the Local bit (02)"; the
+#   Local bit is zero only for globally assigned identifiers, so a self-generated DevEUI sets
+#   0x02 in the first byte, which is what a DevEUI must be without a TTN-assigned block
 #
 # Usage:
 #   scripts/register_device.sh selftest                 prove the reversal check can fail
