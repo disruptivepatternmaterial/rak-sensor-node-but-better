@@ -23,12 +23,23 @@ silently broken later.
 |---|---|
 | Source repo | `disruptivepatternmaterial/forest-weather-machines` (private) |
 | Path | `LoRaWAN/payload/rak-wx-station-default.js` |
-| Pinned commit | `efc0e3cf25b3f9288ff1b9a1a60849b8d425cc32` |
-| SHA-256 | `9c58c2b92193d412958401c9182109495ff748ff502b9d76369dc1f93a85777c` |
-| Copied | 2026-07-30 |
+| Pinned commit | `058bd69acf07552c90da81122eaad2274a85a42a` |
+| SHA-256 | `717afcebeebd0a3d219aad5249bee04c0ddbcfd43059dae2a792bede4e91058b` |
+| Copied | 2026-08-28 |
 
 The same commit and hash are recorded in [`../schema.yaml`](../schema.yaml) under
-`decoder:`. They must stay in agreement.
+`decoder:`. They must stay in agreement — and now something checks, rather than trusting
+the sentence above. `scripts/check_decoder_parity.py` hashes this copy against
+`pinned_sha256` on every run, including runs that read the live formatter and have no
+other reason to open this file.
+
+That check exists because the agreement broke. `6af5964` re-pinned `../schema.yaml` to
+`058bd69` / `717afceb…` after the formatter was restructured upstream, and did not refresh
+this copy. Every machine with the sibling repo cloned kept reporting `PREFLIGHT OK` from
+the live file; CI, which is the only place that falls back to this copy, failed on every
+run for a day. Worse than the red build: the field-by-field gate in CI was comparing the
+schema against the **superseded** decoder and printing `checked 9 fields against 19
+decoder types` while doing it.
 
 ## What a run against this copy does and does not prove
 

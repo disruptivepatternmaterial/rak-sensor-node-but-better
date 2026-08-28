@@ -370,37 +370,70 @@ bool Radio::send(const Payload &p)
             m_joined = false;
             session::forget();
 
-            // Reset the MAC as well as the session. Dropping the session leaves the MAC in
-            // whatever state produced three failures in a row, and RAK's own framework ships
-            // this call specifically because rejoining on top of a wedged MAC was not enough:
-            // re_init_lorawan() is titled "Workaround for bug after NAK" and its whole body is
-            // lmh_reset_mac(). Without it the rejoin can loop against a MAC that cannot
-            // succeed until the watchdog happens to catch it — cheap to avoid, so avoid it.
+            // Reset the MAC's negotiated parameters as well as dropping the session. Dropping
+            // the session alone leaves those parameters in whatever state produced three
+            // failures in a row, and RAK's own framework ships this call specifically because
+            // rejoining on top of that was not enough: re_init_lorawan() is titled "Workaround
+            // for bug after NAK" and its whole body is lmh_reset_mac().
+            //
+            // What it actually does, because the name promises more than it delivers (#70):
+            // `lmh_reset_mac()` is a one-line wrapper whose entire body is
+            // `ResetMacCounters()`. That is a parameter-and-counter reset, NOT a
+            // re-initialisation of the MAC — nothing is torn down or reconstructed. It clears
+            // AdrAckCounter, the ack-retry state and the pending MAC-command buffers, restores
+            // ChannelsDatarate / ChannelsTxPower / the RX2 channel / dwell times / EIRP to
+            // their region defaults, and re-runs RegionInitDefaults(INIT_TYPE_APP_DEFAULTS).
+            //
+            // Two consequences worth naming, both invisible from the call site:
+            //
+            //   - It deliberately does NOT zero the frame counters. UpLinkCounter and
+            //     DownLinkCounter are commented out in ResetMacCounters(); the sibling
+            //     ResetMacParameters() is the one that zeros them. So this call does not
+            //     disturb the counter state that session.cpp is careful about.
+            //   - It DOES force the data rate back to the region default, which is why the
+            //     library preserves ChannelsDatarate around its own call on the confirmed-TX
+            //     timeout path. Here that reset is wanted rather than worked around: three
+            //     consecutive failures are exactly when an ADR-negotiated rate should stop
+            //     being trusted. Relevant to #69, where the node cannot observe its own DR.
             //
             // CITE(prior-art): beegee-tokyo/WisBlock-API-V2 src/lorawan.cpp:210-216 —
             //   `re_init_lorawan()` = `lmh_reset_mac()`, documented as the post-NAK MAC bug
             //   workaround. [CIT-WISBLOCK-API2] — docs/CITATIONS.md
-            // CITE(prior-art): [CIT-SX126X-ARDUINO] — `lmh_reset_mac()` is the library's own
-            //   MAC re-initialisation entry point, so this is its intended use rather than a
-            //   reach into internals.
+            // CITE(prior-art): [CIT-SX126X-ARDUINO] src/mac/LoRaMacHelper.cpp:1215-1218 —
+            //   `lmh_reset_mac()` is `{ ResetMacCounters(); }` and nothing else, so this is a
+            //   supported entry point rather than a reach into internals, but it is a
+            //   parameter reset and not a MAC re-init.
+            // CITE(prior-art): [CIT-SX126X-ARDUINO] src/mac/LoRaMac.cpp:2102-2151 —
+            //   ResetMacCounters(): frame counters left alone (2106-2107), TX parameters
+            //   returned to defaults (2124-2131), RegionInitDefaults(APP_DEFAULTS) (2134).
+            // CITE(prior-art): [CIT-SX126X-ARDUINO] src/mac/LoRaMacHelper.cpp:409-411 — the
+            //   library saves and restores ChannelsDatarate across this call, which is the
+            //   evidence that the DR reset above is real and not inferred.
             // CITE(bench): docs/reviews/2026-08-12_rak_reference_benchmark.md §2 — the gap
             //   analysis that found this call absent from the whole tree.
             lmh_reset_mac();
 
             // Re-select the sub-band. begin() sets it once and returns early ever after, so
             // without this the rejoin escape is the one path that can leave the MAC on a
-            // channel mask nobody chose. Cheap and unconditionally safe: if the reset left the
-            // mask alone this is a no-op, and if it restored the region default of 72 channels
-            // it is the difference between rejoining and grinding against the backoff cap on
-            // frequencies no gateway is tuned to — the failure the comment in begin() warns
-            // about, arriving at the exact moment the node has already given up three times.
+            // channel mask nobody chose.
+            //
+            // This is required, not defensive. The call above ends in
+            // RegionInitDefaults(INIT_TYPE_APP_DEFAULTS), which is precisely what restores the
+            // region's default channel mask — all 72 US915 channels — discarding the sub-band 2
+            // selection begin() made. Without this line the node would come out of its rejoin
+            // escape transmitting on frequencies no TTN gateway is tuned to, grinding against
+            // the backoff cap at the exact moment it has already given up three times. The
+            // comment here used to hedge on whether the mask survived; it does not.
             //
             // CITE(spec): [CIT-LORA-RP002] US915 defines 72 channels; the eight the network
             //   uses are a subset the application must select, not a MAC default.
             // CITE(policy): [CIT-TTN-FREQ] TTN US902-928 uplinks are 903.9-905.3 MHz, i.e.
             //   sub-band 2 — anything outside it reaches no TTN gateway.
+            // CITE(prior-art): [CIT-SX126X-ARDUINO] src/mac/LoRaMac.cpp:2134 —
+            //   ResetMacCounters() calls RegionInitDefaults(INIT_TYPE_APP_DEFAULTS), the
+            //   established mechanism by which the channel mask returns to the region default.
             // CITE(prior-art): [CIT-WISBLOCK-API2] RAK's framework re-applies its channel
-            //   configuration around MAC re-initialisation rather than assuming it survives.
+            //   configuration around this call rather than assuming it survives.
             if (!lmh_setSubBandChannels(kSubBand)) {
                 LOGF("   radio   : could not re-select sub-band %u after MAC reset\n", kSubBand);
             }

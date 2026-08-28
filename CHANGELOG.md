@@ -30,6 +30,47 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **CI had been red on every run for a day, and the decoder-parity gate in CI was checking the
+  wrong decoder.** `6af5964` re-pinned `payload/schema.yaml` to the restructured upstream
+  formatter (`058bd69` / `717afceb…`) but never refreshed the vendored fallback copy in
+  `payload/reference/`, which stayed at the superseded `9c58c2b9…`. Every machine with the
+  private sibling repo cloned read the live file and printed `PREFLIGHT OK`; GitHub Actions
+  cannot reach that repo, so it fell back to the stale copy — and before failing on the hash it
+  had already compared all nine fields against the **wrong** decoder, printing
+  `checked 9 fields against 19 decoder types` while doing it. The copy is refreshed, and
+  `scripts/check_decoder_parity.py` now hashes the vendored copy against `pinned_sha256` on
+  **every** run rather than only when it is the fallback. The checker had asserted in a comment
+  that the copy "matches the pin by construction" and never verified it; on a live run its bytes
+  were never read at all, which is why the drift was invisible everywhere it could have been
+  caught. Regression-tested by restoring the exact stale file: it now fails locally.
+  ([#81](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/81))
+- **The preflight null-policy gate emitted six permanent false positives and could not see a
+  real violation.** It searched for `= 0` on failure-shaped lines, which matched only counter
+  resets (`m_invalid_reads`, `m_failures`) and member initialisers. The null policy is enforced
+  by a *type* — `Maybe<T>` in `src/reading.h`, where `value` is meaningless unless `valid` is
+  true — so `value = 0` is what `Maybe::clear()` does deliberately and was never the risk. The
+  gate now fails on the two things that would actually put a fabricated zero on the wire:
+  `Maybe::set(0)`, which marks a reading valid carrying a zero nobody measured, and any direct
+  write to `.value` / `.valid` outside `reading.h` that reaches around the type's invariant.
+  Both were verified to fire on a planted violation, and comment lines are excluded — the first
+  draft flagged a comment in `src/sensors/battery.cpp` quoting RUI3 source, which would have
+  traded six false positives for one. Six permanent warnings on a gate is how a gate becomes
+  furniture ([rule 20](.cursor/rules/20-citation-discipline.mdc)).
+  ([#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72))
+- **`scripts/soak_ttn.sh` treated a node transmitting far too often as perfectly healthy.**
+  Silence was an anomaly and an unexplainable counter burst was an anomaly, but a clean `+1`
+  step arriving minutes early was logged as an uplink and left `anomalies=0`. That is the FUP
+  failure mode: the airtime budget is spent by *frequency*, and a node whose interval was set
+  to 60 s by a mistaken downlink — a path proven remotely reachable and persistent across a
+  reflash on 2026-08-13 — delivers flawlessly while burning the 30 s/24 h allowance ~15x
+  faster, reading as the healthiest run on record. New `SOAK ANOMALY cadence-fast` fires below
+  half the expected cadence, with a `GAP_VALID` guard so the mid-cycle baseline, the silence
+  re-arm, and the counter-reset branch cannot manufacture anomalies out of gaps that measure
+  nothing. `SOAK_FCNT_CMD` was added so the anomaly branches — the entire value of the harness,
+  and the part #76 showed is easy to get wrong — can be exercised without a board or 24 h;
+  three scenarios were run (too-fast, healthy, silence-then-recovery) and the healthy one
+  reports zero anomalies.
+  ([#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76))
 - **`scripts/soak.sh` usage text printed four lines of its own source**, including the host
   fallback assignment, because `sed -n '2,28p'` ran past the header block.
 - **`scripts/soak.sh status` printed the anomaly count twice on every healthy run.**
@@ -42,6 +83,23 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Changed
 
+- **`lmh_reset_mac()` is documented for what it does, and the sub-band re-selection beside it
+  is no longer a guess.** The comment at `src/radio.cpp` called it the library's "MAC
+  re-initialisation entry point"; its entire body is `ResetMacCounters()`, which re-initialises
+  nothing. Read from the library source: it clears the ADR and ack-retry state and the pending
+  MAC-command buffers, returns the data rate, TX power, RX2 channel, dwell times and EIRP to
+  region defaults, and deliberately leaves the frame counters alone — `UpLinkCounter` and
+  `DownLinkCounter` are commented out, and the sibling `ResetMacParameters()` is the one that
+  zeros them. Two things fall out. It forces the data rate back to default, which is why the
+  library saves and restores `ChannelsDatarate` around its own call; here that reset is wanted,
+  because three consecutive failures are exactly when an ADR-negotiated rate should stop being
+  trusted (relevant to
+  [#69](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/69)).
+  And it ends in `RegionInitDefaults(INIT_TYPE_APP_DEFAULTS)`, which is precisely what restores
+  the 72-channel US915 default — so the adjacent `lmh_setSubBandChannels()` call is *required*,
+  not defensive, and the comment that hedged "if it restored the region default" now states the
+  mechanism. Comment-only; no behavior change.
+  ([#70](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/70))
 - **`wx3-harness` is gone.** It was the silent fallback for every remote operation in
   `remote.sh`, `push.sh`, `soak.sh` and `build.sh`, and the operator does not recognize the
   name. With no environment variable set — the state of a fresh shell — the scripts were

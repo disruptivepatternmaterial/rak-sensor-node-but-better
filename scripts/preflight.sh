@@ -148,22 +148,80 @@ fi
 
 # --------------------------------------------------------------- null policy
 # AGENTS.md / FIRMWARE_SPEC.md 2.1: a failed read is null, never 0.
+#
+# The null policy is enforced by a TYPE, not by convention: src/reading.h wraps every reading
+# in Maybe<T>, whose invariant is that `value` is meaningless unless `valid` is true. So
+# `value = 0` is not a violation -- Maybe::clear() does exactly that, deliberately -- and the
+# scan that looked for `= 0` on a failure path was looking in the wrong place. It flagged six
+# lines, all of them counter resets (`m_invalid_reads`, `m_failures`) and member initialisers,
+# and none of them capable of putting a fabricated zero on the wire. Six permanent false
+# positives on a gate is worse than no gate: rule 20 is explicit that a check which ships
+# warnings teaches everyone to ignore warnings. See #72.
+#
+# What a real violation looks like, given that type: a reading marked VALID while carrying a
+# zero nobody measured. That is `.set(0)` with a literal, or any write that reaches around
+# Maybe's accessors to touch `.value` / `.valid` directly. Those are the two scans below, and
+# they are failures rather than warnings, because either one silently turns "the sensor is
+# broken" into "the wind is calm" at ingest.
 step "null policy"
-if git ls-files 'src/*' 'lib/*' 'include/*' >/dev/null 2>&1 && [[ -n "$(git ls-files 'src/*')" ]]; then
-  # git grep, for the same reason as the secrets gate above.
+if [[ -n "$(git ls-files 'src/*')" ]]; then
+  NULL_CLEAN=1
+
+  # Comment lines are dropped from both scans below. A gate that flags prose is the same
+  # defect it is here to fix: src/sensors/battery.cpp:639 quotes a line of RUI3 API source
+  # inside a comment, and matching it would have replaced six false positives with one.
+  strip_comments() { grep -vE ':[[:space:]]*(//|\*|/\*)' || true; }
+
+  # -- a reading marked valid while carrying a literal zero
+  SET_RC=0
+  SET_ZEROS=$(git grep -nIE '\.set\([[:space:]]*0[[:space:]]*\)' -- 'src/*' 'lib/*' 'include/*' 2>&1) || SET_RC=$?
+  [[ "$SET_RC" -le 1 ]] && SET_ZEROS=$(printf '%s' "$SET_ZEROS" | strip_comments)
+  if [[ "$SET_RC" -gt 1 ]]; then
+    echo "$SET_ZEROS"
+    bad "the fabricated-zero scan itself failed to run (git grep exit $SET_RC)"
+    NULL_CLEAN=0
+  elif [[ -n "$SET_ZEROS" ]]; then
+    echo "$SET_ZEROS"
+    bad "Maybe::set(0) marks a reading VALID with a zero nobody measured -- a failed read must stay null"
+    NULL_CLEAN=0
+  fi
+
+  # -- writes that bypass Maybe's invariant. reading.h is where the type is defined, so it is
+  #    the one file allowed to touch these members.
+  BYPASS_RC=0
+  BYPASS=$(git grep -nIE '\.(value|valid)[[:space:]]*=' -- 'src/*' 'lib/*' 'include/*' ':(exclude)src/reading.h' 2>&1) || BYPASS_RC=$?
+  [[ "$BYPASS_RC" -le 1 ]] && BYPASS=$(printf '%s' "$BYPASS" | strip_comments)
+  if [[ "$BYPASS_RC" -gt 1 ]]; then
+    echo "$BYPASS"
+    bad "the Maybe-bypass scan itself failed to run (git grep exit $BYPASS_RC)"
+    NULL_CLEAN=0
+  elif [[ -n "$BYPASS" ]]; then
+    echo "$BYPASS"
+    bad "direct write to .value/.valid outside src/reading.h -- use set()/clear() so validity cannot drift from the value"
+    NULL_CLEAN=0
+  fi
+
+  # -- the original failure-path heuristic, kept but narrowed to exclude counters and plain
+  #    declarations. Advisory: it cannot distinguish intent, so it warns rather than fails.
   ZERO_RC=0
   ZEROS=$(git grep -nIE '(fail|error|timeout|invalid)[^;]*=[[:space:]]*0[;,]' -- 'src/*' 'lib/*' 'include/*' 2>&1) || ZERO_RC=$?
   if [[ "$ZERO_RC" -gt 1 ]]; then
     echo "$ZEROS"
     bad "the null-policy scan itself failed to run (git grep exit $ZERO_RC)"
-    ZEROS=""
-  fi
-  if [[ -n "$ZEROS" ]]; then
-    echo "$ZEROS"
-    warn "possible fabricated zero on a failure path -- nulls must stay null"
+    NULL_CLEAN=0
   else
-    ok "no obvious fabricated zeros"
+    # Drop counter-shaped left-hand sides and anything that is a declaration with a type.
+    ZEROS=$(printf '%s' "$ZEROS" \
+      | grep -vE '(count|counter|counts|failure|failures|reads|retries|retry|attempts|errors|tries|misses|cycles)[[:space:]]*=[[:space:]]*0[;,]' \
+      | grep -vE ':[[:space:]]*(static[[:space:]]+)?(const[[:space:]]+)?(u?int[0-9_a-z]*t?|size_t|bool|char|unsigned|signed|long|short|float|double)[[:space:]]+' \
+      || true)
+    if [[ -n "$ZEROS" ]]; then
+      echo "$ZEROS"
+      warn "possible fabricated zero on a failure path -- nulls must stay null"
+    fi
   fi
+
+  [[ "$NULL_CLEAN" -eq 1 ]] && ok "readings stay null on failure (no set(0), no Maybe bypass)"
 else
   echo "${DIM}   no firmware sources yet -- skipped${NC}"
 fi

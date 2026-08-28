@@ -1,45 +1,77 @@
 /**
- * Payload decoder for RAK2560 WisNode Sensor Hub + RK900-09 Miniature Ultrasonic Weather Station.
- * Device: https://docs.rakwireless.com/product-categories/wisnode/weather-station/datasheet/
+ * Payload decoder for RAK2560 WisNode Sensor Hub with any combination of:
  *
- * Supports both native RK900-09 probe types AND Generic Probe IO types:
+ *   1. RK900-09 Miniature Ultrasonic Weather Station probe
+ *        wind_speed (ch1), wind_direction (ch2), temperature (ch3),
+ *        humidity_prec (ch4), barometer (ch5)         → wx_* fields
+ *   2. Atmospheric temperature & humidity probe
+ *        temperature (ch1, type 103), humidity (ch2, type 104)
+ *                                                     → env_* fields
+ *   3. RAK9154 Solar Battery Lite
+ *        dc_voltage_batt (ch21), dc_current_batt (ch22),
+ *        capacity_batt (ch23), temperature (ch24),
+ *        error code (ch25, type 243), BMS firmware (ch26, type 243)
+ *                                                     → batt_* fields
  *
+ *   Hub itself: hub_voltage (ch77, type 187).
+ *
+ * Each uplink frame carries ONE probe's readings plus that probe's serial
+ * number (ch0, type 126). The serial is emitted as wx_serial / env_serial /
+ * batt_serial depending on which probe's channels are present in the frame,
+ * falling back to rak_serial when the frame has no probe data (e.g. a
+ * serial + hub_voltage-only frame). This avoids a single rak_serial field
+ * flip-flopping between probe serials on multi-probe hubs.
+ *
+ * LPP types decoded (channel byte, type byte, big-endian value):
  *   Wind Speed:      native 190 (0xBE) or generic 158 (0x9E)  2B × 0.01 → m/s
  *   Wind Direction:  native 191 (0xBF) or generic 159 (0x9F)  2B × 1   → °
- *   Temperature:     103 (0x67)                                2B × 0.1 → °C
+ *   Temperature:     103 (0x67) signed                        2B × 0.1 → °C
  *   Humidity:        native 112 (0x70) 2B×0.1  or generic 104 (0x68) 1B×0.5 → %RH
  *   Pressure:        115 (0x73)                                2B × 0.1 → hPa
  *   Hub voltage:     187 (0xBB)                                2B × 0.01 → V
+ *   Battery capacity 184 (0xB8) × 1 → %
+ *   Battery current  185 (0xB9) × 0.01 → A (signed; positive = charging)
+ *   Battery voltage  186 (0xBA) × 0.01 → V
+ *   Probe serial     126 (0x7E) 3B
  *
- * RAK9154 Solar Battery (when connected to hub):
- *   Battery capacity   type 0xB8 (184) × 1    → %
- *   Battery current    type 0xB9 (185) × 0.01 → A (signed; positive = charging)
- *   Battery voltage    type 0xBA (186) × 0.01 → V
+ * WIND_DIR_OFFSET is the per-install north correction, edited per device:
+ * this install's sensor north arrow points 230° true (SW), so
+ * true = (raw + 230) % 360. Set to 0 for a correctly-oriented install.
  *
- * Installation north offset: sensor north arrow points 230° true (SW).
- * All wind_direction values are corrected: true = (raw + 230) % 360.
- *
- * For TTN/TTS: Application payload formatter → Uplink → JavaScript.
+ * For TTN/TTS: End device payload formatter → Uplink → JavaScript
+ * (set per device because WIND_DIR_OFFSET differs per install).
  */
 "use strict";
 
 var WIND_DIR_OFFSET = 230;
 
-var CHANNEL_NAMES = {
-  // RK900-09 weather station
-  "temperature_3": "wx_temperature",
-  "barometer_5": "wx_barometer",
-  "wind_direction_2": "wx_wind_direction",
-  "wind_speed_1": "wx_wind_speed",
-  "humidity_prec_4": "wx_humidity",
+/**
+ * Raw "typeName_channel" key → standard field name + owning probe.
+ * The probe tag is used only to name the serial field for the frame.
+ */
+var CHANNELS = {
+  // RK900-09 weather station probe
+  "wind_speed_1": { name: "wx_wind_speed", probe: "wx" },
+  "wind_direction_2": { name: "wx_wind_direction", probe: "wx" },
+  "temperature_3": { name: "wx_temperature", probe: "wx" },
+  "humidity_prec_4": { name: "wx_humidity", probe: "wx" },
+  "barometer_5": { name: "wx_barometer", probe: "wx" },
+  // Atmospheric temperature & humidity probe
+  "temperature_1": { name: "env_temperature", probe: "env" },
+  "humidity_2": { name: "env_humidity", probe: "env" },
   // RAK9154 Solar Battery Lite
-  "temperature_24": "batt_temperature",
-  "capacity_batt_23": "batt_capacity",
-  "dc_current_batt_22": "batt_current",
-  "dc_voltage_batt_21": "batt_voltage",
+  "dc_voltage_batt_21": { name: "batt_voltage", probe: "batt" },
+  "dc_current_batt_22": { name: "batt_current", probe: "batt" },
+  "capacity_batt_23": { name: "batt_capacity", probe: "batt" },
+  "temperature_24": { name: "batt_temperature", probe: "batt" },
+  // Type 243 (raw2byte) per RAK SensorHub.js: "Solar Battery Errors; BMS
+  // Firmware version". Observed on live hubs: ch25 constant 0 (no errors),
+  // ch26 constant 3 (BMS firmware v3).
+  "raw2byte_25": { name: "batt_error_code", probe: "batt" },
+  "raw2byte_26": { name: "batt_bms_firmware", probe: "batt" },
   // Sensor Hub
-  "hub_voltage_77": "hub_voltage",
-  "rak_serial_0": "rak_serial"
+  "hub_voltage_77": { name: "hub_voltage" },
+  "rak_serial_0": { name: "rak_serial", isSerial: true }
 };
 
 function decodeUplink(input) {
@@ -50,7 +82,7 @@ function decodeUplink(input) {
     return { data: {}, warnings: warnings, errors: ["Empty or invalid payload"] };
   }
   try {
-    var data = lppDecodeToFlat(bytes);
+    var data = lppDecodeToFlat(bytes, warnings);
     return { data: data, warnings: warnings, errors: errors };
   } catch (e) {
     return {
@@ -86,7 +118,15 @@ function ensureByteArray(bytes) {
     var result = [];
     for (var j = 0; j < bytes.length; j++) {
       var b = bytes[j];
-      result.push((typeof b === "number" && !isNaN(b)) ? (b & 0xff) : 0);
+      // A non-numeric, NaN, fractional, or out-of-range element means the
+      // frame is corrupt. Reject the whole frame (mirrors the un-decodable
+      // string paths above) instead of masking to a fabricated byte
+      // (256 & 0xff -> 0x00, -1 & 0xff -> 0xFF) that would decode into a
+      // plausible wrong value.
+      if (typeof b !== "number" || isNaN(b) || b < 0 || b > 0xff || b !== Math.floor(b)) {
+        return [];
+      }
+      result.push(b);
     }
     return result;
   }
@@ -133,11 +173,20 @@ function lppDecode(bytes) {
   var sensors = [];
   var i = 0;
   while (i < bytes.length) {
+    if (i + 2 > bytes.length) {
+      throw new Error("Truncated payload: dangling channel byte at offset " + i);
+    }
     var channel = bytes[i++];
     var typeId = bytes[i++];
     var type = WX_TYPES[typeId];
     if (!type) {
       throw new Error("Unknown sensor type: " + typeId);
+    }
+    // Reject truncated frames: bytes.slice() past the end returns a short
+    // array and arrayToDecimal would compute a plausible wrong value from it.
+    if (i + type.size > bytes.length) {
+      throw new Error("Truncated payload: type " + typeId + " needs " + type.size +
+        " bytes at offset " + i + ", only " + (bytes.length - i) + " left");
     }
     var raw = bytes.slice(i, i + type.size);
     i += type.size;
@@ -147,23 +196,55 @@ function lppDecode(bytes) {
   return sensors;
 }
 
-function lppDecodeToFlat(bytes) {
+function lppDecodeToFlat(bytes, warnings) {
   var sensors = lppDecode(bytes);
   var data = {};
-  var windSpeed = null;
+  var probe = null;
+  var mixedProbes = false;
+  var hasSerial = false;
+  var serialValue = null;
+
   for (var idx = 0; idx < sensors.length; idx++) {
     var s = sensors[idx];
+    var key = s.name + "_" + s.channel;
+    var mapping = CHANNELS[key];
+
+    if (mapping && mapping.isSerial) {
+      hasSerial = true;
+      serialValue = s.value;
+      continue;
+    }
+
     var val = s.value;
     if (s.name === "wind_direction" && WIND_DIR_OFFSET !== 0) {
       val = (val + WIND_DIR_OFFSET) % 360;
     }
-    var key = s.name + "_" + s.channel;
-    data[CHANNEL_NAMES[key] || key] = val;
-    if (s.name === "wind_speed") windSpeed = val;
+
+    if (mapping) {
+      data[mapping.name] = val;
+      if (mapping.probe) {
+        if (probe === null) {
+          probe = mapping.probe;
+        } else if (probe !== mapping.probe) {
+          mixedProbes = true;
+        }
+      }
+    } else {
+      // Unmapped channel/type: pass the reading through under its raw key
+      // rather than dropping it, and flag it so the gap gets mapped.
+      data[key] = val;
+      warnings.push("Unmapped channel/type key: " + key);
+    }
   }
-  if (windSpeed === 0) {
-    var dirKey = CHANNEL_NAMES["wind_direction_2"] || "wind_direction_2";
-    if (data.hasOwnProperty(dirKey)) data[dirKey] = null;
+
+  if (hasSerial) {
+    var serialKey = (probe !== null && !mixedProbes) ? probe + "_serial" : "rak_serial";
+    data[serialKey] = serialValue;
   }
+
+  // NOTE (2026-07-02): a previous revision nulled wind_direction whenever
+  // wind_speed was 0. That stripped a value the sensor actually reported
+  // (no-fabricated-data rule); the vane direction now passes through as-is
+  // and any calm-air interpretation belongs downstream.
   return data;
 }

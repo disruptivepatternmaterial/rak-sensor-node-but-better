@@ -23,7 +23,9 @@
 #   === SOAK HEARTBEAT n ===   fixed interval, whether or not anything happened
 #   SOAK UPLINK                frame counter advanced
 #   SOAK ANOMALY               silence past the expected cadence, a counter that went backwards,
-#                              or a counter step this harness cannot account for as transmissions
+#                              a counter step this harness cannot account for as transmissions,
+#                              or a single frame delivered far sooner than the cadence allows
+#                              (cadence-fast -- delivery healthy, interval wrong, airtime burning)
 #   SOAK NOTE  counter-step    a step of 2..kCounterMargin, which a reset explains without any
 #                              extra transmission -- see the reserve discussion below
 #   SOAK WARN                  the TTN query failed -- says nothing about the node
@@ -49,6 +51,18 @@ SILENT_LIMIT=$(( EXPECT * 3 ))        # three missed cycles before crying wolf
 #   CITE(policy): CIT-TTN-FUP, docs/CITATIONS.md -- 30 s uplink airtime per node per 24 h is what
 #                 a genuine burst would breach, which is why the two cases must not read alike
 MARGIN="${SOAK_COUNTER_MARGIN:-32}"
+
+# Silence was an anomaly and a counter burst was an anomaly, but transmitting TOO OFTEN was
+# not: a plain +1 step arriving well inside the cadence was logged as a clean uplink and left
+# anomalies=0. That is the exact shape of the failure this harness exists to catch, because
+# the FUP budget is spent by frequency, not by count -- a node whose interval was set to 60 s
+# by a mistaken downlink (#63's set-interval path) delivers perfectly and burns the 30 s/24 h
+# airtime allowance ~15x faster, reading as the healthiest run we have ever recorded.
+# Half the cadence, so a poll-granularity early arrival is not an anomaly.
+#   CITE(policy): CIT-TTN-FUP, docs/CITATIONS.md -- 30 s uplink airtime per node per 24 h
+#   CITE(bench): docs/EVIDENCE.md 2026-08-13 -- a downlink set the interval 1800 s -> 900 s and
+#                it persisted across a reflash, so the interval is remotely mutable in the field
+SHORT_GAP="${SOAK_SHORT_GAP:-$(( EXPECT / 2 ))}"
 
 dur="${1:-24h}"
 label="${2:-bench}"
@@ -87,7 +101,15 @@ if [[ -z "$BANNER_FW" && -n "${SOAK_BANNER_LOG:-}" && -r "${SOAK_BANNER_LOG}" ]]
   BANNER_FW=$(grep -m1 -E 'firmware[[:space:]]*:' "$SOAK_BANNER_LOG" | awk -F: '{gsub(/ /,"",$2);print $2}' || true)
 fi
 
+# SOAK_FCNT_CMD exists so the accounting above can be exercised without a board, a network,
+# or 24 h. The anomaly branches are the whole value of this harness and they are the hardest
+# part to get right -- #76 shipped a "check" that could not fail because a +1 step always
+# looked healthy. A gate for the gate.
 fcnt() {
+  if [[ -n "${SOAK_FCNT_CMD:-}" ]]; then
+    eval "$SOAK_FCNT_CMD"
+    return
+  fi
   ttn-lw-cli end-devices get "$APP" "$DEV" --session.last-f-cnt-up 2>/dev/null \
     | grep -Eo '"last_f_cnt_up"[[:space:]]*:[[:space:]]*[0-9]+' | grep -Eo '[0-9]+$'
 }
@@ -100,8 +122,15 @@ ev "    expectation: one uplink every ${EXPECT}s; silence past ${SILENT_LIMIT}s 
 
 BASE=$(fcnt); LAST="${BASE:-}"
 ev "    baseline   : last_f_cnt_up=${BASE:-QUERY FAILED}"
+ev "    cadence    : a +1 step sooner than ${SHORT_GAP}s is an anomaly (half of ${EXPECT}s)"
 LAST_MOVE=$START
-BEAT=0; UPLINKS=0; ANOM=0; FAILS=0; RESETS=0
+# Is the gap about to be measured a real inter-uplink interval? Not always. The baseline is
+# taken mid-cycle, and both the silence re-arm and the counter-reset branch move LAST_MOVE
+# without an uplink having happened -- so the NEXT gap after any of those is an artifact of
+# this harness, not of the node. Flagging it would manufacture anomalies during exactly the
+# outage the operator is already looking at.
+GAP_VALID=0
+BEAT=0; UPLINKS=0; ANOM=0; FAILS=0; RESETS=0; FAST=0
 
 while :; do
   now=$(date +%s); elapsed=$(( now - START ))
@@ -124,12 +153,22 @@ while :; do
         RESETS=$(( RESETS + 1 ))
         ev "SOAK NOTE  counter-step +$d in ${gap}s within the ${MARGIN}-frame reset reserve --"
         ev "    one uplink after a reset, not $d transmissions (session.cpp:278); resets=$RESETS"
+      elif [[ "$GAP_VALID" -eq 1 && "$gap" -lt "$SHORT_GAP" ]]; then
+        # A single frame, delivered cleanly, far too soon. Nothing else in this loop can see
+        # it: the counter moved forward by one, which every other branch reads as health.
+        FAST=$(( FAST + 1 ))
+        ANOM=$(( ANOM + 1 ))
+        ev "SOAK ANOMALY cadence-fast +1 after only ${gap}s, under the ${SHORT_GAP}s floor (cadence ${EXPECT}s) --"
+        ev "    delivery is fine; the INTERVAL is wrong. At ${gap}s the FUP airtime budget is"
+        ev "    spent ~$(( EXPECT / (gap > 0 ? gap : 1) ))x faster than planned; fast=$FAST"
       fi
       LAST_MOVE=$now
+      GAP_VALID=1
     elif [[ -n "$LAST" && "$c" -lt "$LAST" ]]; then
       ANOM=$(( ANOM + 1 ))
       ev "SOAK ANOMALY counter-reset f_cnt went $LAST -> $c (rejoin or session reset)"
       LAST_MOVE=$now
+      GAP_VALID=0
     fi
     LAST="$c"
   fi
@@ -138,6 +177,7 @@ while :; do
     ANOM=$(( ANOM + 1 ))
     ev "SOAK ANOMALY silence $(( now - LAST_MOVE ))s with no counter advance (limit ${SILENT_LIMIT}s)"
     LAST_MOVE=$now   # re-arm, so one outage does not spam the log every poll
+    GAP_VALID=0      # the re-arm is not an uplink, so the next gap measures nothing
   fi
 
   if [[ $(( elapsed / HEARTBEAT )) -gt "$BEAT" ]]; then
@@ -147,7 +187,7 @@ while :; do
   sleep "$POLL"
 done
 
-ev "=== SOAK TTN DONE === elapsed=$(( $(date +%s) - START ))s uplinks=$UPLINKS resets=$RESETS anomalies=$ANOM query_failures=$FAILS f_cnt=${BASE:-?}->${LAST:-?}"
+ev "=== SOAK TTN DONE === elapsed=$(( $(date +%s) - START ))s uplinks=$UPLINKS resets=$RESETS fast=$FAST anomalies=$ANOM query_failures=$FAILS f_cnt=${BASE:-?}->${LAST:-?}"
 {
   echo "### Soak (network side) — $label"
   echo
@@ -157,6 +197,7 @@ ev "=== SOAK TTN DONE === elapsed=$(( $(date +%s) - START ))s uplinks=$UPLINKS r
   echo "- Duration: $(( $(date +%s) - START )) s of ${SECS} s requested."
   echo "- Uplinks observed: $UPLINKS · frame counter ${BASE:-?} → ${LAST:-?}"
   echo "- Counter steps explained by a reset (≤ ${MARGIN}, the stored reserve): $RESETS"
+  echo "- Uplinks arriving under the ${SHORT_GAP} s cadence floor: $FAST"
   echo "- Anomalies: $ANOM · TTN query failures: $FAILS"
   echo
   echo "This counts uplinks. It does not measure sleep current, and it cannot see a"

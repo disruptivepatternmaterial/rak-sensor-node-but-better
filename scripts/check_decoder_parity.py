@@ -312,10 +312,6 @@ def main() -> int:
     failures, warnings, blocked = [], [], []
 
     if decoder_source == "pinned":
-        # The vendored copy matches the pin by construction, so gate 1 below is
-        # vacuous here. Say so plainly rather than letting a green result imply more
-        # than it proves: the field-by-field contract IS checked, but the question
-        # "did the formatter move upstream?" is unanswerable without the live repo.
         warnings.append(
             "Checked against the PINNED copy in payload/reference/, not a live "
             "checkout.\n"
@@ -324,6 +320,37 @@ def main() -> int:
             "        sibling repo present (the build host, or any local clone) is what\n"
             "        proves the formatter has not moved."
         )
+
+    # --- Gate 0: does the vendored fallback copy still match the pin?
+    #
+    # This used to be assumed rather than checked. The comment here claimed the vendored copy
+    # "matches the pin by construction", and on a live run its bytes were never hashed at all,
+    # so a re-pin that updated schema.yaml and forgot payload/reference/ was invisible on any
+    # machine with the sibling cloned. 6af5964 did exactly that, and CI -- the one place that
+    # falls back to the copy, because forest-weather-machines is private -- went red on every
+    # run for a day while the workstation reported PREFLIGHT OK.
+    #
+    # Checked unconditionally, because the machine that can detect this is precisely the
+    # machine that does not need the fallback.
+    if decoder_source == "live" and VENDORED_DECODER.is_file():
+        vendored_sha = hashlib.sha256(
+            VENDORED_DECODER.read_text(encoding="utf-8").encode("utf-8")
+        ).hexdigest()
+        if vendored_sha != pinned_sha:
+            failures.append(
+                "VENDORED COPY IS STALE -- payload/reference/ does not match "
+                "pinned_sha256.\n"
+                f"        pinned:   {pinned_sha}\n"
+                f"        vendored: {vendored_sha}\n"
+                "        CI cannot reach the private sibling repo, so it checks this copy\n"
+                "        instead. Left stale, CI either fails on the hash or -- worse --\n"
+                "        verifies the field-by-field contract against the WRONG decoder.\n"
+                "        Refresh it from the pinned commit:\n"
+                "          git -C <forest-weather-machines> show "
+                "<pinned_commit>:<decoder path> \\\n"
+                "            > payload/reference/rak-wx-station-default.js\n"
+                "        and update the provenance table in payload/reference/README.md."
+            )
 
     # --- Gate 1: has the formatter changed upstream?
     if actual_sha != pinned_sha:
