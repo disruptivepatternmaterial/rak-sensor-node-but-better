@@ -57,6 +57,25 @@ uint32_t s_saved_counter_ceiling = 0;
 // whose save was withheld, which is precisely the healthy case.
 bool s_have_stored_session = false;
 
+// Consecutive failures to advance the stored ceiling, and whether the ceiling has been
+// abandoned outright.
+//
+// The ceiling refusal was the one hold in this firmware with no exit at all (#74, #68). A
+// permanent write failure -- worn page, full filesystem, unmountable image -- leaves the live
+// counter at the ceiling with nothing able to move it, so every later uplink is refused
+// forever. That needs no brownout and no unreadable pack: a healthy node reaches it on its own
+// about 32 uplinks after the last successful save, roughly 8 h at the 900 s field cadence. Being
+// Class A, the mute node is also uncommandable, which is the state AGENTS.md says must never be
+// reached.
+//
+// Three failures, not one. A rejoin is the most expensive thing this node does and a transient
+// write failure must not cost one; three consecutive failures on a pack the gate has already
+// judged healthy is a broken filesystem rather than a busy one. Same reasoning and same count as
+// main.cpp's kPendingIntervalWriteAttempts.
+constexpr uint8_t kCeilingWriteFailuresBeforeForget = 3;
+uint8_t           s_ceiling_write_failures          = 0;
+bool              s_ceiling_abandoned               = false;
+
 // One-shot authorization to write the counter checkpoint despite a withheld flash-write gate.
 // Set by main.cpp immediately before a keepalive uplink and consumed by the next headroom check.
 // See session::permit_counter_checkpoint() for why the reserve alone is not enough.
@@ -198,7 +217,11 @@ bool restore()
     // fresh, which costs one handshake and is guaranteed to work.
     if (!mib_set_u32(MIB_UPLINK_COUNTER, s.uplink_counter)) {
         LOGLN(F("   session : frame counter rejected — discarding, will join fresh"));
-        forget();
+        // Return deliberately ignored. A failed removal is self-correcting here: this path
+        // already returns false, so the caller joins fresh, and the join's own save() overwrites
+        // the file that could not be removed. Unlike the escape in counter_headroom_ok(), no
+        // decision downstream depends on the file actually being gone.
+        (void)forget();
         return false;
     }
 
@@ -287,6 +310,11 @@ static bool write_session(bool checkpoint_permitted)
     s_saved_counter_ceiling = s.uplink_counter;
     s_have_stored_session   = true;
 
+    // Any write that lands proves the filesystem is working, so the escape ladder in
+    // counter_headroom_ok() starts over. Reset here rather than there because save() reaching
+    // flash is the same evidence as the checkpoint reaching it.
+    s_ceiling_write_failures = 0;
+
     LOGF("   session : saved 0x%08lX, resume at %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
     return true;
@@ -338,14 +366,60 @@ bool counter_headroom_ok()
         return true;
     }
 
-    // Refusing costs one interval of data. Not refusing costs every uplink until somebody
-    // walks out there: unconfirmed sends report success (radio.cpp), so m_failures never
-    // increments, the rejoin escape never fires, and the network discards each frame as a
-    // replay in silence. Recovery would be one frame per kCounterMargin resets.
-    LOGF("   session : uplink withheld — counter %lu has reached the stored ceiling %lu and "
-         "the ceiling cannot be advanced\n",
-         (unsigned long)req.Param.UpLinkCounter, (unsigned long)s_saved_counter_ceiling);
-    return false;
+    // The write did not land. Refusing costs one interval of data, which is the right price for
+    // a transient -- but refusing forever is the permanent mute of #74/#68, so the refusal is
+    // now a ladder with an exit rather than a terminal state.
+    if (s_ceiling_write_failures < kCeilingWriteFailuresBeforeForget) {
+        ++s_ceiling_write_failures;
+        LOGF("   session : uplink withheld — counter %lu reached the stored ceiling %lu and the "
+             "write failed (%u of %u before the stored session is abandoned)\n",
+             (unsigned long)req.Param.UpLinkCounter, (unsigned long)s_saved_counter_ceiling,
+             (unsigned)s_ceiling_write_failures,
+             (unsigned)kCeilingWriteFailuresBeforeForget);
+        return false;
+    }
+
+    // Repeated failure. A node with no stored session has nothing to replay -- restore() finds
+    // no file, the network issues a fresh address and counter, and the headroom check above
+    // becomes unconditionally true -- so discarding the session is the escape. It costs one
+    // rejoin after the next reset, against a deployment that otherwise ends here.
+    if (forget()) {
+        LOGLN(F("   session : ceiling could not be advanced after repeated write failures — "
+                "stored session discarded, transmitting again; the next reset will join fresh"));
+        return true;
+    }
+
+    // Neither the write nor the removal works, so the stored ceiling still describes a real
+    // file and still binds. Transmit anyway. This is the deliberate choice between two bad
+    // outcomes, and it is not symmetric:
+    //
+    //   - Staying mute is terminal. Class A means no downlink without an uplink, so a mute node
+    //     is uncommandable, and nothing in the field will fix a worn flash page. It ends the
+    //     deployment and only a hike recovers it.
+    //   - Transmitting past the ceiling is recoverable. It costs nothing until a reset actually
+    //     happens; after one, the restored counter is behind what the network has already seen,
+    //     so frames are discarded until the counter climbs back past the highest value sent --
+    //     bounded by however many uplinks were taken past the ceiling, then it heals unaided.
+    //
+    // So the replay this refusal exists to prevent is a temporary outage, while the refusal
+    // itself is permanent. Logged once, not every cycle, because it stays true for the rest of
+    // the deployment and a line per uplink would bury everything else.
+    //
+    // CITE(spec): [CIT-LW-LINK] frame counter rules -- a frame at or below the last value the
+    //   network accepted is discarded, which is why falling behind is an outage and not a
+    //   corruption, and why climbing back past it restores service.
+    // CITE(policy): docs/POWER_BUDGET.md -- never let the node reach a state it cannot recover
+    //   from by itself; between two failures, take the one that self-heals.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 -- the flash-write hold protects the pack; it is
+    //   not licensed to end the deployment.
+    if (!s_ceiling_abandoned) {
+        s_ceiling_abandoned = true;
+        LOGF("   session : ceiling %lu cannot be advanced and the stored session cannot be "
+             "removed — transmitting anyway. A reset will replay and lose frames until the "
+             "counter passes what was sent; a mute node never recovers at all\n",
+             (unsigned long)s_saved_counter_ceiling);
+    }
+    return true;
 }
 
 void set_flash_write_gate(FlashWriteGateFn gate)
@@ -353,12 +427,31 @@ void set_flash_write_gate(FlashWriteGateFn gate)
     s_flash_write_gate = gate;
 }
 
-void forget()
+bool forget()
 {
-    InternalFS.remove(kPath);
+    // The return of remove() was previously discarded, and the in-RAM state was cleared either
+    // way. That is safe on the path this function was written for -- the network has stopped
+    // honoring the session and a rejoin is wanted -- but not on the path that now depends on it:
+    // a filesystem too broken to write is a filesystem that may be too broken to remove, and
+    // clearing s_have_stored_session while the file survives lets this node transmit past a
+    // ceiling a reset still resumes from. That is the silent replay the ceiling exists to
+    // prevent, arriving through the escape hatch.
+    //
+    // remove() returns true when the file is gone, including when it was never there, which is
+    // the answer this wants: "nothing stored" is the desired end state, not "a deletion
+    // occurred".
+    if (!InternalFS.remove(kPath)) {
+        // Deliberately leaves s_have_stored_session true. The ceiling still describes a real
+        // file, so it still binds.
+        LOGLN(F("   session : could not discard the stored session — file still on flash, "
+                "ceiling still binds"));
+        return false;
+    }
+
     s_saved_counter_ceiling = 0;
     s_have_stored_session   = false;
     LOGLN(F("   session : discarded — next boot will join"));
+    return true;
 }
 
 } // namespace session
@@ -371,7 +464,9 @@ bool save() { return false; }
 bool counter_headroom_ok() { return true; }
 void permit_counter_checkpoint() {}
 void set_flash_write_gate(FlashWriteGateFn) {}
-void forget() {}
+// True: with no radio there is no session and nothing stored, which is the state forget()
+// promises. Returning false would claim a stored session survives on a build that has none.
+bool forget() { return true; }
 } // namespace session
 
 #endif

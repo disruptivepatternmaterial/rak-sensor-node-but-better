@@ -44,6 +44,7 @@ all of these pass:
 | **LoRaWAN compliance** | Airtime, Class A, downlink handling — rule 40 | review + `scripts/check_citations.py` |
 | **Power** | Sleep path intact, no regression in budget — rule 50 | review + bench |
 | **Hardening** | H1–H8 in `FIRMWARE_SPEC.md` §7 still hold | review |
+| **Safety holds** | Any change that adds or widens a state where the node withholds an action adds its row to `FIRMWARE_SPEC.md` §7.1 and answers the dependency question: **does lifting this hold depend on an action the hold itself suppresses?** If yes, the hold needs a bound. Three defects have had exactly this shape — #61, the keepalive counter-headroom defect, and #74/#68 | review |
 | **No secrets** | No keys, EUIs, or AppKeys in tracked files | `scripts/preflight.sh` |
 | **Nulls** | Missing sensor reads stay null; no fabricated zeros | review |
 

@@ -30,6 +30,37 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The frame-counter ceiling was the one hold in this firmware with no exit at all, and it
+  could mute a perfectly healthy node in about 8 hours.** `session::counter_headroom_ok()`
+  refuses an uplink when the live counter reaches the stored ceiling and the write that would
+  advance it fails. If that write fails *permanently* — worn page, full filesystem, unmountable
+  image — it refuses every uplink afterwards, forever. This needs no brownout, no unreadable
+  pack and no hold: a healthy node reaches it roughly `kCounterMargin` = 32 uplinks after its
+  last successful save, about 8 h at the 900 s field cadence. Being Class A, the mute node is
+  also uncommandable, which is the state `AGENTS.md` says must never be reached, and the only
+  exit was the write that was already failing. The refusal is now a ladder: three consecutive
+  failures (a transient must not cost a rejoin), then `session::forget()` — a node with nothing
+  stored has nothing to replay, so the check becomes unconditionally true and the node keeps
+  transmitting, joining fresh after the next reset.
+  ([#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74),
+  [#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68))
+- **`session::forget()` cleared its in-RAM state without checking that the file was actually
+  removed** — the silent-replay hazard #68 predicted, sitting in the function the escape above
+  depends on. Removal is itself a filesystem write, so on the broken filesystem that makes the
+  escape necessary it is the operation most likely to fail; clearing `s_have_stored_session`
+  anyway would let the node transmit past a ceiling a reset still resumes from, which is exactly
+  the replay the ceiling exists to prevent. It now returns whether the file is gone and leaves
+  the ceiling binding when it is not. The one caller that ignores the result (`restore()`, on a
+  rejected counter) is self-correcting and says so — it already returns false, so the join's own
+  `save()` overwrites the file that could not be removed.
+- **When neither the write nor the removal works, the node now transmits anyway.** The two
+  outcomes are not symmetric and treating them as equally bad is what produced a terminal state:
+  staying mute is permanent, because nothing in the field repairs a worn flash page and an
+  uncommandable node cannot be told anything, while transmitting past the ceiling costs nothing
+  until a reset happens and then loses frames only until the counter climbs back past the
+  highest value already sent — bounded, then it heals unaided. A temporary outage beats a
+  permanent one. Logged once rather than per uplink, since it stays true for the rest of the
+  deployment.
 - **CI had been red on every run for a day, and the decoder-parity gate in CI was checking the
   wrong decoder.** `6af5964` re-pinned `payload/schema.yaml` to the restructured upstream
   formatter (`058bd69` / `717afceb…`) but never refreshed the vendored fallback copy in

@@ -263,6 +263,51 @@ Exact channel IDs must match decoder expectations; verify against live decoder b
 | H7 | BMS silent → no livelock |
 | H8 | Bench soak ≥24 h; field shadow ≥7 d before hike-in trust |
 
+### 7.1 Safety holds — every state where the node withholds an action
+
+Three separate defects have had the same shape: a hold taken for a good reason that also
+disabled the only mechanism able to lift it ([#61](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/61),
+the brownout keepalive counter-headroom defect, and
+[#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74)/[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68)).
+Three times is a pattern, so the enumeration stops being implicit ([#66](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/66)).
+
+**Class A is what makes this category dangerous.** A downlink can only follow an uplink, so
+any hold that stops transmission also removes the only route by which the hold could be
+countermanded. "Mute" and "uncommandable" are the same state, and the node is expected to run
+unattended for a year.
+
+Deliberately **not** a runtime mechanism. Firmware has no general way to know what would lift
+an arbitrary hold, so a "watchdog for holds" would either override safety decisions blindly —
+which is what #38 exists to prevent — or be a hand-maintained table pretending to be a
+mechanism. Every real fix has been specific to its hold.
+
+| Hold | Withholds | Lifted by | Depends on an action it suppresses? | Bound |
+|---|---|---|---|---|
+| Brownout inhibit, measured low (`≤ kTxInhibitCentivolts`) | Uplinks, flash writes | A reading `≥ kTxResumeCentivolts` | **No** — needs pack voltage to recover, which the node neither causes nor suppresses | **None, deliberately.** The pack has said spending energy is wrong; this is the one hold where indefinite silence is correct (#38). If the link then dies, it degrades into the no-evidence hold below and becomes bounded |
+| Brownout hold, no evidence (`kInvalidReadsBeforeInhibit` = 4 unreadable cycles) | Uplinks, flash writes | Any valid reading | **No**, once bounded — but it *would* be terminal unbounded, since the pack may be full and the link simply broken | `kNoEvidenceKeepaliveCycles` = 24 cycles, then one uplink regardless (#45) |
+| Brownout hold, inside the hysteresis band (valid reading between inhibit and resume) | Uplinks, flash writes | A reading `≥ kTxResumeCentivolts` | **No**, once bounded. Reads as well-evidenced while being just as inescapable — a solar pack hovering in-band through short winter days parked the node permanently | Same keepalive, armed at `power.cpp:400` |
+| Flash-write withholding under H3 | Config and session writes | The brownout hold lifting | **No.** Clearing a persisted hold is itself a write, but `Config` does not consult the gate, and a failed clear self-heals on the next valid reading | One documented exception: the counter checkpoint behind an armed keepalive |
+| **Frame-counter ceiling refusal** | Every uplink | A successful `write_session()` advancing the stored ceiling | **Yes — this was the terminal one.** The only exit was the write that was failing. Needs no brownout and no dead pack: a healthy node with a worn page reaches it ~32 uplinks after its last save, about 8 h at 900 s | Three failures, then `session::forget()`; if the removal also fails, transmit anyway — see below |
+| Join backoff | Nothing; lengthens sleep only | A successful join | **No.** Checked because #66 flagged it as the likeliest offender: it does not gate the keepalive, and `note_keepalive_sent()` fires only after an uplink reaches the air, so a failed join cannot consume one | `kBackoffMaxSeconds` = 3600, the default reporting interval |
+| Quiet-cycle uplink suppression | Uplinks with no sensor data | Any sensor field, or the heartbeat | **No** | `heartbeat_due()` — first quiet cycle, then every `kQuietCyclesPerHeartbeat` |
+| Battery fallback-ladder suppression | The expensive re-latch ladder, not the read | The brownout hold lifting | **No.** `read()` issues its direct query *before* consulting the gate, so the read that detects recovery always happens | Inherits the hold's bound |
+
+**Why the ceiling refusal ends in transmitting rather than staying silent.** The two bad
+outcomes are not symmetric. Staying mute is terminal: nothing in the field repairs a worn
+flash page, and an uncommandable node cannot be told anything. Transmitting past the ceiling
+costs nothing until a reset happens, and after one the restored counter is behind what the
+network has already accepted, so frames are discarded until the counter climbs back past the
+highest value sent — bounded, then it heals unaided. A temporary outage beats a permanent one.
+
+`session::forget()` returns whether the file is actually gone, and that return is load-bearing:
+removal is itself a write, so on the broken filesystem that makes the escape necessary it is
+the operation most likely to fail. Clearing the in-RAM state anyway would let the node run past
+a ceiling a reset still resumes from — the silent replay the ceiling exists to prevent,
+reintroduced by the code escaping it.
+
+**Adding or widening a hold requires a row here** and an answer to the dependency column. See
+[`.cursor/rules/30-change-workflow.mdc`](../.cursor/rules/30-change-workflow.mdc).
+
 ## 8. Explicit non-goals
 
 GNSS, RTC module, Meshtastic field image, RAK13002 (IO breakout; conflicts with RAK5802), fabricating sensor zeros, Class C.
