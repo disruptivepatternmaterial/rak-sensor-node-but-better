@@ -20,8 +20,9 @@ Usage:
 Sentinels printed on stdout, stable enough to grep or feed to notify_on_output:
     === CAPTURE WAITING <port> ===      looking for the device
     === CAPTURE ATTACHED <port> ===     device open, lines follow
+    === CAPTURE BANNER commit=<sha> === the board named its own image (see below)
     === CAPTURE DETACHED ===            device went away, will look again
-    === CAPTURE DONE lines=<n> ===      duration elapsed
+    === CAPTURE DONE lines=<n> banner_commit=<sha|NOT OBSERVED> ===   duration elapsed
 
 Exit status is 0 when at least one line was captured, 3 when the device never appeared.
 """
@@ -29,12 +30,24 @@ Exit status is 0 when at least one line was captured, 3 when the device never ap
 import argparse
 import glob
 import os
+import re
 import select
 import subprocess
 import sys
 import time
 
 PORT_GLOB = "/dev/cu.usbmodem*"
+
+# The board's own account of which image is running, printed by main.cpp print_banner().
+# Every captured line already lands in the log verbatim, so the banner was never *missing* --
+# but nothing surfaced it, and nothing said so when it was absent. A capture taken mid-run
+# without a reset contains no banner at all, and read later it is indistinguishable from one
+# that does: both are just serial text. Attribution has to be explicit or it is not evidence
+# (#73, and AGENTS.md on the 2026-08-12 entry that named the wrong thing).
+#
+# CITE(prior-art): scripts/_soak_monitor.py RE_COMMIT -- same pattern, same purpose; the soak
+#   harness already reports banner_commit and raises commit-mismatch against the launch SHA
+RE_BANNER_COMMIT = re.compile(r"commit\s*:\s*([0-9a-f]{7,40})")
 
 # Two minutes is the observed re-enumeration time after a DFU flash on this board; three
 # is the working number so a slow activation is not mistaken for a dead board.
@@ -118,6 +131,8 @@ def main():
     lines = 0
     attached_once = False
     announced_wait = False
+    banner_commit = None
+    banner_commits = []
 
     while time.time() < deadline:
         port = find_port(args.port)
@@ -170,8 +185,18 @@ def main():
             for byte in chunk:
                 if byte in (10, 13):
                     if buf.strip():
-                        emit(buf.decode("utf-8", "replace").rstrip())
+                        text = buf.decode("utf-8", "replace").rstrip()
+                        emit(text)
                         lines += 1
+                        m = RE_BANNER_COMMIT.search(text)
+                        if m and m.group(1) != banner_commit:
+                            # Announced on every change, not just the first. A second, different
+                            # SHA mid-capture means the board was reflashed inside the window,
+                            # and a log attributed to one image would be attributing half its
+                            # lines to the wrong one.
+                            banner_commit = m.group(1)
+                            banner_commits.append(banner_commit)
+                            emit("=== CAPTURE BANNER commit=%s ===" % banner_commit)
                     buf = b""
                 else:
                     buf += bytes([byte])
@@ -183,7 +208,14 @@ def main():
         if time.time() < deadline:
             emit("=== CAPTURE DETACHED ===")
 
-    emit("=== CAPTURE DONE lines=%d ===" % lines)
+    # Naming one SHA for a capture that spans two images is worse than naming none: the log
+    # reads as attributed while half its lines belong to the other image. Say AMBIGUOUS and
+    # list them, so whoever reads it later has to split the log rather than trust the label.
+    if len(set(banner_commits)) > 1:
+        attribution = "AMBIGUOUS (%s)" % ",".join(banner_commits)
+    else:
+        attribution = banner_commit or "NOT OBSERVED"
+    emit("=== CAPTURE DONE lines=%d banner_commit=%s ===" % (lines, attribution))
     if sink:
         sink.close()
     return 0 if lines else 3

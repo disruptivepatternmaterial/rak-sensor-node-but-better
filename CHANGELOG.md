@@ -71,6 +71,20 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   three scenarios were run (too-fast, healthy, silence-then-recovery) and the healthy one
   reports zero anomalies.
   ([#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76))
+- **`scripts/capture.py` produced logs that could not name the image they captured.** Every
+  serial line already landed in the log verbatim, so a boot banner was never missing — but
+  nothing surfaced it, and nothing said so when it was absent. A capture taken mid-run without
+  a reset contains no banner at all and, read back later, is indistinguishable from one that
+  does: both are just serial text. It now emits `=== CAPTURE BANNER commit=<sha> ===` whenever
+  the board names its image, and the closing `CAPTURE DONE` line carries
+  `banner_commit=<sha|NOT OBSERVED|AMBIGUOUS (…)>`. Ambiguous is the case worth having: a
+  reflash inside the capture window means one label would attribute half the log to the wrong
+  image, which is worse than no label, so both SHAs are listed instead. The soak harnesses
+  already did this — `_soak_monitor.py` records `banner_commit` and raises `commit-mismatch`
+  against the launch SHA, and `soak_ttn.sh` captures it up front — so this closes the last
+  harness that could not attribute its own output. Verified over a FIFO standing in for the
+  device, across all three outcomes.
+  ([#73](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/73))
 - **`scripts/soak.sh` usage text printed four lines of its own source**, including the host
   fallback assignment, because `sed -n '2,28p'` ran past the header block.
 - **`scripts/soak.sh status` printed the anomaly count twice on every healthy run.**
