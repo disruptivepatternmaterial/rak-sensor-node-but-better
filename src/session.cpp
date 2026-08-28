@@ -68,10 +68,11 @@ bool s_have_stored_session = false;
 // The ceiling refusal was the one hold in this firmware with no exit at all (#74, #68). A
 // permanent write failure -- worn page, full filesystem, unmountable image -- leaves the live
 // counter at the ceiling with nothing able to move it, so every later uplink is refused
-// forever. That needs no brownout and no unreadable pack: a healthy node reaches it on its own
-// about 32 uplinks after the last successful save, roughly 8 h at the 900 s field cadence. Being
-// Class A, the mute node is also uncommandable, which is the state AGENTS.md says must never be
-// reached.
+// forever. That needs no brownout and no unreadable pack: during uninterrupted runtime a healthy
+// node reaches it every 32 uplinks, roughly 8 h at the 900 s field cadence. After a reset the
+// restored counter intentionally consumes that reserve, so the first uplink checkpoints again
+// before transmitting. Being Class A, a mute node is also uncommandable, which is the state
+// AGENTS.md says must never be reached.
 //
 // Three failures, not one. A rejoin is the most expensive thing this node does and a transient
 // write failure must not cost one; three consecutive failures on a pack the gate has already
@@ -204,7 +205,12 @@ static bool reject_stored_session(const char *reason)
     // when it accepts the new one; if saving the replacement then fails, the next reset restores
     // credentials the network no longer honors and unconfirmed sends look locally successful
     // forever. prepare_fresh_join() repairs this once the flash-write gate says a format is safe.
-    (void)forget();
+    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+        s_fresh_join_blocked = true;
+        LOGLN(F("   session : rejected session retained — brownout gate withholds removal"));
+    } else {
+        (void)forget();
+    }
     return false;
 }
 
@@ -278,6 +284,7 @@ bool restore()
 
     s_saved_counter_ceiling = s.uplink_counter;
     s_have_stored_session   = true;
+    s_fresh_join_blocked    = false;
 
     LOGF("   session : restored 0x%08lX, counter %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
@@ -407,6 +414,10 @@ static bool format_filesystem_and_rebuild_config()
     if (s_filesystem_rebuild == nullptr) {
         return false;
     }
+    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+        LOGLN(F("   session : filesystem repair deferred — brownout gate withholds format"));
+        return false;
+    }
     if (s_filesystem_recovery_cooldown > 0) {
         --s_filesystem_recovery_cooldown;
         return false;
@@ -448,8 +459,6 @@ static bool rebuild_filesystem_and_reanchor()
     } else {
         // Still safe from replay: format removed the stale file, so a reset joins fresh even
         // though this running session could not be checkpointed.
-        s_saved_counter_ceiling = 0;
-        s_have_stored_session   = false;
         LOGLN(F("   session : filesystem formatted, but session could not be restored — next "
                 "reset will join fresh"));
     }
@@ -459,26 +468,40 @@ static bool rebuild_filesystem_and_reanchor()
     return true;
 }
 
-bool prepare_fresh_join()
+JoinPreparation prepare_fresh_join()
 {
     if (!s_fresh_join_blocked) {
-        return true;
+        return JoinPreparation::ReadyToJoin;
+    }
+
+    // The stored session may have failed to apply transiently at boot. Retrying it is read-only
+    // unless another component fails again, and under a brownout gate reject_stored_session()
+    // retains the file rather than removing it. A successful retry restores reachability
+    // without either a format or a fresh join.
+    if (restore()) {
+        LOGLN(F("   session : rejected session restored on retry"));
+        return JoinPreparation::SessionRestored;
+    }
+
+    // restore() may have proved removal while the gate was open.
+    if (!s_fresh_join_blocked) {
+        return JoinPreparation::ReadyToJoin;
     }
 
     if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
         LOGLN(F("   session : fresh join deferred — stale session remains and filesystem "
                 "repair is unsafe under the brownout hold"));
-        return false;
+        return JoinPreparation::Blocked;
     }
 
     if (!format_filesystem_and_rebuild_config()) {
         LOGLN(F("   session : fresh join deferred — stale session could not be removed or "
                 "repaired"));
-        return false;
+        return JoinPreparation::Blocked;
     }
 
     LOGLN(F("   session : stale session removed by filesystem repair — fresh join allowed"));
-    return true;
+    return JoinPreparation::ReadyToJoin;
 }
 
 void permit_counter_checkpoint()
@@ -665,7 +688,7 @@ bool forget()
 
 namespace session {
 bool restore() { return false; }
-bool prepare_fresh_join() { return true; }
+JoinPreparation prepare_fresh_join() { return JoinPreparation::ReadyToJoin; }
 bool save() { return false; }
 bool counter_headroom_ok() { return true; }
 void permit_counter_checkpoint() {}

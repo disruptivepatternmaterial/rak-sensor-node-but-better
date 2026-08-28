@@ -320,16 +320,26 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
             // The comment this replaces was right that a hold backed by a *current* low
             // reading earns no keepalive. It stops being current once the pack goes silent.
             if (!m_without_evidence) {
+                // The hold is already in progress, so these unreadable cycles advance its
+                // reachability clock without permitting a transmission yet. Restarting the
+                // clock when the fourth miss becomes "no evidence" lets a link that answers
+                // once every five cycles erase elapsed time forever.
+                m_keepalive.advance(false);
                 if (m_invalid_reads < kInvalidReadsBeforeInhibit) {
                     ++m_invalid_reads;
                 }
                 if (m_invalid_reads >= kInvalidReadsBeforeInhibit) {
                     m_without_evidence = true;
-                    m_keepalive.start(true);
+                    m_keepalive.set_permitted(true);
+                    const uint16_t remaining =
+                        (m_keepalive.held_cycles() < kNoEvidenceKeepaliveCycles)
+                            ? (uint16_t)(kNoEvidenceKeepaliveCycles -
+                                         m_keepalive.held_cycles())
+                            : 0;
                     LOGF("   power   : hold no longer backed by a reading after %u silent "
                          "cycles — keepalive in %u cycles\n",
                          (unsigned)kInvalidReadsBeforeInhibit,
-                         (unsigned)kNoEvidenceKeepaliveCycles);
+                         (unsigned)remaining);
                 }
                 return;
             }

@@ -62,10 +62,16 @@ void set_filesystem_rebuild(FilesystemRebuildFn rebuild);
 // session is gone.
 bool restore();
 
-// Makes a fresh OTAA join safe after restore() rejected a stored session. Usually true
-// immediately; false only while a stale file could not be removed and the brownout gate makes a
-// whole-filesystem repair unsafe. Call before lmh_join(), and retry on later cycles.
-bool prepare_fresh_join();
+enum class JoinPreparation {
+    ReadyToJoin,
+    SessionRestored,
+    Blocked,
+};
+
+// Makes a fresh OTAA join safe after restore() rejected a stored session. While filesystem
+// repair is unsafe under a brownout hold, retries the existing session so a transient MIB/read
+// failure cannot suppress the keepalive forever. Call before lmh_join().
+JoinPreparation prepare_fresh_join();
 
 // Reads the live session out of the MAC and stores it. Call right after a successful join.
 bool save();
@@ -83,7 +89,8 @@ bool save();
 // reaching the node — unconfirmed uplinks report success, so no failure counter moves and no
 // rejoin is triggered. The node would look healthy and reach nobody for days.
 //
-// Cheap: one MIB read, and a flash write roughly once a month at the default interval.
+// Cheap: one MIB read per uplink, and one flash write per 32 healthy uplinks — about 32 hours
+// at the 3600 s default or 8 hours at the 900 s field floor.
 bool counter_headroom_ok();
 
 // Authorizes exactly one counter checkpoint write on the next headroom check, even while the

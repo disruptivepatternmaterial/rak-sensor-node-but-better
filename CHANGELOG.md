@@ -8,6 +8,12 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-08-28
+
+`0.4.4` is the hardened device-test image for rebuilding node 002 and bringing up node 003.
+It is **not deployment-qualified**: the new brownout, session-repair, and fault paths still
+require device fault injection, and H8 still requires a 24 h bench soak plus 7 d field shadow.
+
 ### Security
 
 - **The build host's public IP was in tracked files and is now out, with a gate to keep it
@@ -81,6 +87,11 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   reads distinguish absent, malformed, and I/O failure; removal accepts only `OK` or `NOENT`;
   and a format is followed by an explicit remount even when Adafruit's internal mounted flag was
   cleared by an earlier failed attempt. A failed write preserves the live record.
+- **The first filesystem mount could erase all persistence before the node had any voltage
+  evidence.** `InternalFileSystem::begin()` is a destructive recovery wrapper: one failed mount
+  erases all seven flash pages, formats, and retries. `Config::begin()` called it before
+  `brownout.begin()` and before the first pack reading. Boot now calls the non-destructive base
+  mount; only the voltage-gated session repair path may format.
 - **Three local radio-send failures could create a fresh session while an old session remained
   on flash.** If saving the rejoin then failed, the next reset restored credentials TTN had
   invalidated, and unconfirmed sends looked locally successful forever. Rejoin now proceeds
@@ -102,7 +113,10 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   the Class A node stayed mute and uncommandable for the entire low-voltage period. Low cycles
   now suppress only the current transmission while preserving elapsed hold time; the first
   later in-band cycle sends if the bound has expired. No keepalive is ever sent on a cycle
-  measured at or below the floor. Found by the unattended-year adversarial review.
+  measured at or below the floor. The adjacent intermittent-link path is covered too: four
+  unreadable cycles change whether the existing clock may transmit without restarting it, so a
+  link answering once every five cycles cannot erase elapsed hold time. Found by the
+  unattended-year adversarial review.
   ([#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45))
 - **The frame-counter ceiling was the one hold in this firmware with no exit at all, and it
   could mute a perfectly healthy node in about 8 hours.** `session::counter_headroom_ok()`

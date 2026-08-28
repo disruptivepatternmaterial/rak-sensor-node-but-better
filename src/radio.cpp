@@ -243,7 +243,13 @@ bool Radio::ensure_joined()
     if (m_joined) {
         return true;
     }
-    if (!session::prepare_fresh_join()) {
+    const session::JoinPreparation preparation = session::prepare_fresh_join();
+    if (preparation == session::JoinPreparation::SessionRestored) {
+        m_joined = true;
+        m_failures = 0;
+        return true;
+    }
+    if (preparation == session::JoinPreparation::Blocked) {
         return false;
     }
 

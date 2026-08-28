@@ -115,6 +115,17 @@ bool remove_or_absent(const char *path)
     return status == LFS_ERR_OK || status == LFS_ERR_NOENT;
 }
 
+bool mount_without_format()
+{
+    // InternalFileSystem::begin() is not a mount operation: on mount failure it erases all seven
+    // flash pages, formats, and retries. At boot that runs before Brownout has any voltage
+    // evidence, so selecting the base implementation is the only non-destructive mount.
+    //
+    // CITE(prior-art): [CIT-INTERNAL-FS] InternalFileSystem.cpp — derived begin() erases every
+    //   filesystem page after one failed Adafruit_LittleFS::begin().
+    return static_cast<Adafruit_LittleFS &>(InternalFS).begin();
+}
+
 bool format_and_mount()
 {
     // format() records whether it was mounted on entry and remounts only in that case. If an
@@ -127,7 +138,7 @@ bool format_and_mount()
     //   `attemptMount = _mounted`, clears `_mounted` before unmount, and remounts only when
     //   attemptMount was true.
     const bool formatted = InternalFS.format();
-    const bool mounted   = InternalFS.begin();
+    const bool mounted   = mount_without_format();
     return formatted && mounted;
 }
 

@@ -162,6 +162,11 @@ class KeepaliveClock {
         }
     }
 
+    // Changes only whether this cycle may transmit. Used when an existing hold crosses from
+    // stale low-voltage evidence to no evidence; restarting the clock there lets an
+    // intermittently answering link erase elapsed time forever.
+    void set_permitted(bool permitted_now) { m_armed = permitted_now; }
+
     void note_sent() { m_held_cycles = 0; }
 
     bool due(bool engaged) const

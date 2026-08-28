@@ -144,7 +144,7 @@
 // the C library uses F as a parameter name in its own macros. That mistake turned into a
 // wall of errors inside stdio.h and cmath that pointed nowhere near this file.
 
-#define FIRMWARE_VERSION "0.4.3"
+#define FIRMWARE_VERSION "0.4.4"
 
 // The commit this image was built from, injected by scripts/pio_git_rev.py -- a platformio.ini
 // `pre:` extra script -- as -D FIRMWARE_COMMIT="a7381e7", with `-dirty` appended when the tree

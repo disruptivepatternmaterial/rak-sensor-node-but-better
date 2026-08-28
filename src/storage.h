@@ -25,6 +25,10 @@ ReadResult read_exact(const char *path, void *data, size_t size);
 // LFS_ERR_NOENT as success while preserving every real I/O error as failure.
 bool remove_or_absent(const char *path);
 
+// Mounts without InternalFileSystem::begin()'s automatic erase-and-format fallback. Boot calls
+// this before voltage is known, so a failed mount must preserve flash for later gated repair.
+bool mount_without_format();
+
 // Formats and then explicitly mounts. Adafruit format() can leave the filesystem unmounted on
 // failure, and skips remount on a later call that began unmounted.
 bool format_and_mount();

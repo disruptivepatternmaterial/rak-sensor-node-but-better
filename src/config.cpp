@@ -56,7 +56,16 @@ constexpr size_t kStoredSizeV1 = offsetof(Stored, brownout_engaged);
 
 void Config::begin()
 {
-    m_mounted = InternalFS.begin();
+    // InternalFileSystem::begin() automatically erases and formats after one failed mount.
+    // This runs before the first pack reading and before Brownout's flash gate exists, so that
+    // fallback can erase Config and the saved session on an unknown or sagging supply. Mount
+    // non-destructively here; session recovery may format later only after the gate says it is
+    // safe.
+    //
+    // CITE(prior-art): [CIT-INTERNAL-FS] derived begin() erases all seven filesystem pages on
+    //   mount failure before retrying.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 — no flash erase/write before voltage evidence.
+    m_mounted = storage::mount_without_format();
     if (!m_mounted) {
         LOGLN(F("   config  : filesystem unavailable — running on defaults"));
         return;
@@ -205,6 +214,9 @@ bool Config::save()
 
 bool Config::rewrite_after_filesystem_format()
 {
+    // storage::format_and_mount() succeeded immediately before this callback. Config may still
+    // remember a failed non-destructive boot mount, so synchronize its view before save().
+    m_mounted = true;
     return save();
 }
 

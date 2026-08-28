@@ -2,6 +2,22 @@
 
 What each release establishes on hardware, and what it does not. Moved out of `AGENTS.md` so it is read when relevant rather than loaded into every agent turn.
 
+## Where v0.4.4 leaves things
+
+**`v0.4.4` is ready to compile and begin device fault-injection testing; it is not yet
+deployment-qualified.** It hardens the frame-counter/session persistence path, bounds every
+known self-trapping safety hold, preserves reachability through brownout-threshold and
+intermittent one-wire oscillation, and machine-checks both OTAA EUIs before registration.
+Local preflight and CI compile/test evidence belong to the release; hardware observations do
+not exist until they are recorded in [`EVIDENCE.md`](EVIDENCE.md).
+
+The first device pass must cover [#55](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/55)
+and [#90](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/90):
+counter-headroom refusal, failed session removal, safe format/remount/config rebuild,
+brownout-deferred recovery, intermittent one-wire validity, and a fresh join only after stale
+credentials are gone. H8 remains open after that: one fault-injection session is not the 24 h
+bench soak or 7 d field shadow.
+
 ## Where v0.4.3 leaves things
 
 **`1c2df3c` is in the field, tagged `v0.4.3`, and it named itself off the board.** The operator
