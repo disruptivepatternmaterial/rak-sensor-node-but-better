@@ -85,7 +85,7 @@ bool session_flash_write_allowed()
 // are not collateral damage.
 bool rebuild_config_after_filesystem_format()
 {
-    return config.save();
+    return config.rewrite_after_filesystem_format();
 }
 
 // Consecutive cycles in which neither sensor produced a single field.

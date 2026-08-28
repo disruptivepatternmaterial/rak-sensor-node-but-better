@@ -203,6 +203,11 @@ bool Config::save()
     return true;
 }
 
+bool Config::rewrite_after_filesystem_format()
+{
+    return save();
+}
+
 bool Config::set_interval_seconds(uint32_t seconds)
 {
     if (!interval_in_range(seconds)) {
