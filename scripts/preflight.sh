@@ -244,6 +244,25 @@ else
   ok "no payload field is BLOCKED"
 fi
 
+# --------------------------------------------------------------- key byte order checker
+# Not a check on this repo's contents -- a check that the tool guarding the most expensive
+# mistake in the project still catches it. A reversed DevEUI is invisible from the network side
+# (issue #23, cost a session on 2026-07-31), so register_device.sh is the only thing standing
+# between a transcription slip and a node that transmits perfectly to nobody. #76 shipped a
+# soak check that could not fail; the same mistake here would be worse, because this one gets
+# trusted right before a device goes in the woods. Needs no credentials, network, or board.
+step "key byte order checker"
+if [[ -x scripts/register_device.sh ]]; then
+  if SELFTEST_OUT=$(scripts/register_device.sh selftest 2>&1); then
+    ok "register_device.sh catches a reversed DevEUI ($(grep -c '^   ok ' <<< "$SELFTEST_OUT") cases)"
+  else
+    echo "$SELFTEST_OUT" | grep -E '^   FAIL|^FAIL' || true
+    bad "register_device.sh selftest failed -- the DevEUI reversal check is not trustworthy"
+  fi
+else
+  bad "scripts/register_device.sh is missing or not executable"
+fi
+
 # --------------------------------------------------------------- summary
 echo
 if [[ "$FAILED" -ne 0 ]]; then

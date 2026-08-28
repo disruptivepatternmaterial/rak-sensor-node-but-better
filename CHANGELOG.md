@@ -28,6 +28,39 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   for ADR-0009: if anyone ever does rewrite history, the broken evidence chain fails the gate
   immediately instead of being discovered later by a reader who cannot find `1c2df3c`.
 
+### Added
+
+- **`scripts/register_device.sh` — registering a node is now scripted, and the byte order is
+  checked by a machine rather than by a human reading two hex strings.** The three checks in
+  [#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23) were
+  a manual checklist; they are now `verify` (TTN versus `src/secrets.h`), `banner` (the boot
+  banner versus `src/secrets.h`, which is the value actually compiled into the running image)
+  and `session` (has the Network Server ever accepted a join). `gen` produces MSB-order keys
+  with a locally-administered DevEUI, and `create` registers the device using the same bytes
+  already in `secrets.h` rather than generating new ones, removing the transcription step the
+  bug lives in.
+
+  The useful part is not the automation, it is the diagnosis. `SX126x-Arduino` takes the DevEUI
+  and JoinEUI most-significant-byte-first and reverses them itself; a widely-copied Arduino
+  LoRaWAN library wants them reversed, so reversed examples are the easy thing to find. A
+  reversed DevEUI describes a device that does not exist, and an unrecognised join request is
+  neither answered nor logged — no join attempt, no error, nothing to bisect, while the node
+  transmits perfectly and forever. It cost a session on 2026-07-31. `verify` reports
+  byte-reversal **as byte-reversal, by name**, distinguishing it from "wrong device", which is
+  precisely the distinction the TTN console cannot make because both present as nothing at all.
+  `check` does the same comparison offline against a pasted console value, so it needs no
+  credentials.
+
+  Gated by its own `selftest` — ten cases including a deliberate reversal, a reversal that must
+  *not* be misreported as a mismatch, a truncated header, a missing header, and a banner with no
+  DevEUI line — wired into `scripts/preflight.sh`. Verified in both directions: breaking the
+  reversal branch turns the run red, restoring it turns it green.
+  [#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76)
+  shipped a check that could not fail, and this one is trusted immediately before a device goes
+  in the woods. Writing the selftest also caught a real bug in the script: `die` inside `$(...)`
+  only exits the subshell, so a missing `secrets.h` was reported as "80 hex digits, expected 16"
+  with the error text itself parsed as hex.
+
 ### Fixed
 
 - **The frame-counter ceiling was the one hold in this firmware with no exit at all, and it

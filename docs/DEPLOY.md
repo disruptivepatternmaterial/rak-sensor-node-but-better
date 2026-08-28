@@ -96,7 +96,46 @@ Two open items block deployment and are **not** firmware:
 
 - **Buck converter selection** — must be chosen on no-load quiescent current, since it is a
   24/7 parallel load. See [`HARDWARE.md`](HARDWARE.md) and [`POWER_BUDGET.md`](POWER_BUDGET.md).
-- **TTN device registration** for additional nodes, with MSB-order keys.
+- **TTN device registration** for additional nodes, with MSB-order keys. Now scripted —
+  see below. The registration itself still needs a logged-in `ttn-lw-cli`, which is a
+  credential and lives on the build host, not in this repo.
 
 A firmware image that passes every gate above is *ready*; the node is not deployable until
 those two close as well.
+
+## Registering a new node
+
+`scripts/register_device.sh`. Run it in this order and do not skip `verify`:
+
+```bash
+scripts/register_device.sh gen                        # MSB-order DevEUI + AppKey, paste into src/secrets.h
+scripts/register_device.sh create puma-concolor-002   # needs ttn-lw-cli logged in
+scripts/register_device.sh verify puma-concolor-002   # TTN vs src/secrets.h — before flashing
+# flash, capture the boot banner, then:
+scripts/register_device.sh banner soak-runs/<run>/serial.log
+scripts/register_device.sh session puma-concolor-002  # did the Network Server accept a join?
+```
+
+**Why the ceremony.** `SX126x-Arduino` wants the DevEUI and JoinEUI most-significant-byte-first
+and reverses them itself when it builds the join request, while a widely-copied Arduino LoRaWAN
+library wants them reversed — so reversed examples are the easy thing to find. A reversed DevEUI
+describes a device that does not exist, and an unrecognised join request is neither answered nor
+logged: the console shows no join attempt, no error and nothing to bisect, while the node
+transmits perfectly and forever. It cost a debugging session on 2026-07-31
+([#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23)).
+
+`verify` exists because that failure is invisible from the network side. It reports
+byte-reversal **as byte-reversal, by name**, separating it from "wrong device" — which is the
+one distinction the TTN console cannot make for you, since both look identical there (nothing
+at all). `check` does the same comparison fully offline against a value pasted from the console,
+so it needs no credentials.
+
+`session` distinguishes "never joined" from "joined once". A missing session means either a
+reversed DevEUI or no gateway coverage; run `verify` first, because it tells the two apart and
+the console does not.
+
+The checker is itself gated: `scripts/register_device.sh selftest` runs ten cases including a
+deliberate reversal, and `scripts/preflight.sh` runs it on every commit. A check that cannot
+fail is worse than no check
+([#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76) was
+exactly that), and this one gets trusted immediately before a device goes in the woods.
