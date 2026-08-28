@@ -126,16 +126,15 @@ bool write_file(const Stored &s)
     return storage::atomic_write(kPath, kTmpPath, &s, sizeof(s));
 }
 
-bool read_file(Stored &s)
+storage::ReadResult read_file(Stored &s)
 {
-    File f(InternalFS);
-    if (!f.open(kPath, FILE_O_READ)) {
-        return false;
+    const storage::ReadResult result = storage::read_exact(kPath, &s, sizeof(s));
+    if (result != storage::ReadResult::Ok) {
+        return result;
     }
-    const int n = f.read((uint8_t *)&s, sizeof(s));
-    f.close();
 
-    return n == (int)sizeof(s) && s.magic == kMagic && s.version == kVersion;
+    return (s.magic == kMagic && s.version == kVersion) ? storage::ReadResult::Ok
+                                                        : storage::ReadResult::InvalidRecord;
 }
 
 bool collect(Stored &s)
@@ -205,17 +204,19 @@ static bool reject_stored_session(const char *reason)
     // when it accepts the new one; if saving the replacement then fails, the next reset restores
     // credentials the network no longer honors and unconfirmed sends look locally successful
     // forever. prepare_fresh_join() repairs this once the flash-write gate says a format is safe.
-    if (!forget()) {
-        s_fresh_join_blocked = true;
-    }
+    (void)forget();
     return false;
 }
 
 bool restore()
 {
     Stored s = {};
-    if (!read_file(s)) {
+    const storage::ReadResult read_result = read_file(s);
+    if (read_result == storage::ReadResult::Absent) {
         return false;
+    }
+    if (read_result != storage::ReadResult::Ok) {
+        return reject_stored_session("unreadable record");
     }
 
     // An all-zero address means the stored file predates a successful join. Treat it as
@@ -414,8 +415,9 @@ static bool format_filesystem_and_rebuild_config()
 
     LOGLN(F("   session : repairing persistence — formatting the filesystem while the pack is "
             "known safe"));
-    if (!InternalFS.format()) {
-        LOGLN(F("   session : filesystem repair failed — flash may be physically unavailable"));
+    if (!storage::format_and_mount()) {
+        LOGLN(F("   session : filesystem format/remount failed — flash may be physically "
+                "unavailable"));
         return false;
     }
 
@@ -641,6 +643,7 @@ bool forget()
     if (!storage::remove_or_absent(kPath)) {
         // Deliberately leaves s_have_stored_session true. The ceiling still describes a real
         // file or one whose absence cannot be proven, so it still binds.
+        s_fresh_join_blocked = true;
         LOGLN(F("   session : could not prove the stored session is gone — ceiling still "
                 "binds"));
         return false;

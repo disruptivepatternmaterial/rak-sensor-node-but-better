@@ -370,8 +370,8 @@ bool Radio::send(const Payload &p)
         if (m_failures >= kFailuresBeforeRejoin) {
             LOGF("   radio   : %lu failures in a row — attempting to drop the session\n",
                  (unsigned long)m_failures);
+            m_joined = false;
             if (session::forget()) {
-                m_joined = false;
                 LOGLN(F("   radio   : stored session is gone — rejoining"));
             } else {
                 // Do not join a fresh network session while a stale one is still the session
@@ -381,12 +381,12 @@ bool Radio::send(const Payload &p)
                 // session report local success, so the failure counter never gets another
                 // chance to escape.
                 //
-                // Keep the current session, reset its negotiated MAC parameters below, and give
-                // it three fresh attempts. A later successful removal permits the rejoin; a
-                // failed removal no longer creates two contradictory sessions.
-                m_failures = 0;
-                LOGLN(F("   radio   : stored session could not be removed — retaining it "
-                        "instead of creating an unpersistable replacement"));
+                // prepare_fresh_join() now owns the next step: format/rebuild immediately when
+                // voltage is safe, or defer the join until it is. This prevents both the
+                // contradictory-session reset and a three-failure loop that never entered the
+                // filesystem repair path.
+                LOGLN(F("   radio   : stored session could not be removed — fresh join blocked "
+                        "until filesystem repair"));
             }
 
             // Reset the MAC's negotiated parameters whether or not the stored session could be

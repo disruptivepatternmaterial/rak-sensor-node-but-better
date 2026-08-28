@@ -298,9 +298,11 @@ TTN ignores lower counters after a reset until `FCntUp` exceeds the highest valu
 accepted ([CITE(policy): TTN frame-counter security — `CIT-TTN-SECURITY`](CITATIONS.md)), so
 six months of post-ceiling transmissions can create six months of locally successful,
 network-discarded uplinks after one watchdog reset. On safe voltage, repeated checkpoint
-failure plus a removal I/O error therefore triggers one whole-filesystem format, followed by
-rewriting the in-RAM Config and re-anchoring the live session. If the session rewrite still
-fails, the stale file is nevertheless gone and the next reset joins fresh.
+failure plus a removal I/O error therefore triggers a whole-filesystem format and explicit
+remount, followed by rewriting the in-RAM Config and re-anchoring the live session. If the
+session rewrite still fails, the stale file is nevertheless gone and the next reset joins
+fresh. Any stored-session read/apply failure follows the same rule: a fresh OTAA join cannot
+start until the old file is proven absent or safe repair removes it.
 
 During a brownout hold, the format is deliberately deferred: the one authorized checkpoint is
 a small bounded write, while erasing the whole filesystem on unknown voltage is not. Each sparse

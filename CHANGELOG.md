@@ -78,12 +78,15 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
   file survived. `File::flush()` and `File::close()` return void and discard commit errors, so
   the atomic writer could rename an uncommitted staging file over a valid record. Config and
   session now share one raw-LittleFS primitive that checks open, write, sync, close, and rename;
-  removal accepts only `OK` or `NOENT`. A failed attempt preserves the live record.
+  reads distinguish absent, malformed, and I/O failure; removal accepts only `OK` or `NOENT`;
+  and a format is followed by an explicit remount even when Adafruit's internal mounted flag was
+  cleared by an earlier failed attempt. A failed write preserves the live record.
 - **Three local radio-send failures could create a fresh session while an old session remained
   on flash.** If saving the rejoin then failed, the next reset restored credentials TTN had
   invalidated, and unconfirmed sends looked locally successful forever. Rejoin now proceeds
-  only after the stored session is proven gone; otherwise the MAC parameters are reset while
-  retaining the one session the next boot will also restore.
+  only after the stored session is proven gone; otherwise it is blocked until safe filesystem
+  repair. The same guard covers unreadable records and every failed restore component, not just
+  the uplink counter.
 - **The registration verifier could approve credentials the firmware did not use.** Its source
   parser matched a commented-out `OTAA_DEVEUI` before the active definition, `create` hardcoded
   an all-zero JoinEUI instead of reading `OTAA_APPEUI`, `verify` checked only DevEUI, and
