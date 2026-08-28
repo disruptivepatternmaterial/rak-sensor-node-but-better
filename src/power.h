@@ -105,18 +105,20 @@ constexpr uint8_t kInvalidReadsBeforeInhibit = 4;
 // pack voltage at all, at any scaling. Inventing a mapping from the 3V3 rail back to the pack
 // would be a fabricated reading, which is worse than no reading. See ADR-0007.
 //
-// So the hold is bounded instead of absolute: after this many consecutive no-evidence cycles
-// the node sends one uplink regardless, then resumes holding for another full interval. That
-// keeps the node distinguishable from a dead one and keeps the downlink path reachable.
+// So any hold whose current reading does not prove that transmitting is unsafe is bounded
+// instead of absolute: after this many held cycles the node sends one uplink, then resumes
+// holding for another full interval. That keeps the node distinguishable from a dead one and
+// keeps the downlink path reachable.
 //
-// This applies **only** to the no-evidence path. When the pack answers and reports a low
-// voltage, staying quiet is exactly right and there is no keepalive — the evidence says
-// spending energy is the wrong move, and #38 exists because that used to be ignored.
+// A cycle measured at or below kTxInhibitCentivolts never transmits — the evidence says
+// spending energy is the wrong move, and #38 exists because that used to be ignored. But that
+// cycle does not erase the elapsed hold time. If a later reading is inside the hysteresis band,
+// the keepalive can become due there; otherwise a pack alternating across the inhibit floor
+// resets the clock forever and makes the Class A node permanently mute.
 //
-// Twenty-four, so at the default hourly interval the node is heard from about once a day. One
-// uplink per day is roughly 5% of the sandbox airtime allowance and a rounding error against
-// a pack measured in amp-hours, which is what makes this affordable where transmitting every
-// cycle blind into a sagging pack is not.
+// Twenty-four means one opportunity every 6 h at the 900 s field floor, or about daily at the
+// 3600 s default. An opportunity is not necessarily an uplink: if that cycle is measured low,
+// it stays suppressed until a later in-band or no-evidence cycle makes transmitting permissible.
 //
 // CITE(policy): [CIT-TTN-FUP] — 30 s of uplink airtime per node per 24 h. A single short
 //   uplink a day sits far inside that, so the keepalive cannot breach the fair-use budget
@@ -128,6 +130,54 @@ constexpr uint8_t kInvalidReadsBeforeInhibit = 4;
 //   actually failed repeatedly during bring-up, which is why single-sourcing the gate on it
 //   is the risk worth bounding.
 constexpr uint16_t kNoEvidenceKeepaliveCycles = 24;
+
+namespace detail {
+
+// Pure state machine for the reachability clock, split out so the threshold-oscillation case
+// can be tested off-target without Arduino or the nRF52 power registers.
+class KeepaliveClock {
+  public:
+    void clear()
+    {
+        m_armed       = false;
+        m_held_cycles = 0;
+    }
+
+    // Starts a new held interval. permitted_now says whether this particular cycle has evidence
+    // that makes one keepalive affordable; it does not change the interval.
+    void start(bool permitted_now)
+    {
+        m_armed       = permitted_now;
+        m_held_cycles = 0;
+    }
+
+    // Advances total time held. A measured-low cycle may disarm the current opportunity, but
+    // it must not erase time already held — otherwise crossings around the inhibit threshold
+    // postpone the keepalive forever.
+    void advance(bool permitted_now)
+    {
+        m_armed = permitted_now;
+        if (m_held_cycles < kNoEvidenceKeepaliveCycles) {
+            ++m_held_cycles;
+        }
+    }
+
+    void note_sent() { m_held_cycles = 0; }
+
+    bool due(bool engaged) const
+    {
+        return engaged && m_armed && m_held_cycles >= kNoEvidenceKeepaliveCycles;
+    }
+
+    bool     armed() const { return m_armed; }
+    uint16_t held_cycles() const { return m_held_cycles; }
+
+  private:
+    bool     m_armed       = false;
+    uint16_t m_held_cycles = 0;
+};
+
+} // namespace detail
 
 // Called on a change of the gate's state so it can be remembered across a reset. Passed in
 // rather than called directly, because persistence lives in Config and this file has no
@@ -189,10 +239,7 @@ class Brownout {
     // reading at all, and one resting on a reading between the inhibit and resume thresholds.
     // Never armed for a reading at or below kTxInhibitCentivolts — that pack is genuinely too
     // low to spend energy, and #38 exists because a keepalive there used to be sent anyway.
-    bool keepalive_due() const
-    {
-        return m_engaged && m_keepalive_armed && m_silent_cycles >= kNoEvidenceKeepaliveCycles;
-    }
+    bool keepalive_due() const { return m_keepalive.due(m_engaged); }
 
     // Called after a keepalive uplink actually reaches the air, so the count restarts. Split
     // from keepalive_due() on purpose: a join that fails must not consume the keepalive, or a
@@ -207,18 +254,14 @@ class Brownout {
     bool              m_engaged       = false;
     uint8_t           m_invalid_reads = 0;
 
-    // Whether the current hold rests on absence of evidence, and how many cycles it has
-    // held. Neither is persisted: the no-evidence hold itself is not persisted either, since
-    // it re-engages within kInvalidReadsBeforeInhibit cycles for the same reason it did the
-    // first time.
-    bool     m_without_evidence = false;
-    uint16_t m_silent_cycles    = 0;
+    // Whether the current hold rests on absence of evidence. Not persisted: it reappears after
+    // kInvalidReadsBeforeInhibit cycles for the same reason it arose the first time.
+    bool m_without_evidence = false;
 
-    // Whether the current hold is one the node cannot lift by itself, and therefore one whose
-    // silence has to be bounded. Separate from m_without_evidence because a hold resting on a
-    // reading inside the hysteresis band is equally inescapable and equally in need of a
-    // keepalive, while reading as perfectly well-evidenced.
-    bool m_keepalive_armed = false;
+    // Separate from m_without_evidence because a hold resting on a reading inside the
+    // hysteresis band is equally inescapable. The clock counts total held cycles while its
+    // armed bit says whether the current evidence permits a keepalive.
+    detail::KeepaliveClock m_keepalive;
 };
 
 } // namespace power
