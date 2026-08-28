@@ -79,6 +79,15 @@ bool session_flash_write_allowed()
     return brownout.flash_write_allowed();
 }
 
+// Session owns the decision to repair a filesystem whose stale session cannot be removed, but
+// Config owns every non-session value that repair erases. Rewrite those in-RAM values
+// immediately after a successful format so the reporting interval and persisted brownout state
+// are not collateral damage.
+bool rebuild_config_after_filesystem_format()
+{
+    return config.rewrite_after_filesystem_format();
+}
+
 // Consecutive cycles in which neither sensor produced a single field.
 uint32_t empty_cycles = 0;
 
@@ -203,6 +212,13 @@ void setup()
 
     print_banner();
     config.begin();
+
+#if FEATURE_RADIO
+    // Must be installed before radio.begin(), which can restore or save a session. A null
+    // callback deliberately disables emergency formatting: deleting Config without having its
+    // owner present to rebuild it is not a valid session repair.
+    session::set_filesystem_rebuild(&rebuild_config_after_filesystem_format);
+#endif
 
 #if FEATURE_BATTERY
     // Restored from flash so a reset cannot clear the hold. Deliberately only on a build

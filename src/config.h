@@ -226,6 +226,11 @@ class Config {
     // not survive a reset.
     bool set_brownout_engaged(bool engaged);
 
+    // Rewrites every in-RAM value after session recovery formats the shared filesystem.
+    // Deliberately narrower than making save() public: ordinary callers must use the setters so
+    // range checks, rollback, and write coalescing cannot be bypassed.
+    bool rewrite_after_filesystem_format();
+
   private:
     bool load();
     bool save();

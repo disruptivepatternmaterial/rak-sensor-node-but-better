@@ -1,6 +1,7 @@
 #include "session.h"
 
 #include "build_features.h"
+#include "storage.h"
 
 #if FEATURE_RADIO
 
@@ -67,10 +68,11 @@ bool s_have_stored_session = false;
 // The ceiling refusal was the one hold in this firmware with no exit at all (#74, #68). A
 // permanent write failure -- worn page, full filesystem, unmountable image -- leaves the live
 // counter at the ceiling with nothing able to move it, so every later uplink is refused
-// forever. That needs no brownout and no unreadable pack: a healthy node reaches it on its own
-// about 32 uplinks after the last successful save, roughly 8 h at the 900 s field cadence. Being
-// Class A, the mute node is also uncommandable, which is the state AGENTS.md says must never be
-// reached.
+// forever. That needs no brownout and no unreadable pack: during uninterrupted runtime a healthy
+// node reaches it every 32 uplinks, roughly 8 h at the 900 s field cadence. After a reset the
+// restored counter intentionally consumes that reserve, so the first uplink checkpoints again
+// before transmitting. Being Class A, a mute node is also uncommandable, which is the state
+// AGENTS.md says must never be reached.
 //
 // Three failures, not one. A rejoin is the most expensive thing this node does and a transient
 // write failure must not cost one; three consecutive failures on a pack the gate has already
@@ -79,6 +81,14 @@ bool s_have_stored_session = false;
 constexpr uint8_t kCeilingWriteFailuresBeforeForget = 3;
 uint8_t           s_ceiling_write_failures          = 0;
 bool              s_ceiling_abandoned               = false;
+bool              s_fresh_join_blocked              = false;
+
+// A failed format may be transient, so "once per boot" would itself be a permanent hold on a
+// node that never resets. It also must not run every 900 s against physically dead flash.
+// Retry after this many eligible calls: about daily at the field floor when every cycle has a
+// payload, and less often while sensor silence already reduces calls into the radio path.
+constexpr uint16_t kFilesystemRecoveryRetryCalls = 96;
+uint16_t           s_filesystem_recovery_cooldown = 0;
 
 // One-shot authorization to write the counter checkpoint despite a withheld flash-write gate.
 // Set by main.cpp immediately before a keepalive uplink and consumed by the next headroom check.
@@ -88,6 +98,10 @@ bool s_checkpoint_permit = false;
 // Null means "allowed". See set_flash_write_gate() — an un-wired gate must not disable
 // persistence, because that failure would be silent and would cost a rejoin every reset.
 session::FlashWriteGateFn s_flash_write_gate = nullptr;
+
+// Rewrites Config after an emergency format. Null means formatting is not permitted: repairing
+// one file by silently discarding the reporting interval and brownout bit is not a repair.
+session::FilesystemRebuildFn s_filesystem_rebuild = nullptr;
 
 bool mib_get(Mib_t type, MibRequestConfirm_t &req)
 {
@@ -106,60 +120,22 @@ bool mib_get(Mib_t type, MibRequestConfirm_t &req)
 // stored file leaves it" was false on precisely the path that matters. Found by adversarial
 // review of the escape ladder, which had been built on top of that promise.
 //
-// The leading remove was not gratuitous, which is why this needs care rather than deletion:
-// FILE_O_WRITE maps to LFS_O_RDWR | LFS_O_CREAT with no truncation, and the library seeks to
-// the end on open, so writing to an existing file appends to it. That is handled here on the
-// temporary file, where a mistake costs nothing.
-//
-// CITE(prior-art): [CIT-ADA-LITTLEFS] Adafruit_LittleFS_File.cpp:56-57,77 -- FILE_O_WRITE is
-//   LFS_O_RDWR|LFS_O_CREAT followed by a seek to LFS_SEEK_END, so an open-and-write appends
 // CITE(prior-art): [CIT-LITTLEFS-DESIGN] littlefs rename is atomic and replaces an existing
 //   destination, so kPath is always either the previous session or the new one
 bool write_file(const Stored &s)
 {
-    File f(InternalFS);
-    if (!f.open(kTmpPath, FILE_O_WRITE)) {
-        return false;
-    }
-
-    // Both, in this order, because of the append-on-open behavior above. A temp left behind by
-    // an interrupted write would otherwise be appended to -- and write() would still report
-    // sizeof(s) bytes, so the size check below would pass while read_file() later read the
-    // stale leading copy and believed it.
-    if (!f.truncate(0) || !f.seek(0)) {
-        f.close();
-        InternalFS.remove(kTmpPath);
-        return false;
-    }
-
-    const size_t n = f.write((const uint8_t *)&s, sizeof(s));
-    f.close();
-
-    if (n != sizeof(s)) {
-        InternalFS.remove(kTmpPath);
-        return false;
-    }
-
-    // The atomic step. Either kPath is the new session or it is still the old one; it is never
-    // absent and never half-written, which is the property the ceiling depends on.
-    if (!InternalFS.rename(kTmpPath, kPath)) {
-        InternalFS.remove(kTmpPath);
-        return false;
-    }
-
-    return true;
+    return storage::atomic_write(kPath, kTmpPath, &s, sizeof(s));
 }
 
-bool read_file(Stored &s)
+storage::ReadResult read_file(Stored &s)
 {
-    File f(InternalFS);
-    if (!f.open(kPath, FILE_O_READ)) {
-        return false;
+    const storage::ReadResult result = storage::read_exact(kPath, &s, sizeof(s));
+    if (result != storage::ReadResult::Ok) {
+        return result;
     }
-    const int n = f.read((uint8_t *)&s, sizeof(s));
-    f.close();
 
-    return n == (int)sizeof(s) && s.magic == kMagic && s.version == kVersion;
+    return (s.magic == kMagic && s.version == kVersion) ? storage::ReadResult::Ok
+                                                        : storage::ReadResult::InvalidRecord;
 }
 
 bool collect(Stored &s)
@@ -221,21 +197,42 @@ bool mib_set_u32(Mib_t type, uint32_t value)
 
 namespace session {
 
+static bool reject_stored_session(const char *reason)
+{
+    LOGF("   session : restore rejected (%s) — discarding before a fresh join\n", reason);
+
+    // A fresh join is safe only if the stale session is gone. TTN invalidates the old session
+    // when it accepts the new one; if saving the replacement then fails, the next reset restores
+    // credentials the network no longer honors and unconfirmed sends look locally successful
+    // forever. prepare_fresh_join() repairs this once the flash-write gate says a format is safe.
+    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+        s_fresh_join_blocked = true;
+        LOGLN(F("   session : rejected session retained — brownout gate withholds removal"));
+    } else {
+        (void)forget();
+    }
+    return false;
+}
+
 bool restore()
 {
     Stored s = {};
-    if (!read_file(s)) {
+    const storage::ReadResult read_result = read_file(s);
+    if (read_result == storage::ReadResult::Absent) {
         return false;
+    }
+    if (read_result != storage::ReadResult::Ok) {
+        return reject_stored_session("unreadable record");
     }
 
     // An all-zero address means the stored file predates a successful join. Treat it as
     // absent rather than pushing a meaningless session into the MAC.
     if (s.dev_addr == 0) {
-        return false;
+        return reject_stored_session("zero DevAddr");
     }
 
     if (!mib_set_u32(MIB_DEV_ADDR, s.dev_addr)) {
-        return false;
+        return reject_stored_session("DevAddr");
     }
 
     MibRequestConfirm_t req;
@@ -244,14 +241,14 @@ bool restore()
     req.Type          = MIB_NWK_SKEY;
     req.Param.NwkSKey = s.nwk_skey;
     if (LoRaMacMibSetRequestConfirm(&req) != LORAMAC_STATUS_OK) {
-        return false;
+        return reject_stored_session("NwkSKey");
     }
 
     memset(&req, 0, sizeof(req));
     req.Type          = MIB_APP_SKEY;
     req.Param.AppSKey = s.app_skey;
     if (LoRaMacMibSetRequestConfirm(&req) != LORAMAC_STATUS_OK) {
-        return false;
+        return reject_stored_session("AppSKey");
     }
 
     // The stored counter is already ahead of anything transmitted, which is the whole
@@ -261,13 +258,7 @@ bool restore()
     // success on every send, and reach nobody. Better to throw the session away and join
     // fresh, which costs one handshake and is guaranteed to work.
     if (!mib_set_u32(MIB_UPLINK_COUNTER, s.uplink_counter)) {
-        LOGLN(F("   session : frame counter rejected — discarding, will join fresh"));
-        // Return deliberately ignored. A failed removal is self-correcting here: this path
-        // already returns false, so the caller joins fresh, and the join's own save() overwrites
-        // the file that could not be removed. Unlike the escape in counter_headroom_ok(), no
-        // decision downstream depends on the file actually being gone.
-        (void)forget();
-        return false;
+        return reject_stored_session("uplink counter");
     }
 
     // The downlink counter only affects receiving. Losing it costs at most one ignored
@@ -277,22 +268,23 @@ bool restore()
     // Restoring these is what keeps the downlink path alive across a reset. Without them
     // the MAC listens one second after each uplink while the network answers at five, so
     // the node would transmit normally and never hear a reply again.
-    if (s.rx_delay1_ms != 0) {
-        (void)mib_set_u32(MIB_RECEIVE_DELAY_1, s.rx_delay1_ms);
+    if (s.rx_delay1_ms != 0 && !mib_set_u32(MIB_RECEIVE_DELAY_1, s.rx_delay1_ms)) {
+        return reject_stored_session("RX1 delay");
     }
-    if (s.rx_delay2_ms != 0) {
-        (void)mib_set_u32(MIB_RECEIVE_DELAY_2, s.rx_delay2_ms);
+    if (s.rx_delay2_ms != 0 && !mib_set_u32(MIB_RECEIVE_DELAY_2, s.rx_delay2_ms)) {
+        return reject_stored_session("RX2 delay");
     }
 
     memset(&req, 0, sizeof(req));
     req.Type                  = MIB_NETWORK_JOINED;
     req.Param.IsNetworkJoined = JOIN_OK;
-    // Setting the address and keys is what actually makes the session usable; this only
-    // stops the MAC from insisting on a handshake first, so a failure here is not fatal.
-    (void)LoRaMacMibSetRequestConfirm(&req);
+    if (LoRaMacMibSetRequestConfirm(&req) != LORAMAC_STATUS_OK) {
+        return reject_stored_session("joined state");
+    }
 
     s_saved_counter_ceiling = s.uplink_counter;
     s_have_stored_session   = true;
+    s_fresh_join_blocked    = false;
 
     LOGF("   session : restored 0x%08lX, counter %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
@@ -385,6 +377,8 @@ static WriteOutcome write_session(bool checkpoint_permitted)
     // counter_headroom_ok() starts over. Reset here rather than there because save() reaching
     // flash is the same evidence as the checkpoint reaching it.
     s_ceiling_write_failures = 0;
+    s_filesystem_recovery_cooldown = 0;
+    s_fresh_join_blocked = false;
 
     // And re-arm the ceiling itself. Clearing the strike count without clearing this would have
     // left the protection off for the rest of the power cycle: s_ceiling_abandoned short-circuits
@@ -405,6 +399,109 @@ bool save()
     // Callers of save() only need to know whether the session is on flash. The distinction
     // between withheld and failed matters to the escape ladder, not here.
     return write_session(false) == WriteOutcome::Ok;
+}
+
+// Last-resort repair after repeated write failures and a removal error prove that the
+// filesystem cannot safely replace even one small record. Called only when the brownout gate
+// says flash work is affordable; formatting while the voltage is unknown would trade a
+// recoverable stale session for a potentially torn whole filesystem.
+//
+// A transient failure retries after kFilesystemRecoveryRetryCalls. If flash is physically dead,
+// that cooldown prevents an erase attempt on every wake without making one failed format a
+// permanent hold of its own.
+static bool format_filesystem_and_rebuild_config()
+{
+    if (s_filesystem_rebuild == nullptr) {
+        return false;
+    }
+    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+        LOGLN(F("   session : filesystem repair deferred — brownout gate withholds format"));
+        return false;
+    }
+    if (s_filesystem_recovery_cooldown > 0) {
+        --s_filesystem_recovery_cooldown;
+        return false;
+    }
+    s_filesystem_recovery_cooldown = kFilesystemRecoveryRetryCalls;
+
+    LOGLN(F("   session : repairing persistence — formatting the filesystem while the pack is "
+            "known safe"));
+    if (!storage::format_and_mount()) {
+        LOGLN(F("   session : filesystem format/remount failed — flash may be physically "
+                "unavailable"));
+        return false;
+    }
+
+    // The stale session is now certainly gone. Clear this before either rewrite so a failure
+    // cannot leave RAM claiming that a reset will restore a file the format erased.
+    s_saved_counter_ceiling = 0;
+    s_have_stored_session   = false;
+    s_ceiling_abandoned     = false;
+    s_ceiling_write_failures = 0;
+    s_fresh_join_blocked     = false;
+
+    const bool config_saved = s_filesystem_rebuild();
+    if (!config_saved) {
+        LOGLN(F("   session : filesystem formatted, but config could not be restored"));
+    }
+    return true;
+}
+
+static bool rebuild_filesystem_and_reanchor()
+{
+    if (!format_filesystem_and_rebuild_config()) {
+        return false;
+    }
+
+    const WriteOutcome session_saved = write_session(false);
+    if (session_saved == WriteOutcome::Ok) {
+        LOGLN(F("   session : filesystem repaired; config and session were re-anchored"));
+    } else {
+        // Still safe from replay: format removed the stale file, so a reset joins fresh even
+        // though this running session could not be checkpointed.
+        LOGLN(F("   session : filesystem formatted, but session could not be restored — next "
+                "reset will join fresh"));
+    }
+
+    // True means the stale file is gone, not that every rewrite succeeded. That is the
+    // deployment-ending fact this recovery exists to establish.
+    return true;
+}
+
+JoinPreparation prepare_fresh_join()
+{
+    if (!s_fresh_join_blocked) {
+        return JoinPreparation::ReadyToJoin;
+    }
+
+    // The stored session may have failed to apply transiently at boot. Retrying it is read-only
+    // unless another component fails again, and under a brownout gate reject_stored_session()
+    // retains the file rather than removing it. A successful retry restores reachability
+    // without either a format or a fresh join.
+    if (restore()) {
+        LOGLN(F("   session : rejected session restored on retry"));
+        return JoinPreparation::SessionRestored;
+    }
+
+    // restore() may have proved removal while the gate was open.
+    if (!s_fresh_join_blocked) {
+        return JoinPreparation::ReadyToJoin;
+    }
+
+    if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
+        LOGLN(F("   session : fresh join deferred — stale session remains and filesystem "
+                "repair is unsafe under the brownout hold"));
+        return JoinPreparation::Blocked;
+    }
+
+    if (!format_filesystem_and_rebuild_config()) {
+        LOGLN(F("   session : fresh join deferred — stale session could not be removed or "
+                "repaired"));
+        return JoinPreparation::Blocked;
+    }
+
+    LOGLN(F("   session : stale session removed by filesystem repair — fresh join allowed"));
+    return JoinPreparation::ReadyToJoin;
 }
 
 void permit_counter_checkpoint()
@@ -441,13 +538,21 @@ bool counter_headroom_ok()
         return true;
     }
 
-    // Already decided, so stop re-deciding. s_ceiling_abandoned used to gate only the log line,
-    // which made "logged once, not every cycle" true of the message and false of the work: every
-    // later uplink still ran collect(), a file open, a write and a remove against a filesystem
-    // already known to reject all of them. At the 900 s cadence that is roughly 35 000 pointless
-    // pairs of flash mutations over a year, spending energy and wear on a question whose answer
-    // cannot change. Found by adversarial review.
+    // A hold-time abandonment gets another chance only when another keepalive is already going
+    // to air. That is deliberately sparse and affordable, and lets a transient filesystem
+    // failure heal without spending a format while pack voltage is unknown. Once the brownout
+    // gate is open, repair the whole filesystem exactly once instead; continuing to transmit
+    // against the stale ceiling makes the replay outage after a reset grow without bound.
     if (s_ceiling_abandoned) {
+        if (permitted) {
+            if (write_session(true) == WriteOutcome::Ok) {
+                return true;
+            }
+            (void)forget();
+            return true;
+        }
+
+        (void)rebuild_filesystem_and_reanchor();
         return true;
     }
 
@@ -498,33 +603,44 @@ bool counter_headroom_ok()
     }
 
     // Neither the write nor the removal works, so the stored ceiling still describes a real
-    // file and still binds. Transmit anyway. This is the deliberate choice between two bad
-    // outcomes, and it is not symmetric:
+    // file and still binds. If the pack is known safe, format and rebuild now: every frame sent
+    // past this point is another frame TTN will ignore after a reset, and TTN documents that it
+    // resumes only once FCntUp exceeds the highest value previously accepted.
+    //
+    // Never format on a checkpoint permit. That token belongs to a keepalive sent while the
+    // brownout gate is engaged; one small atomic record is an accepted bounded risk there, an
+    // erase of the whole filesystem is not. A later keepalive retries the small write/remove,
+    // and the first healthy cycle takes the full repair.
+    //
+    // CITE(policy): [CIT-TTN-SECURITY] lower frame counters are ignored until FCntUp becomes
+    //   higher than the previous value, so post-ceiling transmissions lengthen a future outage
+    //   one-for-one.
+    // CITE(spec): [CIT-LW-LINK] an end device SHALL NOT reuse FCntUp with the same session keys.
+    // CITE(prior-art): [CIT-ADA-LITTLEFS] format unmounts, formats and remounts the filesystem,
+    //   returning false if any step fails.
+    if (!permitted && rebuild_filesystem_and_reanchor()) {
+        return true;
+    }
+
+    // The repair was unsafe now or failed. Transmit anyway for reachability, but remember the
+    // condition: hold-time keepalives retry the small operation, and later healthy cycles retry
+    // the full repair behind a long cooldown. If raw flash cannot even format, no software
+    // persistence strategy can make a reset replay-safe; the cooldown prevents erase thrash.
+    //
+    // The two immediate outcomes are still not symmetric:
     //
     //   - Staying mute is terminal. Class A means no downlink without an uplink, so a mute node
     //     is uncommandable, and nothing in the field will fix a worn flash page. It ends the
     //     deployment and only a hike recovers it.
-    //   - Transmitting past the ceiling is recoverable. It costs nothing until a reset actually
-    //     happens; after one, the restored counter is behind what the network has already seen,
-    //     so frames are discarded until the counter climbs back past the highest value sent --
-    //     bounded by however many uplinks were taken past the ceiling, then it heals unaided.
-    //
-    // So the replay this refusal exists to prevent is a temporary outage, while the refusal
-    // itself is permanent. Logged once, not every cycle, because it stays true for the rest of
-    // the deployment and a line per uplink would bury everything else.
-    //
-    // CITE(spec): [CIT-LW-LINK] frame counter rules -- a frame at or below the last value the
-    //   network accepted is discarded, which is why falling behind is an outage and not a
-    //   corruption, and why climbing back past it restores service.
-    // CITE(policy): docs/POWER_BUDGET.md -- never let the node reach a state it cannot recover
-    //   from by itself; between two failures, take the one that self-heals.
-    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H3 -- the flash-write hold protects the pack; it is
-    //   not licensed to end the deployment.
+    //   - Transmitting preserves the only Class A downlink opportunity and gives later safe
+    //     recovery code a chance to run. Its reset cost is now bounded by how long the node
+    //     remains in a brownout hold before a safe repair, not silently accepted for the rest
+    //     of the deployment.
     if (!s_ceiling_abandoned) {
         s_ceiling_abandoned = true;
         LOGF("   session : ceiling %lu cannot be advanced and the stored session cannot be "
-             "removed — transmitting anyway. A reset will replay and lose frames until the "
-             "counter passes what was sent; a mute node never recovers at all\n",
+             "removed — transmitting for reachability; repair will retry on keepalive or when "
+             "the brownout gate opens\n",
              (unsigned long)s_saved_counter_ceiling);
     }
     return true;
@@ -535,37 +651,33 @@ void set_flash_write_gate(FlashWriteGateFn gate)
     s_flash_write_gate = gate;
 }
 
+void set_filesystem_rebuild(FilesystemRebuildFn rebuild)
+{
+    s_filesystem_rebuild = rebuild;
+}
+
 bool forget()
 {
-    // The return of remove() was previously discarded, and the in-RAM state was cleared either
-    // way. That is safe on the path this function was written for -- the network has stopped
-    // honoring the session and a rejoin is wanted -- but not on the path that now depends on it:
-    // a filesystem too broken to write is a filesystem that may be too broken to remove, and
-    // clearing s_have_stored_session while the file survives lets this node transmit past a
-    // ceiling a reset still resumes from. That is the silent replay the ceiling exists to
-    // prevent, arriving through the escape hatch.
-    //
-    // The return of remove() is deliberately NOT the answer, and an earlier version of this
-    // function documented the exact opposite. Adafruit_LittleFS::remove() is
-    // `return LFS_ERR_OK == err`, and lfs_remove on a missing path returns LFS_ERR_NOENT -- so
-    // it reports false both for "the file could not be removed" and for "there was no file",
-    // which are opposite outcomes here. Trusting it would make a node whose session was already
-    // gone log "file still on flash, ceiling still binds" and keep a ceiling that describes
-    // nothing.
-    InternalFS.remove(kPath);
-
-    // exists() is the ground truth, and it is the right question: what this promises is the end
-    // state "nothing is stored", not the event "a deletion happened".
-    if (InternalFS.exists(kPath)) {
+    // The wrapper APIs cannot answer this safely. remove() returns false for both NOENT and I/O
+    // errors, while exists() returns false for every lfs_stat error — so the earlier
+    // remove-then-!exists implementation treated "flash could not be read" as "file is gone"
+    // and cleared the ceiling while a stale file might survive. storage::remove_or_absent()
+    // retains the raw littlefs status and accepts only OK or NOENT.
+    if (!storage::remove_or_absent(kPath)) {
         // Deliberately leaves s_have_stored_session true. The ceiling still describes a real
-        // file, so it still binds.
-        LOGLN(F("   session : could not discard the stored session — file still on flash, "
-                "ceiling still binds"));
+        // file or one whose absence cannot be proven, so it still binds.
+        s_fresh_join_blocked = true;
+        LOGLN(F("   session : could not prove the stored session is gone — ceiling still "
+                "binds"));
         return false;
     }
 
     s_saved_counter_ceiling = 0;
     s_have_stored_session   = false;
+    s_ceiling_write_failures = 0;
+    s_ceiling_abandoned      = false;
+    s_filesystem_recovery_cooldown = 0;
+    s_fresh_join_blocked = false;
     LOGLN(F("   session : discarded — next boot will join"));
     return true;
 }
@@ -576,10 +688,12 @@ bool forget()
 
 namespace session {
 bool restore() { return false; }
+JoinPreparation prepare_fresh_join() { return JoinPreparation::ReadyToJoin; }
 bool save() { return false; }
 bool counter_headroom_ok() { return true; }
 void permit_counter_checkpoint() {}
 void set_flash_write_gate(FlashWriteGateFn) {}
+void set_filesystem_rebuild(FilesystemRebuildFn) {}
 // True: with no radio there is no session and nothing stored, which is the state forget()
 // promises. Returning false would claim a stored session survives on a build that has none.
 bool forget() { return true; }

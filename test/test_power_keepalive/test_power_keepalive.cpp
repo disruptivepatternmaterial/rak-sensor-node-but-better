@@ -93,6 +93,25 @@ void test_disengaged_hold_never_reports_due()
     TEST_ASSERT_EQUAL_UINT16(0, clock.held_cycles());
 }
 
+void test_intermittent_evidence_cannot_restart_an_existing_hold()
+{
+    KeepaliveClock clock;
+    clock.start(true);
+
+    // Twenty held in-band cycles, then four unreadable cycles. The transition to no-evidence
+    // changes permission only; it must not restart the hold clock.
+    for (uint16_t cycle = 0; cycle < 20; ++cycle) {
+        clock.advance(true);
+    }
+    for (uint16_t cycle = 0; cycle < 4; ++cycle) {
+        clock.advance(false);
+    }
+    clock.set_permitted(true);
+
+    TEST_ASSERT_EQUAL_UINT16(power::kNoEvidenceKeepaliveCycles, clock.held_cycles());
+    TEST_ASSERT_TRUE(clock.due(true));
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -101,5 +120,6 @@ int main(int, char **)
     RUN_TEST(test_keepalive_restarts_the_full_interval);
     RUN_TEST(test_elapsed_hold_does_not_bypass_current_low_evidence);
     RUN_TEST(test_disengaged_hold_never_reports_due);
+    RUN_TEST(test_intermittent_evidence_cannot_restart_an_existing_hold);
     return UNITY_END();
 }
