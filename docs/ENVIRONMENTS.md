@@ -26,13 +26,13 @@ find written down as expired until a probe says otherwise.**
 
 | Period | Address | State |
 |---|---|---|
-| until 2026-08-12 | `192.168.10.223` (LAN) | **dead** — now fails `No route to host` |
+| until 2026-08-12 | `wx3-harness` (LAN) | **dead** — now fails `No route to host` |
 | 2026-08-12 → | a **public** address, ask the operator | working, verified 2026-08-13 |
 
 The current address is deliberately **not recorded anywhere in this repository** — a public
 address plus the account name in a tracked file is an invitation, and this repo is public
 (confirmed `PUBLIC` via `gh repo view`, 2026-08-13). So an old transcript or an old commit
-showing `192.168.10.223` is not wrong about history; it is simply stale. Two sessions have
+showing `wx3-harness` is not wrong about history; it is simply stale. Two sessions have
 now been lost to reading it as current and concluding the host was down.
 
 ### Confirm reachability in one command
@@ -60,7 +60,7 @@ Host wx3-harness                                # ~/.ssh/config — preferred, p
 ```
 
 **As of 2026-08-14 the `wx3-harness` alias on the workstation is a trap, not the fix.** Its
-`HostName` is still the dead LAN address `192.168.10.223`, so falling back to the alias fails
+`HostName` is still the dead LAN address (old static LAN IP), so falling back to the alias fails
 with `No route to host` — which reads as "the build host is down" and is the exact
 misdiagnosis that has already cost two sessions. Until someone repoints that `HostName` at the
 current address, **always `export RAK_BUILD_HOST=ntableman@<address>` explicitly** and confirm
