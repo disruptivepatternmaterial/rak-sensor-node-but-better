@@ -197,6 +197,20 @@ bool mib_set_u32(Mib_t type, uint32_t value)
 
 namespace session {
 
+static bool reject_stored_session(const char *reason)
+{
+    LOGF("   session : restore rejected (%s) — discarding before a fresh join\n", reason);
+
+    // A fresh join is safe only if the stale session is gone. TTN invalidates the old session
+    // when it accepts the new one; if saving the replacement then fails, the next reset restores
+    // credentials the network no longer honors and unconfirmed sends look locally successful
+    // forever. prepare_fresh_join() repairs this once the flash-write gate says a format is safe.
+    if (!forget()) {
+        s_fresh_join_blocked = true;
+    }
+    return false;
+}
+
 bool restore()
 {
     Stored s = {};
@@ -207,11 +221,11 @@ bool restore()
     // An all-zero address means the stored file predates a successful join. Treat it as
     // absent rather than pushing a meaningless session into the MAC.
     if (s.dev_addr == 0) {
-        return false;
+        return reject_stored_session("zero DevAddr");
     }
 
     if (!mib_set_u32(MIB_DEV_ADDR, s.dev_addr)) {
-        return false;
+        return reject_stored_session("DevAddr");
     }
 
     MibRequestConfirm_t req;
@@ -220,14 +234,14 @@ bool restore()
     req.Type          = MIB_NWK_SKEY;
     req.Param.NwkSKey = s.nwk_skey;
     if (LoRaMacMibSetRequestConfirm(&req) != LORAMAC_STATUS_OK) {
-        return false;
+        return reject_stored_session("NwkSKey");
     }
 
     memset(&req, 0, sizeof(req));
     req.Type          = MIB_APP_SKEY;
     req.Param.AppSKey = s.app_skey;
     if (LoRaMacMibSetRequestConfirm(&req) != LORAMAC_STATUS_OK) {
-        return false;
+        return reject_stored_session("AppSKey");
     }
 
     // The stored counter is already ahead of anything transmitted, which is the whole
@@ -237,16 +251,7 @@ bool restore()
     // success on every send, and reach nobody. Better to throw the session away and join
     // fresh, which costs one handshake and is guaranteed to work.
     if (!mib_set_u32(MIB_UPLINK_COUNTER, s.uplink_counter)) {
-        LOGLN(F("   session : frame counter rejected — discarding, will join fresh"));
-        // A fresh join is safe only if the stale session is gone. TTN invalidates the old
-        // session when it accepts the new one; if saving the replacement then fails, the next
-        // reset restores credentials the network no longer honors and unconfirmed sends look
-        // locally successful forever. prepare_fresh_join() repairs this once the flash-write
-        // gate says a format is safe.
-        if (!forget()) {
-            s_fresh_join_blocked = true;
-        }
-        return false;
+        return reject_stored_session("uplink counter");
     }
 
     // The downlink counter only affects receiving. Losing it costs at most one ignored
@@ -256,19 +261,19 @@ bool restore()
     // Restoring these is what keeps the downlink path alive across a reset. Without them
     // the MAC listens one second after each uplink while the network answers at five, so
     // the node would transmit normally and never hear a reply again.
-    if (s.rx_delay1_ms != 0) {
-        (void)mib_set_u32(MIB_RECEIVE_DELAY_1, s.rx_delay1_ms);
+    if (s.rx_delay1_ms != 0 && !mib_set_u32(MIB_RECEIVE_DELAY_1, s.rx_delay1_ms)) {
+        return reject_stored_session("RX1 delay");
     }
-    if (s.rx_delay2_ms != 0) {
-        (void)mib_set_u32(MIB_RECEIVE_DELAY_2, s.rx_delay2_ms);
+    if (s.rx_delay2_ms != 0 && !mib_set_u32(MIB_RECEIVE_DELAY_2, s.rx_delay2_ms)) {
+        return reject_stored_session("RX2 delay");
     }
 
     memset(&req, 0, sizeof(req));
     req.Type                  = MIB_NETWORK_JOINED;
     req.Param.IsNetworkJoined = JOIN_OK;
-    // Setting the address and keys is what actually makes the session usable; this only
-    // stops the MAC from insisting on a handshake first, so a failure here is not fatal.
-    (void)LoRaMacMibSetRequestConfirm(&req);
+    if (LoRaMacMibSetRequestConfirm(&req) != LORAMAC_STATUS_OK) {
+        return reject_stored_session("joined state");
+    }
 
     s_saved_counter_ceiling = s.uplink_counter;
     s_have_stored_session   = true;

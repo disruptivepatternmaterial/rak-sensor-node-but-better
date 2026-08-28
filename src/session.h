@@ -58,7 +58,8 @@ void set_filesystem_rebuild(FilesystemRebuildFn rebuild);
 
 // Pushes a stored session into the MAC and marks it joined. Returns false when there is
 // nothing stored, when it is unreadable, or when it belongs to different firmware — in
-// every case the caller should just join normally.
+// every case the caller may join only after prepare_fresh_join() says any rejected stored
+// session is gone.
 bool restore();
 
 // Makes a fresh OTAA join safe after restore() rejected a stored session. Usually true
