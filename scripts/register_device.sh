@@ -119,9 +119,8 @@ need_cli() {
      has 'ttn-lw-cli login' done, or use 'check' / 'banner', which need no credentials."
 }
 
-ttn_field() { # $1 = device id, $2 = field path, prints flat hex
-  ttn-lw-cli end-devices get "$APP" "$1" "--$2" 2>/dev/null \
-    | grep -oE "\"${2##*.}\"[[:space:]]*:[[:space:]]*\"[0-9A-Fa-f]+\"" \
+ttn_identity_field() { # $1 = JSON field name; reads one identity response on stdin
+  grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[0-9A-Fa-f]+\"" \
     | grep -oE '"[0-9A-Fa-f]+"$' | tr -d '"' | tr 'A-F' 'a-f'
 }
 
@@ -263,9 +262,11 @@ cmd_verify() {
   need_cli
   require_secrets
   bold "== $dev at TTN vs $SECRETS =="
-  local remote_dev remote_join local_dev local_join
-  remote_dev=$(ttn_field "$dev" "ids.dev_eui")
-  remote_join=$(ttn_field "$dev" "ids.join_eui")
+  local identity remote_dev remote_join local_dev local_join
+  identity=$(ttn-lw-cli end-devices get "$APP" "$dev" 2>/dev/null) \
+    || die "TTN could not return the identity for $APP/$dev"
+  remote_dev=$(printf '%s\n' "$identity" | ttn_identity_field "dev_eui")
+  remote_join=$(printf '%s\n' "$identity" | ttn_identity_field "join_eui")
   local_dev=$(secrets_bytes OTAA_DEVEUI) || die "could not read active OTAA_DEVEUI from $SECRETS"
   local_join=$(secrets_bytes OTAA_APPEUI) || die "could not read active OTAA_APPEUI from $SECRETS"
   compare_eui "DevEUI" "TTN     " "$remote_dev" "secrets " "$local_dev" || return $?
@@ -371,12 +372,11 @@ if [[ "${1:-} ${2:-}" == "end-devices create" ]]; then
   [[ " $* " == *" --join-eui 1020304050607080 "* ]] || exit 9
   exit 0
 fi
-for arg in "$@"; do
-  case "$arg" in
-    --ids.dev_eui)  printf '{"dev_eui":"02ABCDEF01234567"}\n'; exit 0 ;;
-    --ids.join_eui) printf '{"join_eui":"%s"}\n' "${FAKE_JOIN_EUI:-1020304050607080}"; exit 0 ;;
-  esac
-done
+if [[ "${1:-} ${2:-}" == "end-devices get" ]]; then
+  printf '{"ids":{"dev_eui":"02ABCDEF01234567","join_eui":"%s"}}\n' \
+    "${FAKE_JOIN_EUI:-1020304050607080}"
+  exit 0
+fi
 exit 8
 EOF
   chmod +x "$tmp/bin/ttn-lw-cli"
