@@ -1286,7 +1286,7 @@ Traps that cost real time here:
 ### 2026-08-12 — The RAK9154 pack latches and reports. It was never broken; the 1800 s cycle hid cycle 3
 
 - **Commit:** `b436aa9`
-- **Host:** Heliotrope Ridge (`130.111.32.200`), RAK4631 on `/dev/cu.usbmodem31101`
+- **Host:** Heliotrope Ridge, RAK4631 on `/dev/cu.usbmodem31101`
 - **Image:** `battdiag` — battery only, ~10 s cycle (`FEATURE_RK900=0 FEATURE_RADIO=0
   FEATURE_SLEEP=0 FEATURE_BENCH_INTERVAL=1 FEATURE_BATTERY_FAST=1`)
 - **Measured:** whether the all-zero record set that every prior session reported as a
@@ -3261,7 +3261,7 @@ on it. No background processes were left running.
 ### 2026-08-13 — `65f8615` on hardware: battery ladder survives 20 cycles, field image reaches sleep, and one transient probe miss still spends the BOOT
 
 - **Commit:** `65f8615` — **read back from the boot banner on the board**, not inferred
-- **Host:** Heliotrope Ridge (`ntableman@130.111.32.200`), board `/dev/cu.usbmodem31201`
+- **Host:** Heliotrope Ridge, board `/dev/cu.usbmodem31201`
 - **Measured:** (1) `env:battdiag` — 20 consecutive ~10 s battery cycles at `65f8615`;
   (2) `env:soak` — the field image, one full cycle including the sleep call
 - **Observation — `env:battdiag` boot banner and first cycle:**

@@ -36,8 +36,9 @@ Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment pro
 Two machines, and they are not interchangeable. Full detail in [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 
 - **This workstation** — author code and docs. No PlatformIO, no device on USB.
-- **Heliotrope Ridge** (`$RAK_BUILD_HOST`) — compile, flash, soak.
-  The RAK4631 lives here at 130.111.32.11 See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
+- **Heliotrope Ridge** (`$RAK_BUILD_HOST`) — compile, flash, soak. The RAK4631 lives here.
+  Set the address with `export RAK_BUILD_HOST=ntableman@<address>`; it is not recorded in
+  this repository, which is public.
 - **Git is the only transport between them.**
 
 ```bash

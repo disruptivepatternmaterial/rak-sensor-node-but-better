@@ -21,12 +21,18 @@
 # been dispatched to the build host). Without it, every subcommand relays over SSH,
 # because the only machine with the RAK4631 on USB is Heliotrope Ridge.
 
+# No -e on purpose: cmd_status and cmd_selftest both rely on greps that return non-zero.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-# Not a constant: the old LAN default (192.168.10.223) stopped answering 2026-08-12.
-# Override with RAK_BUILD_HOST, or define the wx3-harness ssh alias. docs/ENVIRONMENTS.md.
-BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}"
+# The build host is a laptop, so its address moves with the network and no literal address
+# belongs in this repo, which is public. BUILD_HOST, then RAK_BUILD_HOST, then the untracked
+# one-line file. Empty is a valid outcome -- require_host reports it at first remote use.
+BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-}}"
+if [[ -z "$BUILD_HOST" && -r "$HOME/.rak-build-host" ]]; then
+  IFS= read -r BUILD_HOST < "$HOME/.rak-build-host" || BUILD_HOST=""
+  BUILD_HOST="${BUILD_HOST//[[:space:]]/}"
+fi
 REMOTE_REPO="${REMOTE_REPO:-\$HOME/Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 SSH_OPTS=(-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 SOAK_ROOT="${SOAK_ROOT:-soak-runs}"
@@ -46,11 +52,20 @@ for a in "$@"; do
     *) ARGS+=("$a") ;;
   esac
 done
+# The ${ARGS+...} guard is required: bash 3.2 (this workstation and the build host) treats an
+# empty "${ARGS[@]}" as unset and aborts under `set -u`. The inner expansion is quoted.
 set -- ${ARGS+"${ARGS[@]}"}
+
+# Checked at first remote use, not at parse time: `--local` runs on the build host itself and
+# needs no address. Failing by name beats SSHing to a guess, which is what made a laptop on
+# another network look like a dead build host.
+require_host() {
+  [[ -n "$BUILD_HOST" ]] || die "no build host set -- export RAK_BUILD_HOST=ntableman@<address>, or put that address alone on the first line of ~/.rak-build-host"
+}
 
 # Login shell or `pio`, `gh` and `ttn-lw-cli` all report "command not found" over SSH --
 # non-interactive ssh does not source ~/.zprofile, so /opt/homebrew/bin is off PATH.
-rsh()   { ssh "${SSH_OPTS[@]}" "$BUILD_HOST" "zsh -l -c $(printf '%q' "$1")"; }
+rsh()   { require_host; ssh "${SSH_OPTS[@]}" "$BUILD_HOST" "zsh -l -c $(printf '%q' "$1")"; }
 rrepo() { rsh "cd $REMOTE_REPO && $1"; }
 
 # Run a subcommand here, or relay it to the build host.
@@ -93,13 +108,15 @@ cmd_start() {
   if [[ "$LOCAL" -ne 1 ]]; then
     info "Dispatching a ${secs}s soak to the build host"
     scripts/remote.sh sync >/dev/null || die "sync failed -- the build host must be at this commit"
-    # nohup + setsid-equivalent detachment: the run has to outlive the operator's SSH
-    # session. A 24 h soak tied to a terminal is a 24 h soak that ends at lunch.
+    # nohup: the run has to outlive the operator's SSH session. A 24 h soak tied to a
+    # terminal is a 24 h soak that ends at lunch.
     rrepo "nohup scripts/soak.sh start ${secs}s --label $(printf '%q' "$label") ${extra} --local \
              >/dev/null 2>&1 & echo launched pid \$!"
     sleep 3
-    cmd_status
+    # Before cmd_status, not after: on the relay path cmd_status exits inside here_or_there,
+    # so anything printed after it never runs.
     echo "${DIM}   scripts/soak.sh status | tail | stop | summary${NC}"
+    cmd_status
     return 0
   fi
 
@@ -124,28 +141,30 @@ cmd_start() {
 
 # --------------------------------------------------------------------------- status
 cmd_status() {
-  here_or_there status || true
-  local dir="$LATEST"
-  [[ -e "$dir" ]] || die "no soak run under $SOAK_ROOT/"
-  local pid alive="no"
-  pid=$(cat "$dir/soak.pid" 2>/dev/null || echo "")
+  here_or_there status
+  [[ -e "$LATEST" ]] || die "no soak run under $SOAK_ROOT/"
+  local pid alive="no" anomalies
+  pid=$(cat "$LATEST/soak.pid" 2>/dev/null || echo "")
   [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && alive="yes"
-  echo "run    : $(readlink "$dir" 2>/dev/null || echo "$dir")"
+  echo "run    : $(readlink "$LATEST" 2>/dev/null || echo "$LATEST")"
   echo "pid    : ${pid:-none}  running: $alive"
   echo "${DIM}-- last heartbeat --${NC}"
-  grep 'SOAK HEARTBEAT' "$dir/events.log" 2>/dev/null | tail -1 || echo "  none yet"
+  grep 'SOAK HEARTBEAT' "$LATEST/events.log" 2>/dev/null | tail -1 || echo "  none yet"
   echo "${DIM}-- anomalies --${NC}"
-  grep -c 'ANOMALY' "$dir/events.log" 2>/dev/null || echo 0
+  # Captured once: `grep -c` prints 0 AND exits 1 on no match, so a `|| echo 0` fallback
+  # printed the count twice on every healthy run.
+  anomalies=$(grep -c 'ANOMALY' "$LATEST/events.log" 2>/dev/null || true)
+  echo "${anomalies:-0}"
 }
 
 cmd_tail() {
   local n="${1:-40}"
-  here_or_there tail "$n" || true
+  here_or_there tail "$n"
   tail -n "$n" "$LATEST/events.log" 2>/dev/null || die "no events.log yet"
 }
 
 cmd_stop() {
-  here_or_there stop || true
+  here_or_there stop
   local pid; pid=$(cat "$LATEST/soak.pid" 2>/dev/null || echo "")
   [[ -n "$pid" ]] || die "no pid recorded"
   # SIGTERM, not SIGKILL: the monitor traps it, takes a final TTN sample, and writes
@@ -155,7 +174,7 @@ cmd_stop() {
 }
 
 cmd_summary() {
-  here_or_there summary || true
+  here_or_there summary
   cat "$LATEST/summary.md" 2>/dev/null || die "no summary yet -- the run has not finished"
 }
 
@@ -167,10 +186,11 @@ cmd_fetch() {
   # scp is legitimate here: these are generated artifacts, not source. Git stays the
   # only transport for anything tracked (.cursor/rules/10-environments.mdc).
   local remote_dir
-  remote_dir=$(rrepo "readlink -f $SOAK_ROOT/$run" 2>/dev/null | tr -d '\r')
+  remote_dir=$(rrepo "readlink -f $(printf '%q' "$SOAK_ROOT/$run")" 2>/dev/null | tr -d '\r')
   [[ -n "$remote_dir" ]] || die "no such run on the build host: $run"
   scp "${SSH_OPTS[@]}" -q -r "$BUILD_HOST:$remote_dir" "$SOAK_ROOT/" \
-    && ok "$SOAK_ROOT/$(basename "$remote_dir")"
+    && ok "$SOAK_ROOT/$(basename "$remote_dir")" \
+    || die "fetch failed -- scp could not copy $remote_dir"
 }
 
 # --------------------------------------------------------------------------- selftest
@@ -203,8 +223,8 @@ cmd_selftest() {
 
   echo
   local beats reattach cycles
-  beats=$(grep -c 'SOAK HEARTBEAT' "$dir/events.log" || true)
-  reattach=$(grep -c 'attach #' "$dir/events.log" || true)
+  beats=$(grep -c 'SOAK HEARTBEAT' "$dir/events.log" 2>/dev/null || true); beats="${beats:-0}"
+  reattach=$(grep -c 'attach #' "$dir/events.log" 2>/dev/null || true); reattach="${reattach:-0}"
   cycles=$(python3 -c "import json;print(json.load(open('$dir/summary.json'))['cycles_seen'])" 2>/dev/null || echo 0)
   echo "heartbeats: $beats   port attaches: $reattach   cycles parsed: $cycles"
   if [[ "$beats" -ge 1 && "$reattach" -ge 2 && "$cycles" -ge 2 ]]; then
@@ -222,5 +242,7 @@ case "${1:-}" in
   summary)  shift; cmd_summary "$@" ;;
   fetch)    shift; cmd_fetch "$@" ;;
   selftest) shift; cmd_selftest "$@" ;;
-  *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  # 2,22p ends exactly on the last header line. Anything added below it stays out of the
+  # help text; a range past it prints this script's own source as if it were usage.
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

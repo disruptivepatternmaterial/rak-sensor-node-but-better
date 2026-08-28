@@ -24,16 +24,20 @@ cd "$(dirname "$0")/.."
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[34m'; DIM=$'\033[2m'; NC=$'\033[0m'
 die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 
-# No literal address here on purpose. Point BUILD_HOST at the host, or better, define an
-# ssh alias so the address stays in ~/.ssh/config where it belongs:
+# No literal address here on purpose: this repo is public. The build host is a laptop, so its
+# address moves with the network. Resolution order, first non-empty wins:
 #
+#   BUILD_HOST=ntableman@<address>               # one command
 #   export RAK_BUILD_HOST=ntableman@<address>    # one shell
-#   Host wx3-harness                              # ~/.ssh/config, persistent
-#       HostName <address>
-#       User ntableman
+#   ~/.rak-build-host                            # untracked, one line, persistent
 #
 # See docs/ENVIRONMENTS.md.
-BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}"
+BUILD_HOST="${BUILD_HOST:-${RAK_BUILD_HOST:-}}"
+if [[ -z "$BUILD_HOST" && -r "$HOME/.rak-build-host" ]]; then
+  IFS= read -r BUILD_HOST < "$HOME/.rak-build-host" || BUILD_HOST=""
+  BUILD_HOST="${BUILD_HOST//[[:space:]]/}"
+fi
+[[ -n "$BUILD_HOST" ]] || die "no build host set -- export RAK_BUILD_HOST=ntableman@<address>, or put that address alone on the first line of ~/.rak-build-host"
 REMOTE_PATH="${REMOTE_PATH:-Documents/GitHub/lorawan/rak-sensor-node-but-better}"
 # Pushed by explicit SSH URL, never by `git push origin`. The build host's tracked origin is
 # an HTTPS remote, and over a non-interactive ssh it has no credential helper and no tty, so
@@ -65,13 +69,12 @@ if [[ "$DRY" -eq 1 ]]; then
 fi
 
 # Fail here, with instructions, rather than 60 s into a TCP timeout that reads as a broken
-# script. The old default was a LAN address that stopped resolving, and the resulting
-# "ssh: connect ... Operation timed out" told nobody what to do about it.
+# script.
 if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$BUILD_HOST" true 2>/dev/null; then
   echo "${RED}ERROR${NC} cannot reach build host '${BUILD_HOST}'." >&2
-  echo "       Set RAK_BUILD_HOST to the current address, or add an ssh alias:" >&2
+  echo "       The build host is a laptop and may be on a different network now." >&2
+  echo "       Ask for the current address, then:" >&2
   echo "         export RAK_BUILD_HOST=ntableman@<address>" >&2
-  echo "       The address is not stable" >&2
   echo "       (BatchMode is on here, so a host needing a password also lands here;" >&2
   echo "        load the key into the agent or use an alias with IdentityFile.)" >&2
   exit 1

@@ -69,13 +69,14 @@ scripts/push.sh               # push to GitHub (this machine cannot push directl
   read-only. Everything that touches hardware runs on Heliotrope Ridge — and remote commands
   need `zsh -l -c` or `pio` will look like it is not installed. Use `scripts/remote.sh`.
 
-- **The build host address is not stable**
-  If you are confused ask the operator
-  for the address, `export RAK_BUILD_HOST=ntableman@<address>`, and confirm in one command
-  before diagnosing anything:
+- **The build host is a laptop, and it is not always on the same network.** So ask the
+  operator for the address, `export RAK_BUILD_HOST=ntableman@<address>`, and confirm it in
+  one command:
   `ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'` →
-  `Heliotrope-Ridge`. Scripts resolve `${BUILD_HOST:-${RAK_BUILD_HOST:-wx3-harness}}`; the
-  `wx3-harness` ssh alias is the permanent fix. See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
+  `Heliotrope-Ridge`. Scripts resolve `BUILD_HOST`, then `RAK_BUILD_HOST`, then the first
+  line of the untracked `~/.rak-build-host`, and **fail by name if none is set** — there is
+  no default. **A failed SSH means the laptop is elsewhere. Ask; do not investigate, and do
+  not report it as a dead host.** See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 - **The payload is a two-repo contract.** The TTN formatter lives in
   `forest-weather-machines`. A drifted encoder does not lose one field; the decoder throws
   and discards the entire uplink. `scripts/check_decoder_parity.py` runs on every build.

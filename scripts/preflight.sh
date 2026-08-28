@@ -54,6 +54,30 @@ else
   ok "secrets.h not tracked"
 fi
 
+# The build host's address must never enter this repo, which is public. On 2026-08-27 it did:
+# a commit put the host's public IP in README.md, where it survived review because nothing
+# looked for it. Documentation of the rule was not enforcement of the rule.
+# First octet must be 2-3 digits. A single-digit first octet is almost always a version or a
+# spec section (`v1.02 §2.5.1.1` matched a plain dotted-quad pattern and failed this gate on
+# its first run), while every address that has actually leaked here began 130. or 192.
+IP_RC=0
+IP_RAW=$(git grep -nIE '(^|[^0-9.])[0-9]{2,3}(\.[0-9]{1,3}){3}([^0-9.]|$)' -- ':/' 2>&1) || IP_RC=$?
+if [[ "$IP_RC" -gt 1 ]]; then
+  echo "$IP_RAW"
+  bad "the address scan itself failed to run (git grep exit $IP_RC) -- treating as a failure, not a pass"
+  IP_HITS=""
+else
+  # Allowlist only addresses that cannot identify a machine: the unspecified address,
+  # loopback, and the broadcast address.
+  IP_HITS=$(printf '%s' "$IP_RAW" | grep -vE '(^|[^0-9.])(0\.0\.0\.0|127\.0\.0\.1|255\.255\.255\.255)([^0-9.]|$)' || true)
+fi
+if [[ -n "$IP_HITS" ]]; then
+  echo "$IP_HITS"
+  bad "IPv4 literal in a tracked file -- addresses belong in \$RAK_BUILD_HOST or ~/.rak-build-host, never in the repo"
+else
+  ok "no IPv4 literals in tracked files"
+fi
+
 # --------------------------------------------------------------- decoder parity
 # Every build verifies the TTN formatter is current and calls out drift.
 step "TTN formatter parity"
