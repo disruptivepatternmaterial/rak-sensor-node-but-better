@@ -65,9 +65,15 @@ fields:
     source: FIRMWARE_SPEC.md §2.1 reg 0x0001
     status: proposed
     notes: >
-      Emit the RAW heading. The decoder applies WIND_DIR_OFFSET = 230 for the site
-      installation. Applying the offset in firmware as well double-corrects by 230
-      degrees.
+      Emit the RAW heading. The decoder applies WIND_DIR_OFFSET, the per-install north
+      correction. Applying it in firmware as well double-corrects by that many degrees.
+
+      WIND_DIR_OFFSET is PER DEVICE, not a project constant. It lives in each device's
+      own formatter in the TTN console and describes where that mast's north arrow
+      actually points. 230 is puma-concolor-001's value and says nothing about any other
+      node; 002 was given 001's formatter verbatim and therefore inherited 230 without
+      anyone measuring 002's orientation (#84). Copying a formatter between devices
+      silently copies this number, so a new install needs it set or zeroed deliberately.
 
       The decoder NO LONGER nulls this field when wind_speed is 0. Upstream
       169e865 removed that behavior on the same no-fabricated-data grounds this
