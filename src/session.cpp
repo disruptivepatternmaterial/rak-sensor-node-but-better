@@ -15,6 +15,10 @@ namespace {
 
 constexpr char kPath[] = "/session.bin";
 
+// Staging path for write_file(). A crash between the write and the rename leaves this behind
+// and kPath untouched, which is the point; the next write truncates it.
+constexpr char kTmpPath[] = "/session.tmp";
+
 // Bumping the version invalidates every stored session. Do that whenever the struct or the
 // key derivation changes — reading an old layout as a new one would produce a session that
 // looks valid and cannot possibly work.
@@ -92,17 +96,58 @@ bool mib_get(Mib_t type, MibRequestConfirm_t &req)
     return LoRaMacMibGetRequestConfirm(&req) == LORAMAC_STATUS_OK;
 }
 
+// Written to a temporary path and renamed into place, never over the live file.
+//
+// This used to remove kPath and then open it, which destroyed the stored session *before* the
+// write could fail. A full filesystem or a worn page therefore left the node with no session
+// file at all while s_saved_counter_ceiling still described one -- so the ceiling refused
+// uplinks to protect a file that no longer existed, and the comment in write_session()
+// promising that "the brownout gate and a failed write leave the ceiling exactly where the
+// stored file leaves it" was false on precisely the path that matters. Found by adversarial
+// review of the escape ladder, which had been built on top of that promise.
+//
+// The leading remove was not gratuitous, which is why this needs care rather than deletion:
+// FILE_O_WRITE maps to LFS_O_RDWR | LFS_O_CREAT with no truncation, and the library seeks to
+// the end on open, so writing to an existing file appends to it. That is handled here on the
+// temporary file, where a mistake costs nothing.
+//
+// CITE(prior-art): Adafruit_LittleFS_File.cpp:56-57,77 -- FILE_O_WRITE is
+//   LFS_O_RDWR|LFS_O_CREAT followed by a seek to LFS_SEEK_END, so an open-and-write appends
+// CITE(prior-art): [CIT-LITTLEFS-DESIGN] littlefs rename is atomic and replaces an existing
+//   destination, so kPath is always either the previous session or the new one
 bool write_file(const Stored &s)
 {
-    InternalFS.remove(kPath);
-
     File f(InternalFS);
-    if (!f.open(kPath, FILE_O_WRITE)) {
+    if (!f.open(kTmpPath, FILE_O_WRITE)) {
         return false;
     }
+
+    // Both, in this order, because of the append-on-open behavior above. A temp left behind by
+    // an interrupted write would otherwise be appended to -- and write() would still report
+    // sizeof(s) bytes, so the size check below would pass while read_file() later read the
+    // stale leading copy and believed it.
+    if (!f.truncate(0) || !f.seek(0)) {
+        f.close();
+        InternalFS.remove(kTmpPath);
+        return false;
+    }
+
     const size_t n = f.write((const uint8_t *)&s, sizeof(s));
     f.close();
-    return n == sizeof(s);
+
+    if (n != sizeof(s)) {
+        InternalFS.remove(kTmpPath);
+        return false;
+    }
+
+    // The atomic step. Either kPath is the new session or it is still the old one; it is never
+    // absent and never half-written, which is the property the ceiling depends on.
+    if (!InternalFS.rename(kTmpPath, kPath)) {
+        InternalFS.remove(kTmpPath);
+        return false;
+    }
+
+    return true;
 }
 
 bool read_file(Stored &s)
@@ -387,6 +432,16 @@ bool counter_headroom_ok()
         return true;
     }
 
+    // Already decided, so stop re-deciding. s_ceiling_abandoned used to gate only the log line,
+    // which made "logged once, not every cycle" true of the message and false of the work: every
+    // later uplink still ran collect(), a file open, a write and a remove against a filesystem
+    // already known to reject all of them. At the 900 s cadence that is roughly 35 000 pointless
+    // pairs of flash mutations over a year, spending energy and wear on a question whose answer
+    // cannot change. Found by adversarial review.
+    if (s_ceiling_abandoned) {
+        return true;
+    }
+
     // The wire has caught up with flash. save() is the only thing that moves the ceiling, and
     // it moves it only when the write landed — so this answers false exactly when the stored
     // value cannot be advanced, which during a brownout hold is the case issue #51 created.
@@ -481,10 +536,18 @@ bool forget()
     // ceiling a reset still resumes from. That is the silent replay the ceiling exists to
     // prevent, arriving through the escape hatch.
     //
-    // remove() returns true when the file is gone, including when it was never there, which is
-    // the answer this wants: "nothing stored" is the desired end state, not "a deletion
-    // occurred".
-    if (!InternalFS.remove(kPath)) {
+    // The return of remove() is deliberately NOT the answer, and an earlier version of this
+    // function documented the exact opposite. Adafruit_LittleFS::remove() is
+    // `return LFS_ERR_OK == err`, and lfs_remove on a missing path returns LFS_ERR_NOENT -- so
+    // it reports false both for "the file could not be removed" and for "there was no file",
+    // which are opposite outcomes here. Trusting it would make a node whose session was already
+    // gone log "file still on flash, ceiling still binds" and keep a ceiling that describes
+    // nothing.
+    InternalFS.remove(kPath);
+
+    // exists() is the ground truth, and it is the right question: what this promises is the end
+    // state "nothing is stored", not the event "a deletion happened".
+    if (InternalFS.exists(kPath)) {
         // Deliberately leaves s_have_stored_session true. The ceiling still describes a real
         // file, so it still binds.
         LOGLN(F("   session : could not discard the stored session — file still on flash, "

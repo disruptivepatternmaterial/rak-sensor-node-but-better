@@ -117,16 +117,22 @@ void permit_counter_checkpoint();
 // clearly stopped honoring the session, and as the escape from a stored ceiling that can no
 // longer be advanced (see counter_headroom_ok()).
 //
-// Returns whether the stored file is actually gone. This return is load-bearing and used to be
-// absent: removing the file is itself a filesystem write, so on the broken filesystem that
-// makes this function necessary it is exactly the operation most likely to fail. Clearing the
-// in-RAM state anyway would leave a stale file that a reset resumes from at a counter this node
-// has already transmitted — the silent replay the ceiling exists to prevent, reintroduced by
-// the code meant to escape it.
+// Returns whether the stored file is actually gone — established with exists(), not with the
+// return of remove(). This return is load-bearing and used to be absent: removing the file is
+// itself a filesystem write, so on the broken filesystem that makes this function necessary it
+// is exactly the operation most likely to fail. Clearing the in-RAM state anyway would leave a
+// stale file that a reset resumes from at a counter this node has already transmitted — the
+// silent replay the ceiling exists to prevent, reintroduced by the code meant to escape it.
 //
+// Do not "simplify" this back to `return InternalFS.remove(kPath)`. That reports false for a
+// file that was never there as well as for one that could not be removed, which are opposite
+// answers to the question being asked.
+//
+// CITE(prior-art): Adafruit_LittleFS.cpp:189-198 — remove() is `LFS_ERR_OK == err`, and
+//   lfs_remove returns LFS_ERR_NOENT for a missing path, so false does not mean "still there"
 // CITE(prior-art): [CIT-LITTLEFS-DESIGN] "All POSIX operations, such as remove and rename, are
 //   atomic, even in event of power-loss" — so the file is either gone or intact, never
-//   half-removed, which is what makes a boolean answer meaningful here.
+//   half-removed, which is what makes a boolean answer meaningful at all.
 bool forget();
 
 } // namespace session
