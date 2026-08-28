@@ -13,6 +13,10 @@ namespace {
 
 constexpr char kPath[] = "/config.bin";
 
+// Staging path for save(). A crash between the write and the rename leaves this behind and
+// kPath untouched, which is the point; the next save truncates it.
+constexpr char kTmpPath[] = "/config.tmp";
+
 // A magic number and a version, so a file written by different firmware is recognized as
 // foreign and ignored rather than read as garbage settings.
 constexpr uint32_t kMagic   = 0x524B534E; // "RKSN"
@@ -166,17 +170,53 @@ bool Config::save()
     s.boots            = m_boots;
     s.brownout_engaged = m_brownout_engaged ? 1 : 0;
 
-    InternalFS.remove(kPath);
-
+    // Staged and renamed, never written over the live record. The old shape removed kPath and
+    // then opened it, so a write that failed for any reason destroyed the stored config first --
+    // and this record is worse to lose than the session one. It carries m_brownout_engaged,
+    // which is how a brownout hold survives a reset; losing it means the node comes back with no
+    // memory of having decided to stop transmitting, on a pack that may still be flat. That is
+    // the fail-open hole #38 closed, reopened by a failed write. It also carries the interval, so
+    // a downlink-set 900 s would silently revert to the compiled default.
+    //
+    // The leading remove was there for a reason and is preserved on the temp file instead:
+    // FILE_O_WRITE is LFS_O_RDWR | LFS_O_CREAT with no truncation and the library seeks to the
+    // end on open, so an open-and-write appends. truncate(0) + seek(0) covers a temp left behind
+    // by an interrupted write -- which would otherwise be appended to, and since write() would
+    // still report sizeof(s) bytes the length check below would pass while read() later got the
+    // stale leading copy.
+    //
+    // Cost is one extra littlefs block while the write is in flight; Stored is a few dozen bytes
+    // against a 28 KB partition shared only with /session.bin.
+    //
+    // CITE(prior-art): [CIT-ADA-LITTLEFS] Adafruit_LittleFS_File.cpp:56-57,77 -- FILE_O_WRITE is
+    //   LFS_O_RDWR|LFS_O_CREAT then a seek to LFS_SEEK_END, so writing to an open file appends
+    // CITE(prior-art): [CIT-LITTLEFS-DESIGN] remove and rename are atomic even on power loss, so
+    //   kPath is always either the previous config or the new one
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H5 -- "Interval + keys path survives power loss"; a
+    //   failed write that erases the interval does not survive it
     File f(InternalFS);
-    if (!f.open(kPath, FILE_O_WRITE)) {
+    if (!f.open(kTmpPath, FILE_O_WRITE)) {
         LOGLN(F("   config  : write failed"));
+        return false;
+    }
+
+    if (!f.truncate(0) || !f.seek(0)) {
+        f.close();
+        InternalFS.remove(kTmpPath);
+        LOGLN(F("   config  : write failed — could not clear the staging file"));
         return false;
     }
 
     const size_t written = f.write((const uint8_t *)&s, sizeof(s));
     f.close();
     if (written != sizeof(s)) {
+        InternalFS.remove(kTmpPath);
+        return false;
+    }
+
+    if (!InternalFS.rename(kTmpPath, kPath)) {
+        InternalFS.remove(kTmpPath);
+        LOGLN(F("   config  : write failed — staged record could not be moved into place"));
         return false;
     }
 

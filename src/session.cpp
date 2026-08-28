@@ -386,6 +386,15 @@ static WriteOutcome write_session(bool checkpoint_permitted)
     // flash is the same evidence as the checkpoint reaching it.
     s_ceiling_write_failures = 0;
 
+    // And re-arm the ceiling itself. Clearing the strike count without clearing this would have
+    // left the protection off for the rest of the power cycle: s_ceiling_abandoned short-circuits
+    // counter_headroom_ok() before it looks at anything, so a node that recovered -- filesystem
+    // freed, then a rejoin, whose save() is the only other caller of this function
+    // (radio.cpp:267) -- would hold a fresh, valid, correctly-advanced ceiling and ignore it.
+    // The abandonment is a statement about a filesystem that would not accept writes; a write
+    // that just landed retracts it.
+    s_ceiling_abandoned = false;
+
     LOGF("   session : saved 0x%08lX, resume at %lu\n", (unsigned long)s.dev_addr,
          (unsigned long)s.uplink_counter);
     return WriteOutcome::Ok;
