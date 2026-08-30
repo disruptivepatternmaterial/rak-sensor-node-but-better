@@ -128,6 +128,19 @@
 #define FEATURE_BATTERY_TURNAROUND_MS 2
 #endif
 
+// Which GPIO carries the RAK9154 one-wire link. OFF means the documented WB_IO1/P0.17 wiring;
+// ON moves it to WB_A1/P0.31.
+//
+// A build flag rather than an edited constant because the choice is a property of one physical
+// core, not of the firmware. Three cores measured ~3.86 ohm from IO1 to ground on 2026-08-29
+// (issue #96) and needed A1; a core with a healthy IO1 must not inherit that workaround, because
+// A1 is only reachable on the base-board extension header and silently costs a node its
+// documented harness. Flip it for the board in front of you and record which pin the reading
+// came from in docs/EVIDENCE.md — a voltage with no pin attached to it is not attributable.
+#ifndef FEATURE_BATTERY_PIN_A1
+#define FEATURE_BATTERY_PIN_A1 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)

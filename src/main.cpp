@@ -45,11 +45,17 @@ namespace {
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] SoftwareHalfSerial accepts an Arduino GPIO number and
 //   derives its nRF port register and interrupt at runtime; it is not tied to WB_IO1.
 //
-// WB_IO1/P0.17 was the original wiring. Bench isolation on 2026-08-29 found it held at ~9.6 mV
-// powered and ~3.86 ohm to ground unpowered on all available cores, while an empty baseboard was
-// open and A1 measured ~45 kohm. Issue #96 records the raw isolation sequence. A1 is the measured
-// recovery path; IO2 is not an alternative because it controls the RAK5802's 3V3_S rail.
+// WB_IO1/P0.17 is the documented wiring and stays the default. Bench isolation on 2026-08-29
+// found IO1 held at ~9.6 mV powered and ~3.86 ohm to ground unpowered on the three cores
+// available then, while an empty baseboard was open and A1 measured ~45 kohm; issue #96 records
+// the raw sequence. That is a property of those damaged cores, not of the design, so A1 is a
+// per-core recovery path selected at build time rather than the wiring every node inherits.
+// IO2 is not an alternative either way — it controls the RAK5802's 3V3_S rail.
+#if FEATURE_BATTERY_PIN_A1
 constexpr uint8_t kBatteryPin = WB_A1;
+#else
+constexpr uint8_t kBatteryPin = WB_IO1;
+#endif
 
 // Ceiling on one awake cycle. Two sensor reads with bounded retries plus a join attempt
 // and the receive windows fit inside this with room to spare; anything longer means
