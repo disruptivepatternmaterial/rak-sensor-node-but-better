@@ -57,16 +57,21 @@ assignment (`provId FF`, the state `battery.cpp`'s provisioning ladder exists to
 answered at least once. Whether a *provisioned* pack then broadcasts telemetry unprompted is
 untested and is the next cheap question.
 
-### The consequence that matters today
+### The consequence that matters today — and the line between fact and inference
 
-The production battery read drives roughly **14 bytes** per cycle at a 900 s cadence. `owscan`
-phase 0 drives **192 bytes** per cycle — 64 bytes of `0x55` at three baud rates — and cycles in
-seconds. `0x55` toggles every bit, which is the worst possible pattern for the contention path in
-[#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
+**Fact:** the production battery read drives roughly **14 bytes** per cycle at a 900 s cadence.
+`owscan` phase 0 drives **192 bytes** per cycle — 64 bytes of `0x55` at three baud rates — and
+cycles in seconds. `0x55` toggles every bit.
 
-**So the diagnostic has been driving over an order of magnitude more stress into the pad than the
-firmware it was diagnosing**, and it is the only thing node 002 saw that node 001 did not at
-volume. `env:owcensus` (`1b87c4e`) already exists as a passive replacement that drives nothing.
+**Inference, not established:** that this is what destroyed the seven pads. It is the leading
+candidate and it fits, but no measurement has been taken of the node's own end of that wire while
+it transmits, so the contention current is arithmetic rather than an observation. The diagnostic
+was deleted on 2026-08-30 because driving an unqualified pad at 14× the production rate is wrong
+on its own terms — **not** because it has been shown to be the cause.
+
+The measurement that would settle it: an analyzer channel each side of the 1 kΩ series resistor
+while the node transmits, giving contention current directly. Blocked on a flashable core
+([#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95)).
 
 CITE(prior-art): [CIT-ONEWIRE-SERIAL] `RAK-OneWireSerial` @ `c58c0f0` — the wake-byte lead and
 `cal_chksum()` this frame's first and last bytes are read against.
@@ -313,7 +318,7 @@ whole one-wire path from that commit to `afdaf48`:
 | `src/build_features.h` | the two new pin-select flags, and the version bump |
 | `src/main.cpp` | `kBatteryPin` selection, the reset banner, a session-recovery callback |
 
-So the one-wire driver that has destroyed seven pads is **functionally identical to the one
+So the one-wire driver in use where seven pads died is **functionally identical to the one
 running without incident on 001.** The push-pull `pinMode(tx, OUTPUT)` in
 `SoftwareHalfSerial::setTX()`, the four wake bytes, the provisioning ladder and the `0x55`
 timing sweeps are all common to both nodes.

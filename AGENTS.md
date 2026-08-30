@@ -3,16 +3,24 @@
 Read this first. The detailed rules live in [`.cursor/rules/`](.cursor/rules/) and load
 automatically; this is the index and the short version.
 
-## NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC. IT DESTROYED SEVEN GPIO PADS.
+## NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC
 
 **Read this before writing any code that touches the RAK9154 link.** On 2026-08-30
 `src/diagnostics/owscan.{h,cpp}`, `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN` and
 the five `owscan*` build environments were **deleted**. Do not recreate any of them — not a
 passive variant, not behind a flag, not "just to check something."
 
-That diagnostic destroyed the hardware it was built to measure: **seven GPIO pads across two
-RAK4631 cores, every one of them the pad carrying the pack's data line**
+**Why the deletion stands on its own, independent of cause:** a diagnostic that drives an
+unqualified pad at 14× the production rate is wrong whether or not it is the culprit. That is the
+justification. It does not require the paragraph below to be true.
+
+**CAUSE IS NOT ESTABLISHED.** Seven GPIO pads are dead across two RAK4631 cores, every one the pad
+carrying the pack's data line
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+The correlation is solid. **The mechanism below is a candidate that fits the signature — it has
+not been measured, and it must not be quoted as settled.** An earlier review in
+`docs/reviews/2026-08-30_onewire_pin_failures.md` was already retracted for declaring a mechanism
+established because it fit; do not repeat that.
 
 | | Bytes driven per cycle | Cadence |
 |---|---|---|
@@ -22,13 +30,23 @@ RAK4631 cores, every one of them the pad carrying the pack's data line**
 `0x55` toggles every bit, the worst possible pattern for the contention path in
 [#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
 
-**The mechanism, measured 2026-08-30** ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)): the pack actively
-drives its end — **+3.3118 V idle, +0.0867 V driven low, 9,520 edges in 57 s**. Our end idles
-push-pull HIGH. Two live drivers in opposition pass ~3.3 mA through the pad **even with the 1 kΩ
-series resistor fitted**. Earlier sessions compared that to the nRF52840's **15 mA absolute
-maximum**, found it under, and cleared contention. **That is the wrong limit.** The pin's standard
-drive continuous rating is **1–2 mA**, so the resistor left it 2–3× over the rating that governs
-sustained use, on every low bit of every frame. Chronic degradation, not one event.
+**What IS measured** ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-30): the pack actively drives
+its end — **+3.3118 V idle, +0.0867 V driven low, 9,520 edges in 57 s**. Our end idles push-pull
+HIGH. So contention is *physically available*. That much is fact.
+
+**What is INFERRED, not measured:** that two live drivers in opposition pass ~3.3 mA through the
+pad, and that this is what killed the pads. The 3.3 mA is arithmetic from Ohm's law across the
+1 kΩ series resistor, **not a measurement** — nobody has ever observed the node's end of that wire
+while it transmits. The arithmetic does resolve a real error, though: earlier sessions compared
+that current to the nRF52840's **15 mA absolute maximum**, found it under, and cleared contention,
+when the pin's standard-drive continuous rating is **1–2 mA**. Wrong limit compared against. That
+makes chronic degradation plausible; it does not make it established.
+
+**The measurement that would settle it, and has not been done:** put an analyzer channel on each
+side of the 1 kΩ series resistor while the node transmits. The difference divided by 1 kΩ is the
+contention current, directly, in milliamps. Under 1 mA kills this hypothesis; ~3 mA supports it.
+It needs a flashable core, which is blocked on
+[#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95).
 
 **The signature agrees:** `SDA`/P0.13 measures **5.6 kΩ** to ground against **240 kΩ** on the
 never-connected `SCL` control pin — same core, same meter, powered down. 43× apart. The 0.121 V

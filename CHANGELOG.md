@@ -10,7 +10,9 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Removed
 
-- **The one-wire scan diagnostic is deleted, because it destroyed the hardware it measured.**
+- **The one-wire scan diagnostic is deleted for driving an unqualified pad at 14× the production
+  rate.** It is also the leading candidate for the seven destroyed pads, but **that is not
+  established** and the deletion does not rest on it.
   `src/diagnostics/owscan.{h,cpp}`, `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN`
   and the five `owscan*`/`owcensus` environments are gone. Seven GPIO pads across two RAK4631
   cores, every one the pad carrying the pack's data line ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)). Phase 0 drove 192 bytes per

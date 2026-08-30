@@ -93,23 +93,32 @@
 // src/diagnostics/owscan.{h,cpp}. DO NOT RECREATE ANY OF IT. Not a passive variant, not a
 // "safe" variant, not behind a flag.
 //
-// It destroyed the hardware it was built to diagnose. Seven GPIO pads across two cores, and
-// every single one was the pad carrying the pack's data line (#102). Its phase 0 drove 64 bytes
-// of 0x55 at three baud rates every cycle — 192 bytes, cycling in seconds — where the
-// production battery read drives ~14 bytes per 900 s. 0x55 toggles every bit, the worst
-// possible pattern for the contention path in #99.
+// WHY THE DELETION STANDS ON ITS OWN: a diagnostic that drives an UNQUALIFIED pad at 14x the
+// production rate is wrong whether or not it is the culprit. Its phase 0 drove 64 bytes of 0x55
+// at three baud rates every cycle — 192 bytes, cycling in seconds — where the production battery
+// read drives ~14 bytes per 900 s, and 0x55 toggles every bit. That is sufficient justification
+// and it does not depend on anything below.
 //
-// On 2026-08-30 the pack was measured actively driving its end of that wire: +3.3118 V idle,
-// +0.0867 V driven low, 9,520 edges in 57 s. Two live drivers in opposition put ~3.3 mA through
-// the pad even with the 1 kOhm series resistor fitted. Earlier sessions checked that against
-// the nRF52840's 15 mA ABSOLUTE MAXIMUM, found it under, and cleared it — the wrong limit. The
-// pin's STANDARD DRIVE continuous rating is 1–2 mA [CIT-NRF-GPIO-TOTAL], so the resistor left
-// the current 2–3x over the rating that governs sustained use, on every low bit of every frame.
-// Chronic degradation, which is why it took repeated sessions rather than one event, and why
-// node 001 — production image only — is still alive in the field after weeks.
+// CAUSE IS NOT ESTABLISHED. Seven pads are dead across two cores, every one the pad carrying the
+// pack's data line (#102). The correlation is solid. The mechanism is a CANDIDATE.
 //
-// The measured signature agrees: SDA/P0.13 reads 5.6 kOhm to ground against 240 kOhm on the
-// never-connected SCL control pin on the same core, same meter, powered down. 43x apart.
+// Measured 2026-08-30, and these are facts: the pack actively drives its end of the wire at
+// +3.3118 V idle and +0.0867 V low, 9,520 edges in 57 s. SDA/P0.13 reads 5.6 kOhm to ground
+// against 240 kOhm on the never-connected SCL control pin, same core, same meter, powered down.
+// So contention is physically available, and that pad is genuinely damaged.
+//
+// INFERRED, NOT MEASURED: that two live drivers in opposition put ~3.3 mA through the pad, and
+// that this is what killed it. The 3.3 mA is Ohm's law across the 1 kOhm series resistor, not an
+// observation — nobody has watched the node's end of that wire while it transmits. The arithmetic
+// does correct a real error: earlier sessions compared that current to the nRF52840's 15 mA
+// ABSOLUTE MAXIMUM and cleared contention, when the pin's STANDARD DRIVE continuous rating is
+// 1-2 mA [CIT-NRF-GPIO-TOTAL]. Wrong limit. That makes chronic degradation plausible. It does not
+// make it true.
+//
+// THE MEASUREMENT THAT WOULD SETTLE IT, still undone: an analyzer channel on each side of the
+// 1 kOhm series resistor while the node transmits. Difference over 1 kOhm is the contention
+// current, directly. Under 1 mA kills the hypothesis; ~3 mA supports it. Blocked on a flashable
+// core (#95).
 //
 // Two further reasons it is not coming back:
 //

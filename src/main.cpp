@@ -32,8 +32,10 @@
 // of lines of code that never runs on a deployed node, and reading the cycle meant scrolling
 // past all of it.
 //
-// Its one-wire counterpart, diagnostics/owscan.h, was DELETED 2026-08-30 — it destroyed seven
-// GPIO pads. Do not add it back. src/build_features.h holds the measurements.
+// Its one-wire counterpart, diagnostics/owscan.h, was DELETED 2026-08-30: it drove an unqualified
+// pad at 14x the production rate, which is wrong on its own terms. It is also the leading
+// candidate for the seven destroyed pads, though that is NOT established. Do not add it back.
+// src/build_features.h separates the measurements from the inference.
 #include "diagnostics/busscan.h"
 
 namespace {
@@ -328,9 +330,10 @@ void loop()
 #endif
 
     // There is deliberately no one-wire scan branch here. src/diagnostics/owscan.{h,cpp} and
-    // FEATURE_ONEWIRE_SCAN were deleted 2026-08-30 after that diagnostic destroyed seven GPIO
-    // pads across two cores — see the block in src/build_features.h for the measurements. Qualify
-    // a pad with a meter or the logic analyzer, never by driving it from firmware.
+    // FEATURE_ONEWIRE_SCAN were deleted 2026-08-30 for driving an unqualified pad at 14x the
+    // production rate. Whether that is what destroyed the seven pads is NOT established — see
+    // src/build_features.h, which keeps the measurements and the inference apart. Qualify a pad
+    // with a meter or the logic analyzer, never by driving it from firmware.
 
     WeatherReading weather;
     BatteryReading pack;
