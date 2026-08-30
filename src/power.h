@@ -41,6 +41,13 @@ void watchdog_feed();
 // because a node quietly resetting every cycle otherwise looks perfectly healthy.
 bool reset_was_watchdog();
 
+// The reset cause in words, and the raw RESETREAS word behind it. Printed in the boot banner
+// so a reset is attributable rather than anonymous — a button press, a host opening the serial
+// port, the watchdog, and a rail that dropped are four different problems and only one of them
+// is a firmware defect. An all-zero word means power-on or brownout; see reset_reason_text().
+const char *reset_reason_text();
+uint32_t reset_reason_bits();
+
 // Shuts down peripherals, then sleeps for the requested time. Returns once the interval
 // has elapsed and the console is usable again.
 void sleep_seconds(uint32_t seconds);

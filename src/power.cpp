@@ -28,6 +28,12 @@ constexpr uint32_t kWatchdogTicksPerSecond = 32768;
 bool s_reset_was_watchdog = false;
 bool s_watchdog_running   = false;
 
+// The whole RESETREAS word as latched at boot, kept so the cause can be named rather than
+// only tested for the watchdog. Without this a reset is anonymous, and an anonymous reset is
+// indistinguishable from a fault: three sessions on 2026-08-30 read counter jumps caused by
+// a console attach as evidence of a failing node.
+uint32_t s_reset_reason = 0;
+
 // Slice length for the sleep wait below. Coarse enough that the per-cycle wakeup count is
 // negligible, short enough that the tick conversion stays far inside a 32-bit tick count at
 // any interval the configuration permits.
@@ -106,6 +112,7 @@ void watchdog_begin(uint32_t timeout_seconds)
     // RESETREAS latches every reset cause and is only cleared by writing back the bits.
     // Read it before the watchdog can contribute a new one.
     const uint32_t reason = NRF_POWER->RESETREAS;
+    s_reset_reason        = reason;
     s_reset_was_watchdog  = (reason & POWER_RESETREAS_DOG_Msk) != 0;
     NRF_POWER->RESETREAS  = reason;
 
@@ -133,6 +140,51 @@ void watchdog_feed()
 bool reset_was_watchdog()
 {
     return s_reset_was_watchdog;
+}
+
+uint32_t reset_reason_bits()
+{
+    return s_reset_reason;
+}
+
+// CITE(datasheet): nRF52840 Product Specification — POWER, RESETREAS. Bit assignments
+//   RESETPIN 0, DOG 1, SREQ 2, LOCKUP 3, OFF 16, LPCOMP 17, DIF 18, NFC 19, VBUS 20. The bits
+//   are sticky and cleared only by writing them back, which watchdog_begin() does after
+//   latching them here. [CIT-NRF-POWER] — docs/CITATIONS.md
+// CITE(prior-art): [CIT-NRF-GPIO-TOTAL] — the same Nordic material records VIH as 0.7 x VDD,
+//   which is the threshold that makes a marginal idle level a framing failure rather than a
+//   merely noisy one. Relevant here because a brownout and a marginal rail look identical
+//   from the application unless RESETREAS is read.
+//
+// A zero word is the load-bearing case and the reason this function exists. RESETREAS is
+// cleared by a power-on reset, so "no bits set" means the rail dropped and came back — a
+// brownout or an unplugged cable — and is precisely the cause that cannot be distinguished
+// from a healthy first boot without knowing that zero is meaningful.
+const char *reset_reason_text()
+{
+    const uint32_t r = s_reset_reason;
+    if (r == 0) {
+        return "power-on or brownout (RESETREAS clear)";
+    }
+    if (r & POWER_RESETREAS_DOG_Msk) {
+        return "watchdog";
+    }
+    if (r & POWER_RESETREAS_RESETPIN_Msk) {
+        return "reset pin (button, or a host toggling DTR)";
+    }
+    if (r & POWER_RESETREAS_SREQ_Msk) {
+        return "software request";
+    }
+    if (r & POWER_RESETREAS_LOCKUP_Msk) {
+        return "CPU lockup";
+    }
+    if (r & POWER_RESETREAS_OFF_Msk) {
+        return "wake from System OFF";
+    }
+    if (r & POWER_RESETREAS_VBUS_Msk) {
+        return "VBUS detected";
+    }
+    return "other";
 }
 
 void sleep_seconds(uint32_t seconds)

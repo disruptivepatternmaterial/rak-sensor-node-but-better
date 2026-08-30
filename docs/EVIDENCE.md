@@ -4,6 +4,61 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 — node 002 reads weather and transmits; opening the console resets the board
+
+**Host:** Heliotrope Ridge, `/dev/cu.usbmodem31101`. **Core:** node 002's third core, one-wire on
+`SDA` (nRF P0.13), `1 kΩ` inline in the data wire. **Image:** field image at `7ad5daa`, then
+`env:battdiag_sda`. **Pack:** physically disconnected for all of the below — operator-confirmed.
+
+### Observation — the node works
+
+```
+2026-08-30 12:37:38    session : restored 0x260C1AF4, counter 1088
+2026-08-30 12:37:38 [cycle 1]
+2026-08-30 12:37:38    RK900   : raw 0x0000-0x0004 = 0000 0000 0107 01B5 275E
+2026-08-30 12:37:38    RK900   : wind 0.00 m/s @ 0 deg, 26.3 C, 43.7 %RH, 1007.8 hPa
+2026-08-30 12:38:05    battery : no data (no reply, 0 bytes)
+2026-08-30 12:38:05    radio   : sent 20 bytes on port 2
+2026-08-30 12:38:13    sleep   : 3600 s
+```
+
+RK900 returns plausible values, the uplink goes out at 20 bytes (wind-only, no battery block), and
+the cycle closes on a normal sleep. **`battery : no data` is the correct result with no pack
+attached, not a fault** — three sessions were spent treating it as one.
+
+The DevAddr is `0x260C1AF4`, not the `0x260CE734` carried all month, so this core performed a
+fresh OTAA join at some point today rather than restoring the old session.
+
+### Observation — the interval downlink was rejected, so cadence never changed
+
+```
+2026-08-30 12:38:13    radio   : downlink — set interval 300 s
+2026-08-30 12:38:13    config  : rejected interval 300 s (allowed 900-86400)
+```
+
+The node was asked for 300 s repeatedly through the afternoon and correctly refused every time;
+the floor is 900 s. Every "why is it still on the slow cadence" question today has this answer.
+
+### Inference (strong, 3/3 correlation) — the console attach is what reset the board
+
+Every `[cycle 1]` in today's captures falls within one second of `scripts/capture.py` opening the
+port: 12:35:47, 12:36:11, 12:37:38. The `f_cnt` steps read as fault evidence all afternoon —
+`864 → 896 → 928 → 960 → 992 → 1024`, uniform `+32` — are the `kCounterMargin` signature of one
+reset each, and the resets line up with capture attempts, not with transmits.
+
+**Consequence: a counter jump observed while a capture is being started is not evidence of a
+fault.** This is inference from timing correlation, not a measured reset cause; `power.cpp` reads
+`RESETREAS` but only extracts the watchdog bit, so the cause was not logged
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+
+### Observation — the failure ladder behaves as specified with the pack absent
+
+13 consecutive `battdiag_sda` cycles with no pack: one BOOT per failure episode and not more
+(`BOOT already spent this failure episode`), degradation to `probe only`, full-ladder retry every
+second cycle, and the no-evidence hold arming its bounded escape —
+`power : pack silent for 4 cycles — holding transmissions, no voltage evidence (keepalive in 24
+cycles)`. This is the #45 / #71 hardening running correctly on hardware for the first time.
+
 ## 2026-08-30 — node 002's silent core is ALIVE: SWD answered, chip unlocked
 
 **Host:** Heliotrope Ridge, CMSIS-DAP probe (serial `07000001006900394e...`), OpenOCD

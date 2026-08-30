@@ -203,6 +203,12 @@ void print_banner()
     LOGF("region   : US915 sub-band %u\n", radio.sub_band());
 #endif
 
+    // Unconditional, because the cause of a reset is only useful if it is present for every
+    // reset. An anonymous boot line forces the cause to be inferred from counter arithmetic
+    // afterwards, and that inference was wrong repeatedly on 2026-08-30.
+    LOGF("reset    : %s (RESETREAS 0x%08lX)\n", power::reset_reason_text(),
+         (unsigned long)power::reset_reason_bits());
+
     if (power::reset_was_watchdog()) {
         // Worth shouting about. A node resetting every cycle still reports data and looks
         // healthy from the network side, so this is the only place it becomes visible.
