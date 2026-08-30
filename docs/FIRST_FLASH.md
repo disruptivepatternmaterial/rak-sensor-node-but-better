@@ -120,6 +120,82 @@ earlier commit on 2026-08-05 even though `src/sensors/battery.cpp` had changed u
 a UF2 built from it would have carried the wrong commit into an evidence entry. Check the mtime
 against the sync, or `rm -rf .pio/build/<env>` first.
 
+## Converting a RAK4631-R (RUI3) board over SWD
+
+A board bought as **RAK4631-R** ships with RUI3, not the Arduino bootloader, and enumerates as
+**`1915:521F`** instead of a `239A` ID. Nothing in this project can flash it: `adafruit-nrfutil`
+speaks the Adafruit serial DFU protocol, RUI's bootloader does not, and Nordic's `nrfutil dfu`
+never gets past MTU negotiation over USB. The board needs the Arduino bootloader written over
+SWD with a RAKDAP1, and then it behaves like every other board here
+([CITE(datasheet): RAK4630 Bootloader Update Manual](https://raw.githubusercontent.com/RAKWireless/WisBlock/master/bootloader/RAK4630/README.md) —
+`CIT-RAK-BOOTLOADER`, which also notes SWD attaches to **the module**, not the base board).
+
+**The one command that works.** Everything is in a single OpenOCD session on purpose:
+
+```
+openocd -f interface/cmsis-dap.cfg -f target/nrf52.cfg \
+  -c "adapter speed 1000" \
+  -c "nrf52.cpu configure -work-area-size 0" \
+  -c "init" -c "halt" \
+  -c "program rak4631-arduino-s140.hex verify" \
+  -c "reset run" -c "exit"
+```
+
+Expect `** Programming Finished **` then `** Verified OK **`, and expect it to take about
+**200 seconds** — roughly 30× slower than a normal flash. That is the cost of the fix, not a
+symptom. Then confirm `239A:0029` on the bus and flash the application over USB as usual.
+
+`cannot read IDR` immediately after `reset run` is **success, not failure** — see below.
+
+### Two traps, and how much time each one costs
+
+Both of these produced hours of misleading failures on 2026-08-30 before the mechanism was
+understood. Neither looks like what it is.
+
+**1. The core cannot run OpenOCD's flash loader, because it is in lockup.** The default nRF5
+write path downloads a small program into RAM and *executes it on the target*
+(`CIT-OPENOCD-NRF5`, `nrf5.c:1143`). A mass-erased part has no valid vector table, so the CPU
+double-faults into lockup at `pc 0xfffffffe` and the loader never runs. The visible failure is
+`error waiting for target flash write algorithm` and `Failed to write to nrf5 flash` at offset 0,
+after a connection that otherwise looks perfect — DPIDR read, `Cortex-M4 r0p1 processor detected`,
+`Mass erase completed.` **`configure -work-area-size 0` denies OpenOCD the RAM scratch area, which
+makes it fall back to writing one word at a time directly through the debug port** (`nrf5.c:1145`).
+No target code executes, so lockup stops mattering.
+
+**2. Every reset re-arms the software half of APPROTECT.** Access port protection has two halves:
+the hardware half follows `UICR.APPROTECT`, but the software half is re-armed by the CPU on *every*
+reset unless the running firmware writes `SwDisable` to `APPROTECT.DISABLE` at boot
+(`CIT-NRF-APPROTECT`). A freshly erased part runs no such firmware. So an `ERASEALL` opens the
+debug port, and the very next `reset halt` closes it again — and the session that follows shows
+`SWD DPIDR` succeeding with **no core detected at all**, because only CTRL-AP survives.
+
+The practical rule: **do not reset between erasing and programming.** A sequence like
+`init; reset halt; nrf5 mass_erase; reset halt; program ...` re-locks the part in the middle of
+its own recovery. Note also that erasing UICR leaves APPROTECT *disabled*, not enabled — the
+opposite of the intuitive reading, and worth checking rather than assuming, via
+`nrf52.dap apreg 1 0x0c` (CTRL-AP `APPROTECTSTATUS`; `1` means open).
+
+Two corollaries that also cost time:
+
+- **Do not hold the core in reset via CTRL-AP** (`apreg 1 0x00 0x01`) hoping to stop the lockup.
+  It makes every subsequent AP access return `stalled AP operation, issuing ABORT`. Let the core
+  sit in lockup; with no working area it is never asked to do anything.
+- **`cannot read IDR` after `reset run` is the expected end state.** The freshly written
+  bootloader boots and re-arms APPROTECT exactly as designed. Read it as confirmation the image
+  is running, not as a failed flash — the preceding `** Verified OK **` is the real verdict.
+
+### What not to do, learned the hard way
+
+Recorded because each of these was tried, wasted time, and produced no evidence:
+
+| Approach | Why it fails |
+|---|---|
+| Retrying the identical failing command in a loop | The 100 kHz clock and lockup were constant; 49 identical attempts produce 49 identical failures. `.cursor/rules/00-agent-liveness.mdc` caps this at two for a reason. |
+| Lowering the adapter clock further | The failure is the core not executing, not signal integrity. 100 kHz was *slower* than needed and changed nothing. |
+| `pyocd flash -M under-reset` | Holding reset costs the AP: `SoCTarget has no selected core`. |
+| `pyocd flash` at 1000 kHz | `Unexpected ACK '0'` — pyOCD is less tolerant of clock here than OpenOCD, which is fine at 1000 kHz. |
+| Blaming loose hand-held probe wires | Plausible, and it was genuinely unstable early on, which masked the real cause. **A stable connection changes the error message; it does not fix a core that cannot execute.** Get the wires mechanically secure first *so that the remaining error is trustworthy*, then read it. |
+
 ## Stage 1 — wind sensor only
 
 Radio off, battery reader off, no sleep. Powered from USB, printing to the serial monitor.
