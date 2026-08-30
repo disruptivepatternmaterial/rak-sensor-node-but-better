@@ -176,11 +176,53 @@ Both pads are on the 2.54 mm header along the edge of the RAK19007, silkscreened
 `BAT IO2 IO1 A1 IN1` and `SDA SCL TX1 RX1 GND VDD BOOT0`. Neither signal appears on any screw
 terminal, so both are solder joints.
 
+### THE RULE THAT SAVES PINS — connector sequencing
+
+**Cause established 2026-08-30.** Four dead pads across four cores, and in every case the dead pad
+was the pad carrying the pack. The mechanism is not the protocol and not `owscan`; it is that
+**the pack's data line is live while the core has no power.** Nordic states the limit and the
+consequence [CIT-NRF-BACKPOWER]:
+
+> "Max voltage on any GPIO is VDD + 0.3 V. Meaning that for an **unpowered** device, max GPIO
+> voltage is **0.3 V**. Any voltage above this level will make the ESD protection diode conduct and
+> you will backpower the device via the GPIO."
+
+The pack idles its data line at a level referenced to `3V3_In` and has no idea whether the core is
+powered. So an unpowered core with the harness mated sees ~3.3 V on a 0.3 V maximum, and the
+current goes in through the pad's ESD diode. Nordic's word for the result is "the high current flow
+can permanently damage the pin" [CIT-NRF-PINSHORT] — which is the ~3.9 Ω-to-ground signature
+measured on all four.
+
+**Why this bites this build in particular:** the buck powers the core *through the USB-C connector*,
+so the buck and a host cable are mutually exclusive. Every swap between bench and pack power
+therefore contains a window with the core dark and the harness mated. Node 002 went through that
+window a dozen times in one day of bring-up. Node 001 was wired once and deployed, and has never
+been through it — that is the entire difference between them.
+
+> **Order of operations. Follow it every single time.**
+>
+> | Going to bench USB | Going to pack / buck |
+> |---|---|
+> | 1. **Unmate the pack connector first** | 1. **Connect the buck first** |
+> | 2. Then remove buck power | 2. Then mate the pack connector |
+> | 3. Then plug in host USB | 3. Then confirm the boot banner |
+>
+> The pack connector is mated **last** and unmated **first**. Always.
+
+Hot-plugging is the same hazard with a worse edge: on a mating connector the pins touch in an
+unpredictable order, and wire inductance during the plug can break down the clamp diode on its own
+[CIT-NRF-UNPOWERED-PIN].
+
 ### REQUIRED — the one-wire protection network
 
-**Never solder the pack's data wire straight to a base-board pad.** Four GPIO pads have been
-destroyed on this project — `IO1` on three cores, `A1` on a fourth — and **no cause was ever
-found.** Six hypotheses were tested and every one failed
+The sequencing rule above is the fix. This resistor is the **insurance against forgetting it**,
+and it is worth fitting precisely because the rule will eventually be forgotten at 9 p.m. with
+cold hands.
+
+Nordic's damage mode is **current** through the ESD diode, not voltage across it
+[CIT-NRF-BACKPOWER]. A bare wire limits that current only by the diode's own resistance. **1 kΩ
+bounds it to about 3 mA**, which the pin survives indefinitely — so the resistor converts a
+sequencing mistake from fatal into a non-event
 ([`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
 [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
 
@@ -203,7 +245,7 @@ node built with R1 only is a node this project considers correctly built.
 
 | Ref | What | Value | Suggested part | What it adds |
 |---|---|---|---|---|
-| **R2** | resistor | 2.2 kΩ, ¼ W | any through-hole 2.2 kΩ | pulls the idle level clear of the 1.7 V grey zone the pack's 15 kΩ pull-down creates |
+| **R2** | resistor | 2.2 kΩ, ¼ W | any through-hole 2.2 kΩ | pulls the idle level clear of the 1.7 V grey zone the pack's 15 kΩ pull-down creates. **Must reference the board's own `VDD` pad, never an external rail** — a pull-up to an external supply back-powers the nRF through the pin when the board is off [CIT-PARTICLE-BACKPOWER] |
 | **D1** | 3.3 V bidirectional TVS / ESD diode | 3.3 V working voltage | Nexperia `PESD3V3L1BA`, Littelfuse `PESD3V3S1UB`, any 3.3 V TVS | clamps a spike faster than R1 alone can bleed it |
 
 A **bidirectional** TVS has no polarity, so it cannot be fitted backwards — that is why it beats a

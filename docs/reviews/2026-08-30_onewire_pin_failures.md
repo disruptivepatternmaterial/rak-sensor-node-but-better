@@ -3,9 +3,109 @@
 Five pads across four cores have now been declared dead on the RAK9154 one-wire link. This
 review asks the only question worth asking: is the design doing this, or is it bad luck?
 
-**Verdict: not established. Three candidate mechanisms survive, and the two cheapest tests have
-not been run.** What *is* established is that the design is survivable — node 001 runs it in the
-field — so this is a build-level or part-level fault, not an inevitability.
+## Verdict — the design is doing it, and Nordic documents the mechanism
+
+**Cause: the pack's data line is energised while the core is unpowered.** Nordic states the rule
+and the consequence directly [CIT-NRF-BACKPOWER]:
+
+> "Max voltage on any GPIO is VDD + 0.3 V. Meaning that for an **unpowered** device, max GPIO
+> voltage is **0.3 V**. Any voltage above this level will make the ESD protection diode conduct
+> and you will backpower the device via the GPIO."
+
+And on what that does to the pin, in a thread whose title is our exact symptom — *"SWDIO pin
+shorted to ground"*, on a chip that kept running its last firmware [CIT-NRF-PINSHORT]:
+
+> "If you tried powering a circuit via SWDIO or another GPIO pin, the **high current flow can
+> permanently damage the pin.**"
+
+The pack idles its data line at a logic level referenced to `3V3_In`, which this build takes from
+the always-on `VDD` pad. The pack does not know or care whether the core has power. So whenever the
+core is unpowered with the harness mated, the data line is roughly 3.3 V into a 0.3 V absolute
+maximum — **an order of magnitude out of spec** — and the current flows in through the pad's ESD
+diode, into the core's decoupling capacitance, through a diode never sized to carry it.
+
+### Why this happens constantly on 002 and never on 001
+
+**The buck feeds the core through the USB-C connector, so the buck and a host cable are mutually
+exclusive.** Every swap between bench power and pack power therefore contains a window where the
+core has no power and the pack is still mated. That window is not an accident or a mistake — it is
+structural to how this node is powered, and it opens on *every* swap.
+
+- **002** has been swapped between host USB and the buck a dozen times in one day of bring-up.
+- **001** was wired once, deployed, and has never been swapped since.
+
+That is the whole difference. It is not the firmware, not `owscan`, and not the protocol: both
+nodes ran the same images against the same library, and `owscan` drove 001's `IO1` on two separate
+occasions with no harm (fact 14).
+
+### The correlation that names the pin
+
+| Core | Pad carrying the pack | Outcome |
+|---|---|---|
+| three earlier cores | `IO1` (P0.17) | **dead** |
+| node 002 | `A1` (P0.31) | **dead** |
+| node 002 | `A0`, `SCL` — never connected to the pack | healthy |
+| node 002 | `SDA` (P0.13) — connected 2026-08-30, few swaps so far | working |
+
+**Four dead pads, four one-wire pads. The pin that dies is always the pin the pack is on.**
+
+This supersedes the header-geography reading, which noted that every dead pad sits on the
+`BAT IO2 IO1 A1 IN1` row while every healthy pad sits elsewhere. That correlation is real but
+**incidental** — `IO1` and `A1` were on that row because that is where the one-wire pad happened to
+be, not because the row is hazardous. The one-wire correlation is 4/4 and has a documented
+mechanism; the geography correlation has neither a mechanism nor a way to explain `SDA` surviving
+the same treatment. H0 below (the 12 V rail bridging the header) is not refuted, but it is no
+longer needed to explain anything, and it cannot explain the three `IO1` cores that died with no
+12 V ever present.
+
+### The fix is a procedure, and it is free
+
+**Never let the harness be mated while the core is unpowered.** Concretely, and in this order:
+
+| Going to bench USB | Going to pack/buck |
+|---|---|
+| 1. Unmate the pack connector **first** | 1. Connect the buck **first** |
+| 2. Then remove buck power | 2. Then mate the pack connector |
+| 3. Then plug in host USB | 3. Then confirm the boot banner |
+
+The series resistor in [`HARDWARE.md`](../HARDWARE.md) is now justified by a mechanism rather than
+by caution: Nordic's damage mode is **current** through the ESD diode, and 1 kΩ bounds it to about
+3 mA — survivable indefinitely — where a bare wire bounds it only by the diode's own resistance.
+Fit it. It converts a procedural mistake from fatal to harmless, which matters because the
+procedure above will eventually be forgotten.
+
+The pull-up must reference the **board's own** `VDD`, never an external rail, for the same reason
+[CIT-PARTICLE-BACKPOWER]:
+
+> "If the main power supplies are cut off, it is possible to 'back power' the NRF via pull-ups on
+> the I2C or GPIO pins. Always make sure your pull-ups are connected to the 3V3 pin on the device,
+> and not to an external power rail."
+
+### A second, independent kill path — still unmeasured
+
+The RAK19007's USB-C `VBUS` absolute maximum is **5.5 V**, feeding a TP4054 charger behind a series
+diode, with **no documented overvoltage clamp** [CIT-RAK19007-DS]. This build drives that connector
+from a generic adjustable buck whose output has never been metered on this project — the part is
+still listed as unselected in [`POWER_BUDGET.md`](../POWER_BUDGET.md), and
+[`FIRST_FLASH.md`](../FIRST_FLASH.md) :25 already asks for the check.
+
+RAK's own guidance is that a regulated external supply should go to the **P2 "Green Power"
+connector, not USB-C** [CIT-RAK-GREENPOWER]. Feeding USB-C works, and RAK confirms external 5 V and
+USB may coexist, but it is not the path they recommend, and it is the path with the charger IC
+behind it.
+
+This path fits a **whole core** dying, where the back-powering path fits a **single pad** dying. On
+2026-08-30 node 002 stopped enumerating on USB entirely — no serial device, no bootloader volume,
+nothing in the host's USB tree — which is the whole-core signature, not the single-pad one. Meter
+the buck before the next core goes on it.
+
+### How to tell whether the dead core is recoverable
+
+RAK's own discriminator [CIT-RAK-USBDEAD]: a missing SoftDevice kills USB while leaving SWD
+working, so **if SWD connects, the core is software-bricked and recoverable; if SWD does not
+connect, the chip is damaged.** Do not conclude "dead chip" from USB silence alone — every
+documented RAK4631 no-enumeration case in the forum corpus turned out to be bootloader or
+SoftDevice, not silicon.
 
 ### Three refuted hypotheses, recorded so they are not re-derived
 

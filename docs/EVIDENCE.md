@@ -4,6 +4,87 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 — cause of the dead one-wire pads established: back-powering an unpowered core
+
+**Host:** research and analysis on the workstation; failure observations from the Heliotrope Ridge
+bench earlier the same day. **Commit:** documented at the commit carrying this entry.
+**Core:** node 002's third core (die ID never read — [#97](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/97)).
+
+### Observation
+
+Four GPIO pads have died across four RAK4631 cores on this project. In every case the dead pad was
+**the pad carrying the RAK9154 one-wire link** — `IO1` (P0.17) on three cores, `A1` (P0.31) on the
+fourth. Pads on the same cores that were never connected to the pack (`A0`, `SCL`) remained
+healthy, and `SDA` (P0.13), connected 2026-08-30, works.
+
+A dead pad reads permanently LOW as an input and measures ~3.9 Ω to ground. The rest of each chip
+kept working.
+
+Separately, on 2026-08-30 node 002 stopped presenting on USB entirely: no `/dev/cu.usbmodem*`, no
+UF2 bootloader volume, and **nothing in the host's `ioreg -p IOUSB` tree** — only the Mac's own
+hubs and a SuperDrive. Not even a failed-enumeration entry.
+
+### Inference, with sources
+
+The dead-pad mechanism is documented by Nordic. On an **unpowered** nRF52840 the absolute maximum
+on any GPIO is **0.3 V**, because the limit is VDD + 0.3 V and VDD is zero; above that the pad's ESD
+protection diode conducts and back-powers the chip through the pin [CIT-NRF-BACKPOWER]. The damage
+mode is current, and Nordic's phrasing for the result — in a thread titled *"SWDIO pin shorted to
+ground"*, on a chip still running its last firmware — is that "the high current flow can
+permanently damage the pin" [CIT-NRF-PINSHORT]. That thread's symptom is ours: one pad a few ohms
+to ground, neighbours healthy.
+
+The RAK9154 idles its data line at a level referenced to `3V3_In`, which this build takes from the
+always-on `VDD` pad, and the pack has no way to know whether the core is powered. **So an unpowered
+core with the harness mated sees roughly 3.3 V against a 0.3 V maximum — an order of magnitude
+out.**
+
+**Why node 002 and not node 001.** The buck powers the core *through the USB-C connector*, so the
+buck and a host cable are mutually exclusive. Every swap between bench power and pack power
+therefore contains a window with the core dark and the harness mated. Node 002 went through that
+window roughly a dozen times during one day of bring-up. Node 001 was wired once, deployed, and has
+never been through it — and `owscan`, including its transmit phases, drove 001's `IO1` on
+2026-08-04 and 2026-08-12 with no harm. The difference is exposure to the swap window, not
+firmware, not the protocol, and not the diagnostic tool.
+
+**This supersedes the header-geography reading** recorded earlier the same day, which observed that
+every dead pad sat on the `BAT IO2 IO1 A1 IN1` row while every healthy pad sat elsewhere. That
+correlation is real but incidental — those pads were on that row because that is where the one-wire
+pad happened to be. It has no mechanism and cannot explain `SDA` surviving. H0 (a 12 V bridge on the
+header) is not refuted but is no longer load-bearing, and it never explained the three `IO1` cores
+that died with no 12 V present.
+
+### The whole-core failure is a different signature
+
+Back-powering through one pad predicts one dead pad, not a chip that vanishes from the USB tree.
+The RAK19007's USB-C `VBUS` absolute maximum is **−0.3 to 5.5 V**, feeding a TP4054 charger behind a
+series diode, with **no documented overvoltage clamp** [CIT-RAK19007-DS]. The buck driving that
+connector has never been metered on this project. Filed as
+[#100](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/100). RAK's own
+recommendation is that a regulated external supply goes to the **P2 "Green Power" connector, not
+USB-C** [CIT-RAK-GREENPOWER] — which would also close the #96 swap window, because the buck and a
+host cable would stop being mutually exclusive.
+
+### Not yet established
+
+- Whether this core is damaged or merely software-bricked. RAK's discriminator is SWD: a missing
+  SoftDevice kills USB while leaving SWD working, so **SWD reachability is the test**
+  [CIT-RAK-USBDEAD]. Not run at the time of writing. USB silence alone is not evidence of a dead
+  chip — every documented RAK4631 no-enumeration case in the forum corpus turned out to be
+  bootloader or SoftDevice.
+- The buck's actual output voltage, loaded and unloaded ([#100](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/100)).
+- Whether the ground-short *end state* is fully explained. [CIT-NRF-PINSHORT] carries an unresolved
+  objection: back-powering through the clamp diode should short the pin to VCC, not to ground.
+  Nordic did not close it. The damage attribution stands; the precise end state does not.
+
+### Consequence for the build
+
+Connector sequencing is now a documented rule in [`HARDWARE.md`](HARDWARE.md): the pack connector is
+mated **last** and unmated **first**, always. The 1 kΩ series resistor is retained and now justified
+by mechanism — it bounds the ESD-diode current to about 3 mA, converting a sequencing mistake from
+fatal to harmless.
+
+
 ## What counts as evidence
 
 An entry records something **observed**, not something expected. Every entry carries:
