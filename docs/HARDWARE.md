@@ -171,68 +171,142 @@ terminal, so both are solder joints.
 
 ### REQUIRED — the one-wire protection network
 
-**Do not solder the pack's data wire directly to a base-board pad.** Four GPIO pads have been
-destroyed on this project (`IO1` on three cores, `A1` on a fourth) and **no mechanism was ever
-established** — six hypotheses were tested and all were refuted or weakened
+**Never solder the pack's data wire straight to a base-board pad.** Four GPIO pads have been
+destroyed on this project — `IO1` on three cores, `A1` on a fourth — and **no cause was ever
+found.** Six hypotheses were tested and every one failed
 ([`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
 [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
 
-This network makes the cause irrelevant: nothing on the harness can deliver enough current or
-voltage to reach the pad. Fit it on **every** node, including 003.
+Three components make the cause irrelevant. Fit them on **every** node.
 
-#### Bill of materials
+#### Parts
 
-| Ref | Part | Value | Notes |
+| Ref | What | Value | Suggested part |
 |---|---|---|---|
-| R1 | resistor | **1 kΩ**, ¼ W, 1 % or 5 % | in series in the data wire |
-| D1 | **BAT54S** dual Schottky, SOT-23 | — | or a single 3.3 V TVS such as `PESD3V3L1BA` |
-| R2 | resistor | **2.2 kΩ**, ¼ W | pull-up to `3V3` |
+| **R1** | resistor | 1 kΩ, ¼ W | any through-hole 1 kΩ |
+| **R2** | resistor | 2.2 kΩ, ¼ W | any through-hole 2.2 kΩ |
+| **D1** | 3.3 V bidirectional TVS / ESD diode | 3.3 V working voltage | Nexperia `PESD3V3L1BA`, Littelfuse `PESD3V3S1UB`, or any 3.3 V TVS |
 
-#### Wiring
+A **bidirectional** TVS has no polarity, so it cannot be fitted backwards. That is why it is the
+recommended part over a `BAT54S`. Check the part's own datasheet for its working voltage before
+fitting; 3.3 V working, not 3.3 V breakdown.
+
+#### Schematic
+
+```mermaid
+flowchart LR
+    subgraph PACK["RAK9154 pack, SP11 connector"]
+        P35["pins 3 + 5<br/>joined together<br/>(TXD + RXD)"]
+        P2["pin 2<br/>P-minus"]
+    end
+
+    subgraph HARNESS["in the harness, heat-shrunk"]
+        R1["R1<br/>1 kohm<br/>in series"]
+    end
+
+    subgraph BOARD["RAK19007 edge header"]
+        SDA["SDA pad<br/>nRF52840 P0.13"]
+        V3["3V3 pad"]
+        GNDPAD["GND pad"]
+        R2["R2<br/>2.2 kohm<br/>pull-up"]
+        D1["D1<br/>3.3 V TVS<br/>clamp"]
+    end
+
+    P35 -->|data wire| R1
+    R1 -->|"protected side"| SDA
+    SDA --- R2
+    R2 --- V3
+    SDA --- D1
+    D1 --- GNDPAD
+    P2 -->|ground wire| GNDPAD
+
+    style R1 fill:#ffe9b3,stroke:#b8860b,stroke-width:2px
+    style D1 fill:#ffd6d6,stroke:#b22222,stroke-width:2px
+    style R2 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
+    style SDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+```
+
+The same thing as a plain schematic, since the node names above hide the topology:
 
 ```
-pack pins 3+5 ──── R1 (1 kΩ) ────┬──── SDA pad (nRF P0.13)
-     (joined)                    │
-                                 ├──── R2 (2.2 kΩ) ──── 3V3
-                                 │
-                            D1 BAT54S
-                          ┌──────┴──────┐
-                    cathode→3V3    anode→GND
+ pack pin 3 ─┐
+             ├── (joined) ──── R1 1 kohm ────┬───────────── SDA pad  (nRF P0.13)
+ pack pin 5 ─┘                               │
+                                             ├── R2 2.2 kohm ── 3V3 pad
+                                             │
+                                             └── D1 TVS ─────── GND pad
+
+ pack pin 2 (P-minus) ─────────────────────────────────────── GND pad
+ pack pin 4 (3V3_In)  ─────────────────────────────────────── VDD pad
 ```
 
-R1 goes in the wire itself — cut the data wire and solder R1 inline, heat-shrink it. Everything
-else lands on the **pin side** of R1, meaning the `SDA` end.
+**Everything except R1 lands on the board side of R1.** R1 is the only thing between the pack and
+the rest of the network. That ordering is the whole design: R1 limits the current, and D1 and R2
+sit where they can protect and bias a pad that R1 has already made safe.
 
-A BAT54S is two Schottky diodes in one SOT-23 with a common node on pin 3. Put the **common node
-on the signal**, the diode that goes to `3V3` on one end pin, and the one to `GND` on the other.
-If you use a TVS instead, it is a two-terminal part: signal to `GND`, either way round.
+#### Build steps
 
-#### What each part does
+Do these in order. Steps 1 and 8 are not optional.
 
-| Part | Protects against |
+1. **Power everything down.** USB unplugged, pack connector unmated. Nothing energised while you
+   work on a wire.
+2. **Join pack pins 3 and 5** at the connector, as before. One wire leaves that junction.
+3. **Cut that wire** about 30 mm from the board end.
+4. **Solder R1 (1 kΩ) inline** across the cut — pack side to one lead, board side to the other.
+   Heat-shrink over the body so nothing can touch the header.
+5. **Solder the board side of R1 to the `SDA` pad** on the `SDA SCL TX1 RX1 GND VDD BOOT0` row.
+6. **Solder R2 (2.2 kΩ)** from that same `SDA` pad to the `3V3` pad.
+7. **Solder D1 (TVS)** from that same `SDA` pad to the `GND` pad. Keep both legs short. A
+   bidirectional part has no orientation.
+8. **Verify before applying power** — see the table below. Then mate the pack, then plug in USB.
+
+#### Verify with a meter, power off, pack unmated
+
+| Measure between | Expect | If wrong |
+|---|---|---|
+| `SDA` pad and `3V3` pad | ~2.2 kΩ | R2 missing, wrong value, or a cold joint |
+| `SDA` pad and `GND` pad | high, hundreds of kΩ or more | a short — D1 is a wrong part or the pads are bridged. **Do not power up** |
+| `SDA` pad and pack pin 3 | ~1 kΩ | R1 missing or shorted across |
+| pack pin 2 and `GND` pad | near 0 Ω | ground wire not landed |
+| `BAT` pad and `SDA` pad | open | a bridge on the header row. **Do not power up** |
+
+Then power up and confirm the pad electrically before trusting it:
+
+```bash
+scripts/flash.sh --yes --env owscan_sda   # expect: INPUT_PULLUP idle HIGH, 0 samples LOW
+scripts/flash.sh --yes --env battdiag_sda # expect: 12.xx V within ~15 cycles
+```
+
+With R2 fitted, `owscan_sda` should report `idle HIGH` and **0 falling edges** while the pack is
+idle — the same signature as an unconnected clean pad, because R2 now holds the line high properly
+instead of leaving it at 1.7 V.
+
+#### What each part is for
+
+| Part | Job |
 |---|---|
-| R1, 1 kΩ | Limits any fault current to about 3 mA — well under the nRF52840's 15 mA per-pin absolute maximum, which is a **damage** limit and not an operating point [CIT-NRF-GPIO]. Covers a short, a driver collision, or a stray touch of the 12 V rail |
-| D1 | Clamps the pad to within a diode drop of `GND` and `3V3`. Overvoltage on the wire is shunted to the rail instead of into the pin. This is the part that makes a 12 V contact survivable |
-| R2, 2.2 kΩ | Fixes the idle level. Measured 2026-08-30: the pack presents **15 kΩ** to its own ground, which against the nRF52840's ~13 kΩ internal pull-up leaves the line near **1.7 V** — inside the undefined band between V_IL and V_IH. With R2 fitted, idle sits near 2.9 V and reads as a solid HIGH |
+| **R1, 1 kΩ** | Caps fault current near 3 mA. The nRF52840's per-pin **absolute maximum** is 15 mA, and absolute maximum is a damage threshold, not an operating point [CIT-NRF-GPIO]. Covers a short, a driver collision, and a stray touch of the 12 V rail |
+| **D1, TVS** | Clamps the pad to within a diode drop of `GND` and `3V3`, shunting overvoltage to the rail instead of into the pin. This is the part that makes a 12 V contact survivable rather than fatal |
+| **R2, 2.2 kΩ** | Fixes the idle level. Measured 2026-08-30: the pack presents **15 kΩ** to its own ground, which against the nRF52840's ~13 kΩ internal pull-up leaves the line near **1.7 V** — inside the undefined band between V_IL and V_IH. With R2 the line idles near 2.9 V and reads as a solid HIGH |
 
-Neither R1 nor R2 costs anything at 9600 baud: the RC time constant against any realistic harness
+Neither resistor costs anything at 9600 baud: the RC time constant against any realistic harness
 capacitance is far shorter than one bit period.
 
-#### Two rules that cost nothing and go with it
+#### Two habits that go with it, both free
 
-- **Never mate or unmate the pack connector with the board powered.** Pins on the SP11 do not
-  mate simultaneously, so a powered hot-plug can leave the data line referenced to nothing for a
-  moment. Unplug USB, unmate the pack, do the work, mate the pack, then power up.
-- **Meter every new core before it goes into a baseboard** — `IO1` to `GND` on the core
-  connector, expect megohms. A few ohms means it arrived shorted; send it back. No core's `IO1`
-  has ever been measured *before* installation, which is precisely why "arrived shorted" cannot
-  be told apart from "shorted here."
+- **Never mate or unmate the pack connector with the board powered.** SP11 pins do not mate
+  simultaneously, so a powered hot-plug can leave the data line referenced to nothing for a
+  moment. Order: unplug USB, unmate pack, work, mate pack, plug in USB.
+- **Meter every new core before it goes into a baseboard** — `IO1` to `GND` on the core connector,
+  expect megohms. A few ohms means it arrived shorted, so send it back. No core's `IO1` has ever
+  been measured *before* installation, which is exactly why "arrived shorted" cannot be told apart
+  from "shorted here."
 
 #### If a pin still dies with this fitted
 
-Then the harness is exonerated by construction and the fault is inside the core module. That is a
-warranty conversation with RAKwireless, not a debugging session — and it is the first time this
-project would have evidence strong enough to make that claim.
+The harness is then exonerated by construction and the fault is inside the core module — a
+warranty conversation with RAKwireless rather than another debugging session. It would also be the
+first time this project had evidence strong enough to make that claim stick.
 
 ### The whole harness on one screen
 
