@@ -65,9 +65,12 @@ counter resets as soon as any field is read. Implemented in `src/main.cpp`
 
 ### 2.2 RAK9154 (battery) — implemented path
 
-**Implemented: 5-pin Sensor Hub Load one-wire** (TXD+RXD bridged, 9600 half-duplex, IPSO TLV),
-chosen in [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) and working on hardware since
-2026-08-05. This is the socket to go to when battery reads fail.
+**Implemented: 5-pin Sensor Hub Load one-wire** (TXD+RXD bridged to base-board `A1` /
+`WB_A1`, 9600 half-duplex, IPSO TLV), chosen in
+[ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) and working on the original IO1 path since
+2026-08-05. A1 replaces damaged IO1 pins under [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)
+and remains hardware-unverified until that issue closes. This is the socket to go to when
+battery reads fail.
 [CITE(prior-art): Meshtastic `RAK9154Sensor`, `beegee-tokyo/RAK-OneWireSerial`, `forest-weather-machines/rak-4-5-wire/firmware/nanoc6-onewire-poll`](CITATIONS.md)
 [CITE(bench): pack latches pid `0x01` and reports 12.23 V / 98 % / 23.0 °C, `1a203d3`](EVIDENCE.md)
 

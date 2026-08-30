@@ -8,6 +8,16 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **Battery one-wire moves from damaged `IO1` to the free `A1` pad.** Bench isolation found
+  IO1 held at ~9.6 mV powered and ~3.86 Ω to ground unpowered on all available cores, while an
+  empty baseboard was open and A1 measured ~45 kΩ. Two baseboards, removing RAK5802, and
+  removing the battery harness did not change the result. `WB_A1` maps to nRF P0.31 and is
+  unused; IO2 is not available because it controls the RAK5802 `3V3_S` power rail. This remains
+  hardware-unverified until `owscan`, `battdiag`, and the full image pass on A1.
+  ([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96))
+
 ## [0.4.4] — 2026-08-28
 
 `0.4.4` is the hardened device-test image for rebuilding node 002 and bringing up node 003.

@@ -54,6 +54,13 @@ the protocol, not the MCU-side code.
 
 ## Consequences
 
+- **2026-08-29 pin amendment:** the bus decision is unchanged, but the MCU-side GPIO moves from
+  `WB_IO1` to the base-board `A1` pad (`WB_A1`, nRF P0.31). Isolation under
+  [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)
+  found IO1 at ~3.86 Ω to ground on all available cores while A1 measured ~45 kΩ; the empty
+  baseboard was open and removing the harness/RAK5802 changed nothing. IO2 is unavailable
+  because it controls the RAK5802's `3V3_S` rail. The protocol, connector pins 3+5 bridge, and
+  separate-bus rationale remain exactly as decided here.
 - Stage 1 (RK900) gets simpler: fixed 4800, no bus arbitration, no baud switching.
 - Stage 3 (battery) needs a half-duplex one-wire implementation on a second UART rather
   than a second Modbus address. References: `beegee-tokyo/RAK-OneWireSerial`

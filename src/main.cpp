@@ -36,11 +36,20 @@
 
 namespace {
 
-// CITE(datasheet): [CIT-RAK19007] the base board's IO slot exposes WB_IO1..WB_IO6; the
-//   one-wire battery link lands on WB_IO1, leaving Serial1 free for the RS-485 module.
+// CITE(datasheet): [CIT-RAK19007] the base-board extension header exposes A1 as a direct core
+//   GPIO; the one-wire battery link lands there, leaving Serial1 free for the RS-485 module.
 // CITE(datasheet): [CIT-RAK5802] the RS-485 module occupies the IO slot and its
 //   transceiver is powered from the switched rail on WB_IO2, which rk900.cpp controls.
-constexpr uint8_t kBatteryPin = WB_IO1;
+// CITE(datasheet): [CIT-NRF-GPIOTE] P0.31 supports the GPIO edge event the half-duplex receiver
+//   requires.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] SoftwareHalfSerial accepts an Arduino GPIO number and
+//   derives its nRF port register and interrupt at runtime; it is not tied to WB_IO1.
+//
+// WB_IO1/P0.17 was the original wiring. Bench isolation on 2026-08-29 found it held at ~9.6 mV
+// powered and ~3.86 ohm to ground unpowered on all available cores, while an empty baseboard was
+// open and A1 measured ~45 kohm. Issue #96 records the raw isolation sequence. A1 is the measured
+// recovery path; IO2 is not an alternative because it controls the RAK5802's 3V3_S rail.
+constexpr uint8_t kBatteryPin = WB_A1;
 
 // Ceiling on one awake cycle. Two sensor reads with bounded retries plus a join attempt
 // and the receive windows fit inside this with room to spare; anything longer means

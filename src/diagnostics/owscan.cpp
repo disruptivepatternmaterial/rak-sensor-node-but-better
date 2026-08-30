@@ -176,9 +176,9 @@ void ow_dump(const uint8_t *b, uint32_t n)
 // CITE(datasheet): [CIT-NRF-GPIO] nRF52840 PS, GPIO — PIN_CNF[n].PULL is configured
 //   independently of DIR, so INPUT_PULLUP and INPUT really do terminate an undriven line
 //   differently; the pair is a measurement, not two names for the same thing.
-// CITE(datasheet): [CIT-RAK19007] the one-wire link lands on the base board's WB_IO1 pad
-//   (g_pin above), which is the pin sampled here — pack pins 3+5 joined, confirmed
-//   continuous to that pad.
+// CITE(datasheet): [CIT-RAK19007] the one-wire link lands on the base-board extension GPIO
+//   selected by main.cpp (g_pin above), which is the pin sampled here — pack pins 3+5 joined
+//   and confirmed continuous to that pad.
 uint32_t ow_census(bool pull_up)
 {
     // The library arms a GPIOTE falling-edge interrupt on this same pin and would consume
@@ -437,7 +437,7 @@ void onewire_scan(uint8_t pin)
     ow_bytes        = 0;
     ow_best_baud    = 0;
 
-    LOGF("[ow scan] pin WB_IO1 (Arduino %u), pack pins 3+5 joined\n", (unsigned)g_pin);
+    LOGF("[ow scan] battery GPIO Arduino %u, pack pins 3+5 joined\n", (unsigned)g_pin);
 
     // Three points, so k and F in `T = k * bit_period + F` are over-determined rather than
     // assumed. 64 bytes per point keeps the micros() quantisation far below the signal.

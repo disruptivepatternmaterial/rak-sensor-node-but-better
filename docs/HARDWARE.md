@@ -153,7 +153,7 @@ Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is e
 ### The two data rules, stated plainly
 
 > **Pack pins 3 and 5 (TXD and RXD) are joined together, and that single joined wire goes to
-> the `IO1` pad on the base board.**
+> the `A1` pad on the base board.**
 >
 > **Pack pin 4 (`3V3_In`) goes to the `VDD` pad on the base board. Not to the RAK5802's `3V3`
 > terminal, and never to 5 V.**
@@ -168,8 +168,17 @@ terminal, so both are solder joints.
 |---|---|---|
 | Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
 | Pin 2 `P−` | buck negative **and** RAK5802 `GND` **and** RK900 negative | all three |
-| Pins 3 + 5 joined | `IO1` pad | one-wire half-duplex to the pack |
+| Pins 3 + 5 joined | `A1` pad (`WB_A1`, nRF P0.31) | one-wire half-duplex to the pack |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
+
+`IO1` was the original one-wire pad and must no longer be used on these cores. Bench isolation
+on 2026-08-29 found IO1 held at ~9.6 mV powered and ~3.86 Ω to ground unpowered on all three
+available cores; an empty baseboard was open, two baseboards behaved identically with a core
+installed, and removing the battery harness and RAK5802 changed nothing. A1 measured ~45 kΩ and
+is the replacement under test ([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+
+Do not substitute `IO2`: it controls the RAK19007 `3V3_S` switch that powers the RAK5802.
+Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 baud.
 
 | From (RK900) | To |
 |---|---|
