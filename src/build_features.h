@@ -155,6 +155,19 @@
 #define FEATURE_BATTERY_PIN_SDA 0
 #endif
 
+// Passive pad triage. ON makes owscan sample every candidate one-wire pad and drive none of
+// them, then return — no transmit phases at all.
+//
+// Exists because the question "which pads on this core are still usable" was previously answered
+// with one image per pad, and each image is a flash plus a power cycle. Handling events are the
+// population that correlates with the destroyed pads (issue #102), so a four-image answer costs
+// four times the exposure of a one-image answer. It is also the only owscan mode that cannot
+// itself stress a pin: the full scan sends 64 bytes of 0x55 at three bauds and then sweeps BOOT
+// and SENDAT, which is the most aggressive thing this firmware does to that wire.
+#ifndef OWSCAN_CENSUS_ONLY
+#define OWSCAN_CENSUS_ONLY 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)

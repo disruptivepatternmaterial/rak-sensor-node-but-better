@@ -439,6 +439,87 @@ void onewire_scan(uint8_t pin)
 
     LOGF("[ow scan] battery GPIO Arduino %u, pack pins 3+5 joined\n", (unsigned)g_pin);
 
+#if OWSCAN_CENSUS_ONLY
+    // Triage mode: sample every candidate pad and drive none of them.
+    //
+    // The point is to find a usable pad on a core that has already lost some, and to do it in
+    // ONE flash. Every flash and every power cycle is another handling event, and handling
+    // events are the population that correlates with the seven destroyed pads — so censusing
+    // four pads with four separate images multiplies the exposure by four to answer one
+    // question. This answers it once.
+    //
+    // Nothing here transmits. Phases 0, 3 and 4 of the full scan drive the pin — 64 bytes of
+    // 0x55 at three bauds, then BOOT and SENDAT sweeps — and a diagnostic whose job is to
+    // decide whether a pin is safe must not be the thing that stresses it. INPUT and
+    // INPUT_PULLUP are both pure observation.
+    //
+    // Reading: a healthy, undriven pad reads idle HIGH with the pull-up on and 0 % low. A pad
+    // that reads 100 % low with the pull-up enabled cannot be pulled up by the chip's own
+    // ~13 kOhm internal resistor, which takes a sink below about 1 kOhm — that is a destroyed
+    // pad, and it is the measured signature of all seven.
+    //
+    // CITE(datasheet): [CIT-NRF-GPIO] PIN_CNF[n].PULL is configured independently of DIR, so
+    //   INPUT_PULLUP and INPUT genuinely terminate an undriven line differently.
+    // CITE(prior-art): [CIT-NRF-GPIO-TOTAL] internal pull resistance 11/13/16 kOhm, which is
+    //   what sets the threshold above.
+    // CITE(bench): docs/EVIDENCE.md 2026-08-30 — SDA/P0.13 read 1749426 of 1749426 samples low
+    //   with the pack unplugged and the pull-up lifted.
+    {
+        // IO2 is deliberately absent: it switches the RAK5802's 3V3_S rail, so sampling it is
+        // not free. TX1/RX1 are absent because the RS-485 module owns them.
+        struct CandidatePad {
+            uint8_t     pin;
+            const char *name;
+        };
+        const CandidatePad pads[] = {
+            {WB_IO1, "IO1  (P0.17)"},
+            {WB_A1, "A1   (P0.31)"},
+            {WB_I2C1_SDA, "SDA  (P0.13)"},
+            {WB_I2C1_SCL, "SCL  (P0.14)"},
+        };
+
+        LOGLN(F("[ow census] passive pad triage — nothing is driven, no bytes are sent"));
+        LOGLN(F("[ow census] healthy = idle HIGH, 0 % low with the pull-up on"));
+
+        uint8_t healthy = 0;
+        for (uint32_t i = 0; i < (sizeof(pads) / sizeof(pads[0])); i++) {
+            g_pin = pads[i].pin;
+            ow_bus().end();
+
+            pinMode(g_pin, INPUT_PULLUP);
+            delay(5);
+
+            uint32_t lows    = 0;
+            uint32_t samples = 0;
+            const uint32_t start = millis();
+            while ((millis() - start) < kOwCensusMs) {
+                if (digitalRead(g_pin) == LOW) {
+                    lows++;
+                }
+                samples++;
+            }
+
+            const bool ok = (lows == 0);
+            if (ok) {
+                healthy++;
+            }
+            LOGF("   %s : %s — %lu of %lu samples low\n", pads[i].name,
+                 ok ? "HEALTHY (idle HIGH)" : "DEAD (held low)", (unsigned long)lows,
+                 (unsigned long)samples);
+
+            // Left as a plain input, pull-up released, so the triage leaves nothing driving or
+            // sourcing into a harness that may still be attached.
+            pinMode(g_pin, INPUT);
+        }
+
+        LOGF("[ow census] verdict: %u of 4 candidate pad(s) healthy\n", (unsigned)healthy);
+        if (healthy == 0) {
+            LOGLN(F("[ow census] no usable pad on this core for the one-wire link"));
+        }
+        return;
+    }
+#endif
+
     // Three points, so k and F in `T = k * bit_period + F` are over-determined rather than
     // assumed. 64 bytes per point keeps the micros() quantisation far below the signal.
     LOGLN(F("[ow scan] phase 0: transmit timing — is the excess in the bit period or between "
