@@ -32,7 +32,8 @@ bool s_watchdog_running   = false;
 // only tested for the watchdog. Without this a reset is anonymous, and an anonymous reset is
 // indistinguishable from a fault: three sessions on 2026-08-30 read counter jumps caused by
 // a console attach as evidence of a failing node.
-uint32_t s_reset_reason = 0;
+uint32_t s_reset_reason          = 0;
+bool     s_reset_reason_captured = false;
 
 // Slice length for the sleep wait below. Coarse enough that the per-cycle wakeup count is
 // negligible, short enough that the tick conversion stays far inside a 32-bit tick count at
@@ -109,12 +110,7 @@ void watchdog_begin(uint32_t timeout_seconds)
         return; // registers are locked; a second call cannot change anything
     }
 
-    // RESETREAS latches every reset cause and is only cleared by writing back the bits.
-    // Read it before the watchdog can contribute a new one.
-    const uint32_t reason = NRF_POWER->RESETREAS;
-    s_reset_reason        = reason;
-    s_reset_was_watchdog  = (reason & POWER_RESETREAS_DOG_Msk) != 0;
-    NRF_POWER->RESETREAS  = reason;
+    capture_reset_reason();
 
     // HALT: pause while a debugger has the core stopped, so a breakpoint is not a reset.
     // SLEEP: pause while the CPU sleeps, which is what lets a short timeout coexist with
@@ -139,11 +135,48 @@ void watchdog_feed()
 
 bool reset_was_watchdog()
 {
+    capture_reset_reason();
     return s_reset_was_watchdog;
+}
+
+// Reads the Arduino core's snapshot, NOT the hardware register.
+//
+// This distinction is the whole correctness of the feature. `RESETREAS` is write-one-to-clear,
+// and the Adafruit nRF52 core clears it in `init()` — which runs before `setup()`:
+//
+//     _reset_reason = NRF_POWER->RESETREAS;
+//     NRF_POWER->RESETREAS |= NRF_POWER->RESETREAS;   // W1C: register is now zero
+//
+// So an application that reads the register itself gets zero on **every** boot, whatever the
+// cause. The first revision of this code did exactly that, and because zero is decoded as
+// "power-on or brownout", it would have reported a rail drop for every button press, every
+// watchdog bite and every console attach — confidently, in the boot banner, for the rest of the
+// project. That is worse than the anonymous reset it replaced: an absent signal invites
+// investigation, whereas a wrong one ends it. Caught in review before it reached hardware.
+//
+// Idempotent and self-latching so call order cannot reintroduce the bug. Every public accessor
+// calls it, so the value is correct whether or not the watchdog is compiled in and regardless of
+// where the banner sits in setup().
+//
+// CITE(prior-art): [CIT-ADA-NRF52-CORE] cores/nRF5/wiring.c — `init()` snapshots RESETREAS into
+//   `_reset_reason` and then clears it write-one-to-clear; `readResetReason()` in wiring.h:32
+//   returns that snapshot. This is the only source of a non-zero reset cause in an application.
+// CITE(datasheet): [CIT-NRF-POWER] nRF52840 POWER — RESETREAS bits are sticky and cleared only
+//   by writing them back, which is what makes the core's early clear destructive to a later
+//   reader.
+void capture_reset_reason()
+{
+    if (s_reset_reason_captured) {
+        return;
+    }
+    s_reset_reason          = readResetReason();
+    s_reset_was_watchdog    = (s_reset_reason & POWER_RESETREAS_DOG_Msk) != 0;
+    s_reset_reason_captured = true;
 }
 
 uint32_t reset_reason_bits()
 {
+    capture_reset_reason();
     return s_reset_reason;
 }
 
@@ -151,15 +184,16 @@ uint32_t reset_reason_bits()
 //   RESETPIN 0, DOG 1, SREQ 2, LOCKUP 3, OFF 16, LPCOMP 17, DIF 18, NFC 19, VBUS 20. The bits
 //   are sticky and cleared only by writing them back, which watchdog_begin() does after
 //   latching them here. [CIT-NRF-POWER] — docs/CITATIONS.md
-// CITE(prior-art): [CIT-NRF-GPIO-TOTAL] — the same Nordic material records VIH as 0.7 x VDD,
-//   which is the threshold that makes a marginal idle level a framing failure rather than a
-//   merely noisy one. Relevant here because a brownout and a marginal rail look identical
-//   from the application unless RESETREAS is read.
+// Six of the nine bits are named. LPCOMP (17), DIF (18) and NFC (19) fall through to "other",
+// which the raw hex in the banner makes diagnosable — none of the three is reachable in this
+// firmware. Multiple sticky bits can be set at once, so this is a priority encoder rather than a
+// full decode, and the watchdog deliberately wins.
 //
-// A zero word is the load-bearing case and the reason this function exists. RESETREAS is
-// cleared by a power-on reset, so "no bits set" means the rail dropped and came back — a
-// brownout or an unplugged cable — and is precisely the cause that cannot be distinguished
-// from a healthy first boot without knowing that zero is meaningful.
+// A zero word is the load-bearing case. RESETREAS is cleared by a power-on reset, so "no bits
+// set" means the rail dropped and came back — a brownout or an unplugged cable — which is
+// precisely the cause that cannot be distinguished from a healthy first boot without knowing
+// that zero is meaningful. That is also why capture_reset_reason() must not read the register
+// directly: the core's early clear makes every reset look like this case.
 const char *reset_reason_text()
 {
     const uint32_t r = s_reset_reason;

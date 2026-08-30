@@ -48,6 +48,11 @@ bool reset_was_watchdog();
 const char *reset_reason_text();
 uint32_t reset_reason_bits();
 
+// Latches the reset cause from the Arduino core's snapshot. Idempotent, and called by each of
+// the accessors above, so nothing depends on call order — see the implementation for why reading
+// NRF_POWER->RESETREAS directly is wrong.
+void capture_reset_reason();
+
 // Shuts down peripherals, then sleeps for the requested time. Returns once the interval
 // has elapsed and the console is usable again.
 void sleep_seconds(uint32_t seconds);

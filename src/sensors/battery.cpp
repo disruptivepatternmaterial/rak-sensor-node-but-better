@@ -1416,10 +1416,18 @@ BatteryReading Battery::read()
     // which records that the one-wire driver is unchanged since the image running safely on
     // node 001, so no firmware theory can explain the difference between the two nodes.
     //
-    // CITE(prior-art): [CIT-NRF-UNPOWERED-PIN] Nordic — applying a voltage to a pin of an
-    //   unpowered device drives current through parasitic paths; the hazard is specifically the
-    //   unpowered case, which is exactly what WB_IO2 LOW creates for the RAK5802.
-    // CITE(datasheet): [CIT-RAK5802] the module's terminals are on the switched 3V3_S rail.
+    // Scoped precisely, because review caught the first draft of this comment overclaiming:
+    // [CIT-RAK5802] documents the module's `3V3` **clip** as sitting on the switched rail, and
+    // documents `SDA` as a direct passthrough with no buffer. It does **not** establish that the
+    // SDA net has a clamp or pull referenced to 3V3_S. So the justification here is only that
+    // this pin lands on a module whose supply the firmware switches off, and that raising the
+    // rail for the transaction removes an asymmetry that nothing needs. It is NOT a
+    // datasheet-grade claim about a powered signal path, and [CIT-NRF-UNPOWERED-PIN] was removed
+    // from this block because it concerns voltage applied to an nRF pin while the nRF's own VDD
+    // is zero — the opposite arrangement to this one.
+    //
+    // CITE(datasheet): [CIT-RAK19007] "IO2 controls the power switch of 3V3_S" — the rail this
+    //   raises, and the reason the module is unpowered by the time Battery::read() runs.
     // CITE(bench): docs/EVIDENCE.md 2026-08-30 — the production cycle runs Battery::read() with
     //   3V3_S already dropped by RK900::power_off(), confirmed by owscan's rail A/B phase.
     SwitchedRailHold rail_hold(m_pin == WB_I2C1_SDA);
