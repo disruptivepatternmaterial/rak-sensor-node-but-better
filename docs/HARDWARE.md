@@ -177,19 +177,31 @@ found.** Six hypotheses were tested and every one failed
 ([`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
 [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
 
-Three components make the cause irrelevant. Fit them on **every** node.
+**The whole build is one resistor.** Put a 1 kΩ resistor inline in the pack's data wire and land
+it in the RAK5802's `SDA` spring clip. That is it. Nothing is soldered to the board.
 
-#### Parts
+The series resistor is the part that actually saves the pin: it limits the current into P0.13 in
+every failure mode at once — a stuck driver, a hot-plug transient, a miswire onto the 12 V rail —
+without needing to know which one killed the last four. Fit it on **every** node.
 
 | Ref | What | Value | Suggested part |
 |---|---|---|---|
 | **R1** | resistor | 1 kΩ, ¼ W | any through-hole 1 kΩ |
-| **R2** | resistor | 2.2 kΩ, ¼ W | any through-hole 2.2 kΩ |
-| **D1** | 3.3 V bidirectional TVS / ESD diode | 3.3 V working voltage | Nexperia `PESD3V3L1BA`, Littelfuse `PESD3V3S1UB`, or any 3.3 V TVS |
 
-A **bidirectional** TVS has no polarity, so it cannot be fitted backwards. That is why it is the
-recommended part over a `BAT54S`. Check the part's own datasheet for its working voltage before
-fitting; 3.3 V working, not 3.3 V breakdown.
+#### Optional refinements — skip these unless a pin dies again
+
+R1 alone is the deal. The two parts below sharpen it and are worth adding on a node you are about
+to leave in the woods for a year, but they are not the difference between working and not, and a
+node built with R1 only is a node this project considers correctly built.
+
+| Ref | What | Value | Suggested part | What it adds |
+|---|---|---|---|---|
+| **R2** | resistor | 2.2 kΩ, ¼ W | any through-hole 2.2 kΩ | pulls the idle level clear of the 1.7 V grey zone the pack's 15 kΩ pull-down creates |
+| **D1** | 3.3 V bidirectional TVS / ESD diode | 3.3 V working voltage | Nexperia `PESD3V3L1BA`, Littelfuse `PESD3V3S1UB`, any 3.3 V TVS | clamps a spike faster than R1 alone can bleed it |
+
+A **bidirectional** TVS has no polarity, so it cannot be fitted backwards — that is why it beats a
+`BAT54S` here. Check the part's own datasheet for its **working** voltage, not its breakdown
+voltage, before fitting.
 
 #### Where it lands — use the RAK5802 spring terminals, not the soldered pad
 
@@ -273,25 +285,22 @@ The same thing as a plain schematic, because the boxes above hide the topology:
 board side of R1. That ordering is the design: R1 limits the current, then D1 and R2 protect and
 bias a node R1 has already made safe.
 
-#### Build steps
+#### Build steps — the one-part version
 
-In order. Steps 1 and 9 are not optional.
+1. **Power everything down.** USB unplugged, pack connector unmated.
+2. **Join pack pins 3 and 5** at the connector. One wire leaves that junction.
+3. **Cut that wire** about 30 mm from the board end.
+4. **Solder R1 (1 kΩ) inline** across the cut. Heat-shrink the body so it cannot touch anything.
+5. **Push the board side of R1 into the RAK5802 `SDA` spring clip.**
+6. **Pack pin 2 (`P−`)** into the RAK5802 `GND` clip. **Pack pin 4** to the `VDD` pad on the edge
+   header — *not* the module's `3V3` clip, which switches off mid-cycle.
+7. **Meter `SDA` clip to `GND` clip** before applying power. It must not read near 0 Ω. Then mate
+   the pack, then USB.
 
-1. **Power everything down.** USB unplugged, pack connector unmated. Nothing energised while a
-   wire is being moved.
-2. **Check whether a pull-up is already fitted.** Meter the `SDA` clip to the `VDD` pad. If it
-   reads **10 kΩ or less**, the base board already has an I2C pull-up and **R2 is not needed** —
-   skip steps 7. If it reads open or hundreds of kΩ, fit R2.
-3. **Join pack pins 3 and 5** at the connector. One wire leaves that junction.
-4. **Cut that wire** roughly 30 mm from the board end.
-5. **Solder R1 (1 kΩ) inline** across the cut — pack side to one lead, board side to the other.
-   Heat-shrink the body so it cannot touch anything.
-6. **Push the board side of R1 into the RAK5802 `SDA` spring clip.**
-7. **R2 (2.2 kΩ)** from the `SDA` clip to the **`VDD` pad** on the edge header. Not the module's
-   `3V3` clip. Skip if step 2 said a pull-up is already there.
-8. **D1 (TVS)** from the `SDA` clip to the `GND` clip. Short legs. Bidirectional parts have no
-   orientation.
-9. **Verify with a meter before applying power** — table below. Then mate the pack, then USB.
+If you are also fitting the optional parts: R2 from the `SDA` clip to the **`VDD` pad** (measure
+`SDA` to `VDD` first — under 10 kΩ means the board already has a pull-up and R2 is redundant), and
+D1 from the `SDA` clip to the `GND` clip. Both attach on the board side of R1, so R1 protects them
+too.
 
 #### Verify with a meter — power off, pack unmated
 
