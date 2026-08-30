@@ -4,6 +4,67 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 — node 002's silent core is ALIVE: SWD answered, chip unlocked
+
+**Host:** Heliotrope Ridge, CMSIS-DAP probe (serial `07000001006900394e...`), OpenOCD
+0.12.0 from `~/.platformio/packages/tool-openocd`. **Core:** node 002's third core, the one that
+stopped enumerating on USB.
+
+### Observation — the core is not dead
+
+One OpenOCD session connected and the target identified itself:
+
+```
+Info : Connecting under reset
+Info : SWD DPIDR 0x2ba01477
+Info : [nrf52.cpu] Cortex-M4 r0p1 processor detected
+Info : [nrf52.cpu] target has 6 breakpoints, 4 watchpoints
+0x00000001          <- CTRL-AP APPROTECTSTATUS
+```
+
+**`APPROTECTSTATUS = 0x00000001` means access port protection is NOT active** — the debug port is
+open, so no mass erase is required to work on this core.
+
+**A dead chip cannot do this.** It cannot return a valid DPIDR, and it certainly cannot report its
+own core revision and its breakpoint and watchpoint counts. Combined with RAK's discriminator — a
+missing SoftDevice kills USB while leaving SWD working, and "if you can't connect through JLink,
+the device is damaged" [CIT-RAK-USBDEAD] — **this core is software-bricked, not damaged.**
+
+The connection also required `connect_assert_srst`. Plain `init` failed at 100, 400 and 1000 kHz.
+Holding reset while attaching is what worked, which indicates **there is firmware executing in
+there** that interferes with the debug port when allowed to run.
+
+### Not reproducible on demand — a physical-contact problem, not a silicon one
+
+After that single success, **120 consecutive attempts failed** with `Error connecting DP: cannot
+read IDR`, across three clock speeds, with and without `connect_assert_srst`, and with `halt`
+removed from the command chain after it was found to abort the sequence early. Nothing was changed
+on the software side between the success and the failures.
+
+The probe initialises correctly every time — it reports its firmware version, its serial, and the
+line states — so the failure is at the target end of the wires. **One good connection followed by
+120 identical failures with no software change is the signature of marginal probe contact, not of a
+chip that died in between.**
+
+### What this retires
+
+**"Another dead chip" is refuted.** The core answered. Any further reasoning about node 002's USB
+silence must start from a live, unlocked nRF52840 running some firmware, with a broken USB
+presentation — which is the bootloader/SoftDevice class of fault that RAK's forum corpus says every
+documented RAK4631 no-enumeration case turned out to be.
+
+### Not yet established
+
+- What is actually in flash. The UICR bootloader pointer, the vector table at `0x0`, the
+  application at `0x26000` and the bootloader at `0xF4000` were all queued for reading and **none
+  of them were read** — every attempt after the first failed to connect. No conclusion about the
+  bootloader or SoftDevice state is available yet.
+- Whether reflashing bootloader + SoftDevice + application over SWD restores USB. The procedure
+  that worked on a different core earlier the same day is in [`FIRST_FLASH.md`](FIRST_FLASH.md):
+  OpenOCD with `configure -work-area-size 0`, and no resets between erase and program.
+- Why the probe contact is marginal. Mechanical, and on the operator's side of the bench.
+
+
 ## 2026-08-30 — buck output measured at 4.98 V; the buck is cleared
 
 **Host:** Heliotrope Ridge bench. **Core:** node 002's third core. **Meter:** operator's DMM.
