@@ -125,6 +125,8 @@ def main() -> int:
     parser.add_argument("--out", default="/tmp/owscope",
                         help="output directory for the capture and its CSV export")
     parser.add_argument("--port", type=int, default=10430, help="Logic 2 automation port")
+    parser.add_argument("--device", default=None,
+                        help="Saleae device id; defaults to the first physical device found")
     args = parser.parse_args()
 
     try:
@@ -136,6 +138,20 @@ def main() -> int:
     os.makedirs(args.out, exist_ok=True)
 
     with automation.Manager.connect(port=args.port) as manager:
+        # Logic 2 always offers simulation devices alongside any real hardware, and it refuses
+        # to pick for you: with more than one candidate, start_capture() fails with
+        # MissingDeviceError rather than choosing. So name the physical one explicitly. A
+        # simulated capture would happily produce a clean square wave and prove nothing about
+        # the wire, which is the only thing this script exists to measure.
+        physical = [d for d in manager.get_devices(include_simulation_devices=False)
+                    if not d.is_simulation]
+        if not physical:
+            print("no physical Saleae found — check it is on USB and that Logic 2 lists it",
+                  file=sys.stderr)
+            return 1
+        device_id = args.device or physical[0].device_id
+        print(f"device         : {device_id} ({physical[0].device_type.name})")
+
         device_configuration = automation.LogicDeviceConfiguration(
             enabled_analog_channels=[args.channel],
             analog_sample_rate=DEFAULT_ANALOG_HZ,
@@ -145,6 +161,7 @@ def main() -> int:
         )
         print(f"capturing analog channel {args.channel} for {args.seconds} s ...")
         with manager.start_capture(
+            device_id=device_id,
             device_configuration=device_configuration,
             capture_configuration=capture_configuration,
         ) as capture:
