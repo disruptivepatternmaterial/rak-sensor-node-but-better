@@ -137,12 +137,40 @@ Decoded: **12.54 V, −0.02 A, 100 %, 22.0 °C** — channel 21 `0xba` voltage, 
 This is the first RAK9154 reading this project has taken over **A1** rather than IO1, and it
 went end to end: pack → one-wire on P0.31 → encoder → radio → TTN → decoder.
 
-#### The wind sensor returned null, and the payload says so
+#### The RK900 answers once the harness is assembled
+
+Later the same morning, with the node fully assembled, `env:stage1` (RK900 only, no radio, no
+sleep) at commit `dd36e63d5f198195213530104d8b379afa9362f4`:
+
+```
+[cycle 2]
+   RK900   : raw 0x0000-0x0004 = 0000 0000 0100 01BA 275F
+   RK900   : wind 0.00 m/s @ 0 deg, 25.6 C, 44.2 %RH, 1007.9 hPa
+   wait    : 60 s (sleep disabled)
+```
+
+Full five-register read at 9600 8N1, slave `0x01`, and the raw words corroborate the decode:
+`0x0100` → 25.6 °C, `0x01BA` → 44.2 %RH, `0x275F` → 1007.9 hPa. **Wind 0.00 m/s at 0° is a real
+reading from a still anemometer on a bench, not a fabricated zero** — registers `0x0000` and
+`0x0001` are genuinely zero and the driver reported a successful read, which is a different
+outcome from the null recorded below.
+
+So **both sensors answer on this node**: the RAK9154 over A1 and the RK900 over RS-485. The node
+was returned to `env:rak4631_a1` afterwards.
+
+The console did not print a banner in either capture (`banner_commit=NOT OBSERVED`) because the
+capture attached mid-cycle, so the commit above is asserted from the flash inputs rather than
+read back from the board.
+
+#### Earlier the same day, before assembly: the wind field was null, and the payload said so
 
 The uplink is **15 bytes carrying 4 fields**; a full one is 35 bytes carrying 9. No wind channel
 is present at all. That is the null policy behaving correctly — a failed RK900 read is omitted,
-never encoded as zero — so the absence is itself a true reading. The RK900 was silent this
-cycle and the cause is not yet investigated.
+never encoded as zero — so the absence is itself a true reading. **The cause was simply that the
+harness was not assembled yet**; once it was, the RK900 answered (above). Worth keeping as a
+paired example: the same firmware omitted the field when the sensor could not answer and encoded
+a genuine `0.00 m/s` when it could, which is exactly the distinction the null policy exists to
+preserve.
 
 #### Correction to the entry below
 
