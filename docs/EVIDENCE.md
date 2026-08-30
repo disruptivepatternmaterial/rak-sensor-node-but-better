@@ -4,6 +4,71 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 — buck output measured at 4.98 V; the buck is cleared
+
+**Host:** Heliotrope Ridge bench. **Core:** node 002's third core. **Meter:** operator's DMM.
+
+### Observation
+
+**Buck output: 4.98 V**, with the pack near full charge (~12.4–12.5 V at the buck input, from the
+same pack that reported 12.41 V over the air at 18:13:20Z the same day).
+
+### What this establishes
+
+The buck is feeding a correct rail. 4.98 V is comfortably inside the RAK19007's `VBUS` absolute
+maximum of 5.5 V [CIT-RAK19007-DS] and inside the nRF52840's own 5.8 V [CIT-NRF-GPIO-TOTAL].
+**Overvoltage from the buck is refuted as the cause of the whole-core USB failure.**
+
+This closes the check that [`FIRST_FLASH.md`](FIRST_FLASH.md) :25 has asked for since the project
+began and that had never been recorded.
+
+### A retracted hypothesis, recorded so it is not re-derived
+
+I proposed that the buck's real hazard was **input sag** — that as the pack discharged, the buck
+input would walk down toward the module's enable threshold and the output would enter a growing
+sawtooth overshooting well above setpoint. **This does not apply to this build, and the operator
+was correct to reject it.**
+
+The measurement it rested on [CIT-MP1584-SCOPE] was taken on a module configured for a **3.3 V**
+output whose sawtooth appeared near an **~11.8 V** input threshold specific to that board. An
+MP1584 configured for **5 V** out needs only roughly 6 V in. **The pack's own protection cuts off
+far above 6 V**, and this firmware stops transmitting at a 9.60 V inhibit long before that, so the
+buck input never enters the regime where that behaviour was observed. Generalising one hobby
+capture across a different setpoint and a different input range was wrong.
+
+The related TI thread [CIT-TI-BUCK-OVERSHOOT] describes overshoot on **recovery from an output
+short circuit**, which is a different event, not discharge sag. Conflating the two inflated the
+concern further. Both citations stay in the registry because they are real and correctly describe
+what they measured; neither supports a claim about this node.
+
+### What is therefore still unexplained
+
+**The whole-core USB failure on node 002 has no established cause.** The back-powering mechanism in
+[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96) explains a
+single dead pad and predicts the rest of the chip surviving — it does not predict a core that
+vanishes from the host's USB tree entirely. With the buck cleared, no candidate remains that has
+both a mechanism and evidence.
+
+The next diagnostic is SWD, not more theory: a missing SoftDevice kills USB while leaving SWD
+working, so **SWD reachability distinguishes a software-bricked core from a damaged one**
+[CIT-RAK-USBDEAD]. Until that is run, "dead chip" is not a finding.
+
+### Unrelated finding recorded the same day
+
+RAK's own reference path for reading this pack **does not put the data line on a bare core GPIO**.
+`beegee-tokyo/RAK-OneWireSerial`, the only published code that names the RAK9154, requires a
+**RAK13002 WisBlock IO module** — "the Sensor Probe is connected with 3.3 V, GND and RXD1 only from
+the RAK13002 module" — prefers `RX1` / P0.15, states that other GPIOs "should work… but it is not
+tested", and is marked BETA [CIT-RAK-ONEWIRESERIAL]. This build's topology is outside anything RAK
+documents, and the module skipped is the one sitting between the pack and the core.
+
+The RAK9154 datasheet itself confirms the SP11 pinout in use but is **silent on every electrical
+property** of the data lines — no logic level, no open-drain-versus-push-pull, no internal pull
+resistance, and no statement of what `3V3_In` is for [CIT-RAK9154-DS]. The 15 kΩ measured on the
+pack's data line is close to the nRF52840's own internal pull range of 11–16 kΩ
+[CIT-NRF-GPIO-TOTAL], but nothing in RAK's documentation says what the pack presents.
+
+
 ## 2026-08-30 — cause of the dead one-wire pads established: back-powering an unpowered core
 
 **Host:** research and analysis on the workstation; failure observations from the Heliotrope Ridge

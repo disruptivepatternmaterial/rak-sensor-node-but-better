@@ -81,23 +81,24 @@ The pull-up must reference the **board's own** `VDD`, never an external rail, fo
 > the I2C or GPIO pins. Always make sure your pull-ups are connected to the 3V3 pin on the device,
 > and not to an external power rail."
 
-### A second, independent kill path — still unmeasured
+### The second kill path was measured and is closed
 
 The RAK19007's USB-C `VBUS` absolute maximum is **5.5 V**, feeding a TP4054 charger behind a series
-diode, with **no documented overvoltage clamp** [CIT-RAK19007-DS]. This build drives that connector
-from a generic adjustable buck whose output has never been metered on this project — the part is
-still listed as unselected in [`POWER_BUDGET.md`](../POWER_BUDGET.md), and
-[`FIRST_FLASH.md`](../FIRST_FLASH.md) :25 already asks for the check.
+diode with **no documented overvoltage clamp** [CIT-RAK19007-DS], and this build drives that
+connector from a generic adjustable buck. On 2026-08-30 the buck was finally metered:
+**4.98 V** at nominal pack voltage. Inside spec. **Overvoltage from the buck is refuted**
+([`EVIDENCE.md`](../EVIDENCE.md) 2026-08-30).
 
-RAK's own guidance is that a regulated external supply should go to the **P2 "Green Power"
-connector, not USB-C** [CIT-RAK-GREENPOWER]. Feeding USB-C works, and RAK confirms external 5 V and
-USB may coexist, but it is not the path they recommend, and it is the path with the charger IC
-behind it.
+I additionally argued that the danger was input sag as the pack discharged. **Retracted.** That
+rested on a capture of a module set for 3.3 V out whose sawtooth appeared near an ~11.8 V input
+threshold; an MP1584 set for 5 V needs about 6 V in, and the pack's protection — never mind this
+firmware's 9.60 V inhibit — cuts off far above that. The input cannot reach that regime here.
 
-This path fits a **whole core** dying, where the back-powering path fits a **single pad** dying. On
-2026-08-30 node 002 stopped enumerating on USB entirely — no serial device, no bootloader volume,
-nothing in the host's USB tree — which is the whole-core signature, not the single-pad one. Meter
-the buck before the next core goes on it.
+**So the whole-core USB failure on node 002 remains unexplained.** Back-powering explains one dead
+pad and predicts the rest of the chip living; it does not predict a core absent from the host's USB
+tree. RAK's guidance that a regulated supply belongs on the **P2 "Green Power" connector rather than
+USB-C** [CIT-RAK-GREENPOWER] is still worth adopting, but for the sequencing reason in this review,
+not because the buck was found guilty.
 
 ### How to tell whether the dead core is recoverable
 
