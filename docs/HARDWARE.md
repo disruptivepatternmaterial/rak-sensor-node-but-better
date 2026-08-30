@@ -191,84 +191,117 @@ A **bidirectional** TVS has no polarity, so it cannot be fitted backwards. That 
 recommended part over a `BAT54S`. Check the part's own datasheet for its working voltage before
 fitting; 3.3 V working, not 3.3 V breakdown.
 
+#### Where it lands — use the RAK5802 spring terminals, not the soldered pad
+
+`WB_I2C1_SDA` is P0.13, and `variant.h` marks it `SENSOR_SLOT IO_SLOT` — so it appears **both** on
+the base-board edge header **and** on the RAK5802's second spring terminal block, silkscreened
+`SCL SDA 3V3 AIN`. RAKwireless documents that block as a "reserved I2C expansion interface", a
+direct passthrough with no buffer or isolation; the module's 18 kV ESD protection is on the RS485
+side only [CIT-RAK5802].
+
+**Land the pack's data wire in the RAK5802's `SDA` spring terminal.** It is the same net as the
+pad, and it is better in three ways: no soldering, trivial rework, and it keeps you entirely off
+the 2.54 mm header row where all four dead pads have been.
+
+> **Trap — do not use the RAK5802's `3V3` terminal for anything.** That terminal sits on the
+> switched `3V3_S` rail, and `src/sensors/rk900.cpp` deliberately drops `WB_IO2` LOW after each
+> weather read. A pull-up or a reference taken from there vanishes partway through every cycle,
+> and the symptom is a battery that reads intermittently — very easy to misread as a protocol
+> fault. R2 and pack pin 4 both come from the always-on **`VDD` pad** on the edge header.
+
+`GND` on the same terminal block is common ground and is fine for D1 and for the harness ground
+wire.
+
 #### Schematic
 
 ```mermaid
 flowchart LR
-    subgraph PACK["RAK9154 pack, SP11 connector"]
-        P35["pins 3 + 5<br/>joined together<br/>(TXD + RXD)"]
+    subgraph PACK["RAK9154 pack — SP11 connector"]
+        P35["pins 3 + 5 joined<br/>TXD + RXD"]
         P2["pin 2<br/>P-minus"]
+        P4["pin 4<br/>3V3_In"]
     end
 
-    subgraph HARNESS["in the harness, heat-shrunk"]
-        R1["R1<br/>1 kohm<br/>in series"]
+    R1["R1 — 1 kohm<br/>inline in the wire<br/>heat-shrunk"]
+
+    subgraph T["RAK5802 spring terminals<br/>SCL SDA 3V3 AIN"]
+        TSDA["SDA clip<br/>= nRF P0.13"]
+        TGND["GND clip"]
+        T3V3["3V3 clip<br/>SWITCHED — DO NOT USE"]
     end
 
-    subgraph BOARD["RAK19007 edge header"]
-        SDA["SDA pad<br/>nRF52840 P0.13"]
-        V3["3V3 pad"]
-        GNDPAD["GND pad"]
-        R2["R2<br/>2.2 kohm<br/>pull-up"]
-        D1["D1<br/>3.3 V TVS<br/>clamp"]
+    subgraph H["RAK19007 edge header — always on"]
+        HVDD["VDD pad<br/>3.3 V always on"]
     end
 
-    P35 -->|data wire| R1
-    R1 -->|"protected side"| SDA
-    SDA --- R2
-    R2 --- V3
-    SDA --- D1
-    D1 --- GNDPAD
-    P2 -->|ground wire| GNDPAD
+    D1["D1 — 3.3 V TVS<br/>clamp"]
+    R2["R2 — 2.2 kohm<br/>pull-up"]
+
+    P35 --> R1
+    R1 --> TSDA
+    TSDA --- D1
+    D1 --- TGND
+    TSDA --- R2
+    R2 --- HVDD
+    P2 --> TGND
+    P4 --> HVDD
 
     style R1 fill:#ffe9b3,stroke:#b8860b,stroke-width:2px
     style D1 fill:#ffd6d6,stroke:#b22222,stroke-width:2px
     style R2 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
-    style SDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style TSDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style T3V3 fill:#eeeeee,stroke:#999999,stroke-dasharray: 4 3
 ```
 
-The same thing as a plain schematic, since the node names above hide the topology:
+The same thing as a plain schematic, because the boxes above hide the topology:
 
 ```
  pack pin 3 ─┐
-             ├── (joined) ──── R1 1 kohm ────┬───────────── SDA pad  (nRF P0.13)
- pack pin 5 ─┘                               │
-                                             ├── R2 2.2 kohm ── 3V3 pad
-                                             │
-                                             └── D1 TVS ─────── GND pad
+             ├─ (joined) ── R1 1 kohm ──┬────────── RAK5802 "SDA" spring clip  (nRF P0.13)
+ pack pin 5 ─┘                          │
+                                        ├── R2 2.2 kohm ──── VDD pad  (edge header, always on)
+                                        │
+                                        └── D1 TVS ───────── RAK5802 "GND" spring clip
 
- pack pin 2 (P-minus) ─────────────────────────────────────── GND pad
- pack pin 4 (3V3_In)  ─────────────────────────────────────── VDD pad
+ pack pin 2 (P-minus) ───────────────────────────────────── RAK5802 "GND" spring clip
+ pack pin 4 (3V3_In)  ───────────────────────────────────── VDD pad  (edge header)
+
+ RAK5802 "3V3" clip ── UNUSED. Switched rail, dies mid-cycle.
 ```
 
-**Everything except R1 lands on the board side of R1.** R1 is the only thing between the pack and
-the rest of the network. That ordering is the whole design: R1 limits the current, and D1 and R2
-sit where they can protect and bias a pad that R1 has already made safe.
+**R1 is the only thing between the pack and everything else.** D1 and R2 both attach on the
+board side of R1. That ordering is the design: R1 limits the current, then D1 and R2 protect and
+bias a node R1 has already made safe.
 
 #### Build steps
 
-Do these in order. Steps 1 and 8 are not optional.
+In order. Steps 1 and 9 are not optional.
 
-1. **Power everything down.** USB unplugged, pack connector unmated. Nothing energised while you
-   work on a wire.
-2. **Join pack pins 3 and 5** at the connector, as before. One wire leaves that junction.
-3. **Cut that wire** about 30 mm from the board end.
-4. **Solder R1 (1 kΩ) inline** across the cut — pack side to one lead, board side to the other.
-   Heat-shrink over the body so nothing can touch the header.
-5. **Solder the board side of R1 to the `SDA` pad** on the `SDA SCL TX1 RX1 GND VDD BOOT0` row.
-6. **Solder R2 (2.2 kΩ)** from that same `SDA` pad to the `3V3` pad.
-7. **Solder D1 (TVS)** from that same `SDA` pad to the `GND` pad. Keep both legs short. A
-   bidirectional part has no orientation.
-8. **Verify before applying power** — see the table below. Then mate the pack, then plug in USB.
+1. **Power everything down.** USB unplugged, pack connector unmated. Nothing energised while a
+   wire is being moved.
+2. **Check whether a pull-up is already fitted.** Meter the `SDA` clip to the `VDD` pad. If it
+   reads **10 kΩ or less**, the base board already has an I2C pull-up and **R2 is not needed** —
+   skip steps 7. If it reads open or hundreds of kΩ, fit R2.
+3. **Join pack pins 3 and 5** at the connector. One wire leaves that junction.
+4. **Cut that wire** roughly 30 mm from the board end.
+5. **Solder R1 (1 kΩ) inline** across the cut — pack side to one lead, board side to the other.
+   Heat-shrink the body so it cannot touch anything.
+6. **Push the board side of R1 into the RAK5802 `SDA` spring clip.**
+7. **R2 (2.2 kΩ)** from the `SDA` clip to the **`VDD` pad** on the edge header. Not the module's
+   `3V3` clip. Skip if step 2 said a pull-up is already there.
+8. **D1 (TVS)** from the `SDA` clip to the `GND` clip. Short legs. Bidirectional parts have no
+   orientation.
+9. **Verify with a meter before applying power** — table below. Then mate the pack, then USB.
 
-#### Verify with a meter, power off, pack unmated
+#### Verify with a meter — power off, pack unmated
 
 | Measure between | Expect | If wrong |
 |---|---|---|
-| `SDA` pad and `3V3` pad | ~2.2 kΩ | R2 missing, wrong value, or a cold joint |
-| `SDA` pad and `GND` pad | high, hundreds of kΩ or more | a short — D1 is a wrong part or the pads are bridged. **Do not power up** |
-| `SDA` pad and pack pin 3 | ~1 kΩ | R1 missing or shorted across |
-| pack pin 2 and `GND` pad | near 0 Ω | ground wire not landed |
-| `BAT` pad and `SDA` pad | open | a bridge on the header row. **Do not power up** |
+| `SDA` clip and `VDD` pad | ~2.2 kΩ, or ≤10 kΩ if the board's own pull-up is doing the job | R2 missing, wrong value, or a bad clip |
+| `SDA` clip and `GND` clip | high, hundreds of kΩ or more | a short — wrong D1, or a strand across the clips. **Do not power up** |
+| `SDA` clip and pack pin 3 | ~1 kΩ | R1 missing, or shorted across by solder |
+| pack pin 2 and `GND` clip | near 0 Ω | ground wire not seated in the clip |
+| `BAT` pad and `SDA` clip | open | a bridge on the header row. **Do not power up** |
 
 Then power up and confirm the pad electrically before trusting it:
 
