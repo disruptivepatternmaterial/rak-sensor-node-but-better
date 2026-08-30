@@ -88,16 +88,48 @@
 #define FEATURE_BUS_SCAN 0
 #endif
 
-// The same idea for the one-wire battery link, OFF everywhere except its own environment.
-// The battery driver collapses "the pack never heard us" and "the pack answered and we
-// missed it" into one outcome — no reply, 0 bytes — and those need opposite responses: a
-// meter and a cable in the first case, a constant in the second. This measures the pin
-// itself before it assumes any protocol at all, so the two can be told apart. Never
-// compiled into a field image: it holds the line for tens of seconds and addresses probe
-// ids the node has no business addressing.
-#ifndef FEATURE_ONEWIRE_SCAN
-#define FEATURE_ONEWIRE_SCAN 0
-#endif
+// ===========================================================================================
+// DELETED 2026-08-30 — FEATURE_ONEWIRE_SCAN, OWSCAN_CENSUS_ONLY, OWSCAN_PIN, and the whole of
+// src/diagnostics/owscan.{h,cpp}. DO NOT RECREATE ANY OF IT. Not a passive variant, not a
+// "safe" variant, not behind a flag.
+//
+// It destroyed the hardware it was built to diagnose. Seven GPIO pads across two cores, and
+// every single one was the pad carrying the pack's data line (#102). Its phase 0 drove 64 bytes
+// of 0x55 at three baud rates every cycle — 192 bytes, cycling in seconds — where the
+// production battery read drives ~14 bytes per 900 s. 0x55 toggles every bit, the worst
+// possible pattern for the contention path in #99.
+//
+// On 2026-08-30 the pack was measured actively driving its end of that wire: +3.3118 V idle,
+// +0.0867 V driven low, 9,520 edges in 57 s. Two live drivers in opposition put ~3.3 mA through
+// the pad even with the 1 kOhm series resistor fitted. Earlier sessions checked that against
+// the nRF52840's 15 mA ABSOLUTE MAXIMUM, found it under, and cleared it — the wrong limit. The
+// pin's STANDARD DRIVE continuous rating is 1–2 mA [CIT-NRF-GPIO-TOTAL], so the resistor left
+// the current 2–3x over the rating that governs sustained use, on every low bit of every frame.
+// Chronic degradation, which is why it took repeated sessions rather than one event, and why
+// node 001 — production image only — is still alive in the field after weeks.
+//
+// The measured signature agrees: SDA/P0.13 reads 5.6 kOhm to ground against 240 kOhm on the
+// never-connected SCL control pin on the same core, same meter, powered down. 43x apart.
+//
+// Two further reasons it is not coming back:
+//
+//   1. THE OPERATOR NEVER RAN IT. Agents flashed it over SSH, repeatedly, across sessions. A
+//      warning comment would have been read by exactly the sessions that already ignored one.
+//      Deleting the code is the only control that does not depend on the next agent's care.
+//   2. IT WAS WORSE THAN THE ALTERNATIVE ANYWAY. Two multimeter readings settled in one minute
+//      what this diagnostic got wrong across multiple sessions and several discarded cores. If
+//      a pad needs qualifying, meter it against a known-good pin on the same core — see
+//      docs/HARDWARE.md § "Qualifying the pack harness".
+//
+// If you believe you need to observe that line, use the logic analyzer. It survives -25 V to
+// +25 V and presents 2 MOhm [CIT-SALEAE-LOGICPRO8], against a pad that survives 3.6 V powered
+// and 0.3 V unpowered. It reads the answer without spending a core, and on 2026-08-30 it decoded
+// the pack's entire announcement frame at 9600 8N1 with no MCU connected at all.
+//
+// CITE(bench): docs/EVIDENCE.md 2026-08-30 — the measured drive levels, the 9,520 edges, the
+//   5.6 kOhm / 240 kOhm pad comparison, and the decoded frame.
+// CITE(datasheet): [CIT-NRF-GPIO-TOTAL] nRF52840 standard drive sink/source 1/2/4 mA.
+// ===========================================================================================
 
 // Deliberately no FEATURE_BATTERY_MODBUS. A raw Modbus read at slave 0x6E on the pack's
 // one-wire line drew 0 bytes on every cycle — the Generic Probe IO adapter does not bridge a
@@ -155,17 +187,36 @@
 #define FEATURE_BATTERY_PIN_SDA 0
 #endif
 
-// Passive pad triage. ON makes owscan sample every candidate one-wire pad and drive none of
-// them, then return — no transmit phases at all.
+// The THIRD and LAST recovery pad on node 002's core: WB_I2C1_SCL/P0.14. Takes precedence over
+// both flags above so a board cannot be built for two pins at once.
 //
-// Exists because the question "which pads on this core are still usable" was previously answered
-// with one image per pad, and each image is a flash plus a power cycle. Handling events are the
-// population that correlates with the destroyed pads (issue #102), so a four-image answer costs
-// four times the exposure of a one-image answer. It is also the only owscan mode that cannot
-// itself stress a pin: the full scan sends 64 bytes of 0x55 at three bauds and then sweeps BOOT
-// and SENDAT, which is the most aggressive thing this firmware does to that wire.
-#ifndef OWSCAN_CENSUS_ONLY
-#define OWSCAN_CENSUS_ONLY 0
+// SDA/P0.13 failed on 2026-08-30 like A1 and IO1 before it, and the operator's meter separated
+// damage from suspicion for the first time: with the core installed and everything powered down,
+// SDA read 5.6 kohm to GND while SCL — never connected to the pack — read 240 kohm. 43x apart on
+// the same core, same meter, so SDA is genuinely damaged and SCL is genuinely healthy. The
+// firmware's earlier 0.121 V on that powered pin implies ~495 ohm at 3.3 V, an 11x drop from the
+// meter's reading at its lower test voltage: a non-linear, diode-like junction, i.e. a punched
+// through ESD clamp on the GROUND side rather than a resistive short.
+//
+// Ground side matters. It means current entered the pad while the pad was pulling LOW, which is
+// the direction where our NMOS sinks the pack's active HIGH — and on the same day the pack was
+// measured driving its end (+3.3118 V idle, +0.0867 V low, 9,520 edges in 57 s).
+//
+// **SCL IS THE LAST USABLE PAD ON THIS CORE.** IO1, A1 and SDA are gone; TX1/RX1 belong to the
+// RS-485 module, IO2 gates the 3V3_S rail, and IN1 is not a core GPIO in the variant. So do not
+// select this pin until the transmit path that consumed the other three is fixed — moving the
+// wire without fixing the drive spends the last pad and the core with it (issue #99, #102).
+//
+// Reachable as a spring terminal on the RAK5802 (`SCL SDA 3V3 AIN`), so unlike A1 this needs no
+// solder joint. Same switched-rail caveat as SDA: that terminal sits on a module whose supply
+// WB_IO2 gates, so SwitchedRailHold in battery.cpp must cover this pin too.
+//
+// CITE(datasheet): [CIT-NRF-GPIO-TOTAL] nRF52840 standard drive sink/source 1/2/4 mA — the
+//   continuous rating the contention current exceeds, distinct from the 15 mA damage limit.
+// CITE(bench): docs/EVIDENCE.md 2026-08-30 — the 5.6 kohm / 240 kohm pad comparison and the
+//   measured pack drive levels behind the paragraph above.
+#ifndef FEATURE_BATTERY_PIN_SCL
+#define FEATURE_BATTERY_PIN_SCL 0
 #endif
 
 #if FEATURE_CONSOLE && defined(ARDUINO)

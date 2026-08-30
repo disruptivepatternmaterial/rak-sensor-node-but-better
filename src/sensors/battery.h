@@ -30,13 +30,14 @@
 
 // How many 0xFF wake bytes lead every frame sent on the one-wire link.
 //
-// Exposed here, rather than kept private to battery.cpp, because src/diagnostics/owscan.cpp
-// must send the same run: the pack has only ever replied to frames led by four, so a scan that
-// sends one reports "no reply" for a working pack and sends the next reader after a fault that
-// does not exist. That already happened. Everything else in owscan.cpp is deliberately
-// duplicated so the scan can probe frames the driver never sends — this value is the exception,
-// because it is not a protocol field, it is a physical-layer property of this pack, and there is
-// no version of "correct" that differs between the two.
+// It stays exposed here even though its only other consumer, src/diagnostics/owscan.cpp, was
+// deleted 2026-08-30 for destroying seven GPIO pads. The reason is the value itself: the pack has
+// only ever replied to frames led by four wake bytes, so any future reader that sends one gets
+// "no reply" from a working pack and goes hunting a fault that does not exist. That already
+// happened once. This is a physical-layer property of this pack, not a protocol field, and it is
+// worth keeping visible so nobody re-derives it by driving the wire.
+//
+// Do NOT take this as licence to write a new scanner. See src/build_features.h.
 //
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t carries
 //   a single `U8 wakeup`, so four is a deliberate deviation from the reference struct.

@@ -4,6 +4,261 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 (fifth) — the pack's announcement frame decoded off the wire: it broadcasts unprompted, and identifies as "RAK2560-io"
+
+**Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8 `AF11F852CEC20A9`, capture 15,
+digital + analog on the data line, `Async Serial` analyzer at **9600 8N1**. **Core:** none fitted.
+**Nothing was transmitting** — pin 4 energised from the bench supply at 3.3 V, data wire to the
+analyzer only, no MCU anywhere in the loop.
+
+### Observation
+
+**828 bytes decoded in 17.6 s. Nine frames, 92 bytes each, all nine byte-identical.**
+Inter-frame period min 1.208 s, max 2.755 s, mean **2.186 s**.
+
+```
+FF 7E 00 55 02 00 00 FF 00 01 50 03 44 01 02 09 00 33 09 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 FF 00 47 45 00 00
+00 00 52 41 4B 32 35 36 30 2D 69 6F 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 06 15 BA 08 00 16 B9 08 00 17 B8 08 00 18
+67 08 00 19 F3 08 00 1A F3 08 00 86
+```
+
+| Offset | Bytes | Reading |
+|---|---|---|
+| 0 | `FF` | wake byte — matches the four-wake-byte lead the driver already implements |
+| 1 | `7E` | frame delimiter, HDLC-style |
+| 42–51 | `52 41 4B 32 35 36 30 2D 69 6F` | **ASCII `"RAK2560-io"`** — the device names itself |
+| 66 | `06` | count: six entries follow |
+| 67–90 | `15 BA0800 · 16 B90800 · 17 B80800 · 18 670800 · 19 F30800 · 1A F30800` | six ID/3-byte-value triplets, IDs `0x15`–`0x1A` consecutive; values LE = 2234, 2233, 2232, 2151, 2291, 2291 |
+| 91 | `86` | trailing byte, presumably the `cal_chksum()` popcount [CIT-ONEWIRE-SERIAL] |
+
+### What this establishes
+
+1. **The pack transmits without being asked.** Every ~2.2 s, with no master on the bus and no MCU
+   connected at all. Previously the protocol was believed to be strictly request/response.
+2. **9600 8N1 is confirmed on the pack side**, decoded rather than inferred. Independent of
+   [ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md), which established 9600 for the
+   *RK900* on a different bus.
+3. **The device identity is on the wire in plain ASCII**, confirming this is the RAK2560 Sensor Hub
+   probe protocol and that [CIT-RAK-ONEWIRESERIAL] / [CIT-MESHTASTIC-9154] are the right
+   references.
+4. **Six consecutive IDs carrying six similar values.** Relevant to
+   [#7](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/7), which
+   records the pack's cell count as inferred from the nominal rating and never established. **Not
+   concluded** — the unit of those values is unknown and six IDs need not mean six cells.
+
+### What this does NOT establish
+
+**All nine frames are identical, so this is an announcement, not telemetry.** No field varied
+across 17.6 s. The `FF` at offsets 7 and 34 is consistent with an unprovisioned id awaiting
+assignment (`provId FF`, the state `battery.cpp`'s provisioning ladder exists to leave). So
+**listen-only cannot be assumed to yield battery readings** — the pack very likely has to be
+answered at least once. Whether a *provisioned* pack then broadcasts telemetry unprompted is
+untested and is the next cheap question.
+
+### The consequence that matters today
+
+The production battery read drives roughly **14 bytes** per cycle at a 900 s cadence. `owscan`
+phase 0 drives **192 bytes** per cycle — 64 bytes of `0x55` at three baud rates — and cycles in
+seconds. `0x55` toggles every bit, which is the worst possible pattern for the contention path in
+[#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
+
+**So the diagnostic has been driving over an order of magnitude more stress into the pad than the
+firmware it was diagnosing**, and it is the only thing node 002 saw that node 001 did not at
+volume. `env:owcensus` (`1b87c4e`) already exists as a passive replacement that drives nothing.
+
+CITE(prior-art): [CIT-ONEWIRE-SERIAL] `RAK-OneWireSerial` @ `c58c0f0` — the wake-byte lead and
+`cal_chksum()` this frame's first and last bytes are read against.
+CITE(prior-art): [CIT-RAK-ONEWIRESERIAL] — RAK's own library, which names the RAK2560 Sensor Hub
+probe protocol; the ASCII identity here confirms it applies.
+CITE(bench): decoded bytes at `/tmp/rak-owprobe/decode/pack9600_c15.csv` on the build host, from
+the capture preserved at `~/rak-captures/20260830_pack_announcement_9600.sal` alongside
+`~/rak-captures/20260830_pack_levels_pin4_energised.sal`.
+
+## 2026-08-30 (fourth) — the pack's data line MEASURED at last: 3.31 V idle, 0.087 V driven low, never out of pad spec
+
+**The oldest unsourced electrical assumption in the project is now a measurement.** The RAK9154's
+data-line logic level had never been established from a datasheet or a bench reading on any node
+(prior reviews' "fact 4"). It has now.
+
+**Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8 `AF11F852CEC20A9`, capture 13,
+three analog channels at 781.25 kS/s, 2,347,642 samples over 60.100 s, exported at downsample 20.
+**Core:** none fitted. **Base board:** not in the loop. Pack pin 4 (`3V3_In`) energised from a
+bench supply at 3.3 V, current limit 50 mA, supply negative bonded to pack pin 2 with the analyzer
+ground. Data wire to the analyzer only.
+
+### The valid window
+
+Pin 4 was stable above 3.0 V for **57.11 s** (`t = 0.000 … 57.109 s`), median **+3.291 V**. It
+dropped to ground for one contiguous 1.221 s run at `t = 57.132 … 58.353 s` — the supply being
+switched off at the end of the run. All figures below are from the stable window only.
+
+| Channel | Pack pin | min | median | max |
+|---|---|---|---|---|
+| 0 | 1 (`P+`) | +10.521 V | +10.521 V | +10.521 V (analyzer clipped, ≥ 10.52 V) |
+| 1 | 4 (`3V3_In`) | +3.004 V | **+3.291 V** | +3.302 V |
+| 2 | joined 3+5 (data) | **+0.014 V** | **+3.313 V** | **+3.318 V** |
+
+### The data line, characterised
+
+| Property | Measured |
+|---|---|
+| Idle / HIGH level | **+3.3118 V** mean, 96.56 % of samples (2,154,191) |
+| Driven LOW level | **+0.0867 V** mean, 3.44 % of samples (76,644) |
+| Absolute maximum seen | **+3.318 V** |
+| Absolute minimum seen | **+0.014 V** |
+| Midpoint (1.65 V) crossings | **9,520** in 57.11 s |
+
+### Five conclusions
+
+1. **The pack does not overdrive the pin. Overvoltage from the pack is RULED OUT.** Peak on the
+   data line is +3.318 V against the nRF52840's `VDD + 0.3 V` = 3.600 V absolute maximum
+   [CIT-NRF-GPIO] — **282 mV of headroom**. Not 5 V, not 12 V.
+2. **The pack's driver is referenced to pin 4, not to `P+`.** Data HIGH sits at +3.3118 V while
+   pin 4 sits at +3.291 V — **21 mV apart**, the same rail within measurement tolerance. Since the
+   build feeds pin 4 from the node's own `VDD`, the pack **structurally cannot** drive the line
+   above the rail the nRF52840's I/O runs on. This was the open question in the previous entry and
+   it is now closed.
+3. **No negative excursion.** Floor is **+0.014 V** against the pad's −0.3 V lower limit, across
+   9,520 edges. The ground-offset / driven-negative mechanism
+   ([CIT-NRF-GNDLIFT]) produces nothing here — though this test has no node ground return in it,
+   so it constrains the pack, not the assembled system.
+4. **The pack is an ACTIVE low-side driver, not a passive pull-down.** It pulls the line to
+   +0.0867 V mean — a real driver, low impedance. **This strengthens
+   [#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99):**
+   our end idles as a push-pull output driven HIGH, so an overlap is two active drivers in
+   opposition with nothing between them but their on-resistances. Contention is now confirmed as
+   physically available, not hypothetical.
+5. **[#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)'s
+   premise is confirmed by measurement for the first time.** The line idles at **+3.31 V**, and an
+   *unpowered* nRF52840 pad's maximum is **0.3 V** [CIT-NRF-BACKPOWER]. A mated harness on a dark
+   core is therefore **11× over** its absolute maximum — previously asserted from the nominal rail
+   label, now measured.
+
+### What is NOT concluded
+
+The pack transmitting for 57 s at a safe level does not explain seven dead pads. It removes
+candidates. Still open and untested: H0 on the **base-board header** (`BAT` sits on the same
+2.54 mm row as the pads that die, and the board was not in this test), the contention path in
+conclusion 4, and the unpowered-core exposure in conclusion 5.
+
+CITE(datasheet): [CIT-NRF-GPIO] — the `VDD + 0.3 V` pad maximum the 282 mV headroom is measured
+against.
+CITE(prior-art): [CIT-NRF-BACKPOWER] — the 0.3 V unpowered maximum behind conclusion 5.
+CITE(datasheet): [CIT-SALEAE-LOGICPRO8] — ±10 V analog range (why channel 0 clips), 4.88 mV per
+LSB (why 21 mV in conclusion 2 is at the edge of resolution and read as "same rail").
+CITE(bench): capture preserved at `/tmp/rak-owprobe/energised/analog.csv` on the build host.
+
+## 2026-08-30 (later still) — the pack alone is harmless, and the harness has no 12 V bridge to the data line
+
+**Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8 `AF11F852CEC20A9`, capture 12,
+three analog channels at 781.25 kS/s, 1,172,363 samples over 30.012 s, exported at downsample 20.
+**Core:** none fitted. **Base board:** not in the loop. Only the pack and the analyzer, GND on
+pack pin 2.
+
+### Observation
+
+| Channel | Pack pin | min | median | max | stdev | distinct ADC codes |
+|---|---|---|---|---|---|---|
+| 0 | 1 (`P+`) | +10.521 V | +10.521 V | +10.521 V | **0.000 mV** | **1** |
+| 1 | 4 (`3V3_In`) | −0.046 V | −0.020 V | +0.011 V | 2.99 mV | 12 |
+| 2 | joined 3+5 (data) | −0.017 V | +0.003 V | +0.045 V | 9.04 mV | 13 |
+
+Zero samples on any channel sat more than 0.5 V from that channel's median. The pack transmitted
+nothing for the full 30 s.
+
+### Four conclusions, each with the number behind it
+
+1. **The pack was live.** Channel 0 held +10.521 V on all 1,172,363 samples with *one* ADC code
+   and *zero* variance — that is the analyzer clipping at the top of its ±10 V analog range
+   [CIT-SALEAE-LOGICPRO8], not a measurement. So `P+` is **≥ 10.52 V**. This is the control the
+   earlier 0 V capture lacked: **that reading was not a dead pack.**
+2. **The pack does not drive pin 4.** It sits at −0.020 V with 2.99 mV of noise — far below the
+   20 mV floating threshold, so genuinely connected and genuinely at ground. `3V3_In` is a
+   passive input exactly as [CIT-RAK9154-DS] describes. **Hypothesis rejected: the pack does not
+   present a rail on pin 4 that could back-feed the board's 3.3 V.**
+3. **There is no `P+`-to-data-line bridge inside the harness.** `P+` was live at ≥ 10.52 V while
+   the data wire read +0.003 V. The data wire's only loads were the analyzer's 2 MΩ and the pack's
+   measured 15 kΩ pull-down, so a resistive bridge would appear as a divider; 3 mV across 15 kΩ
+   bounds any such path at **> 50 MΩ**, i.e. absent. **This clears the harness of H0** (the 12 V
+   rail reaching the data pad). H0 on the *base-board header* is untouched — the board was not in
+   this test.
+4. **With pin 4 unpowered the pack is mute and everything but `P+` is at ground.** So a mated
+   harness on an unpowered node is not sitting there with a lethal level on the data wire.
+
+### What it means for the mechanism
+
+The pack's data driver is powered from pin 4, and pin 4 is fed from the node's own `VDD`. If pin 4
+is genuinely that driver's rail, the pack **cannot** drive the data line above the node's 3.3 V,
+because it is the same rail the nRF52840's I/O sits on — which would rule out overvoltage from the
+pack entirely. That is not yet established: pin 4 could be a detect input while the driver
+references `P+` internally. **Open, and the next measurement:** energise pin 4 from 3.3 V with no
+Core fitted and watch what the data line rests at and drives to.
+
+CITE(datasheet): [CIT-SALEAE-LOGICPRO8] — the ±10 V analog range that makes channel 0's
+single-code reading a clip rather than a value, and the 2 MΩ input that makes the divider
+argument in conclusion 3 valid.
+CITE(datasheet): [CIT-RAK9154-DS] — SP11 pinout; `3V3_In` on pin 4, corroborated here by
+measurement rather than by the label.
+CITE(bench): capture preserved at `/tmp/rak-owprobe/pins/analog.csv` on the build host.
+
+## 2026-08-30 (later) — the measurement gating #102 is void: it reads 0 V by construction
+
+**Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8, serial `AF11F852CEC20A9`, Logic
+2.4.46. **Core:** none — no RAK4631 was involved, and none was at risk. **Measured by the
+analyzer**, not by the firmware.
+
+[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102) names
+one discriminating measurement and blocks fitting another core until it passes: *"pack live,
+harness unplugged from the node, meter the joined data wire against pack pin 2. Anything above
+3.3 V is the pin killer."* It was run. **It cannot answer the question, and would have returned a
+false all-clear.**
+
+### Observation
+
+| Capture | Setup | Samples | Span | min | max | median | stdev |
+|---|---|---|---|---|---|---|---|
+| 9 | nothing connected (instrument baseline) | 1,639 | 2.097 s | −0.192 V | +0.220 V | −0.009 V | **78.43 mV** |
+| 11 | pack powered, harness unplugged from the node, ch0 on joined data wire (pins 3+5), GND on pack pin 2 | 786,429 | 20.133 s | −0.025 V | +0.001 V | −0.009 V | **0.74 mV** |
+
+Capture 11 is **0.000 V, flat, for the full 20 seconds** — 775,463 of 786,429 samples (98.6 %) on
+a single ADC code, six distinct codes in the whole file.
+
+### Why that is a real reading and not a bad clip
+
+Capture 11 is **105× quieter** than capture 9. A 2 MΩ input with nothing on it acts as an antenna
+and wanders across 77 codes; a low-impedance tie to ground does not. So the probe was genuinely
+on the wire and the wire was genuinely at ground.
+
+### Why it proves nothing about the harness
+
+**The pack's data-line reference is its own pin 4 (`3V3_In`), and pin 4 is fed from the node.**
+With the harness unplugged from the node, pin 4 has no supply, the pack's line driver has no
+rail, and the line rests at 0 V through the pack's measured 15 kΩ pull-down. That is the only
+possible outcome of this setup — identical whether the harness is lethal or benign.
+
+So the gate that has been blocking #102 is structurally incapable of discriminating, and the
+obvious reading of its result ("≤ 3.3 V, therefore cleared") would have licensed fitting a fourth
+core to an unqualified harness. **No harness has been cleared. #102 stays open.**
+
+### What was changed as a result
+
+- `scripts/owprobe.py` distinguishes the three near-zero cases by noise instead of magnitude:
+  floating clip (> 20 mV stdev), de-energised driver (< 20 mV stdev), and a genuine driven low.
+  It exits 1 on the first two rather than reporting a pass. Verified against both captures above
+  plus four synthetic cases.
+- [`HARDWARE.md`](HARDWARE.md) § "Qualifying the pack harness" records the void test and
+  specifies the one that works: energise pin 4 from the base board's `VDD` **with no Core
+  fitted**. The 3.3 V regulator is on the base board, not the Core — RAK diagnosed the identical
+  symptom with the Core physically removed and `VDD` still dead [CIT-RAK19007] — so the pack gets
+  its reference while no nRF52840 pad is exposed at all.
+
+CITE(datasheet): [CIT-SALEAE-LOGICPRO8] — the ±25 V absolute maximum and 2 MΩ input that make
+this measurable without a core; the ±10 V analog range that would have saturated on a 12 V line.
+CITE(prior-art): [CIT-RAK19007] — the 3.3 V regulator sits on the base board.
+CITE(bench): captures preserved on the build host at `/tmp/rak-owprobe/{baseline,live}/analog.csv`.
+
 ## 2026-08-30 — SDA/P0.13 is the fourth dead one-wire pad, and a 1 kΩ series resistor did not prevent it
 
 **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31101`. **Core:** node 002's third core. **Image:**

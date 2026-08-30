@@ -178,7 +178,12 @@ cmd_sync() {
 
 cmd_run() {
   [[ $# -ge 1 ]] || die "usage: remote.sh run '<command>'"
-  info "Running on $BUILD_HOST_NAME: $*"
+  # Banner on stderr, not stdout. Callers capture this subcommand in `$(...)` to read a value
+  # back off the build host, and a banner on stdout lands inside that value. flash.sh's port
+  # probe was `$(remote.sh run 'ls /dev/cu.usbmodem*')`, which therefore never came back empty
+  # and never fired its "no board on USB" guard -- it reported the banner text as the port name
+  # instead. The soak guard above only escapes this because it anchors its grep on a leading pid.
+  info "Running on $BUILD_HOST_NAME: $*" >&2
   rrepo "$*"
 }
 

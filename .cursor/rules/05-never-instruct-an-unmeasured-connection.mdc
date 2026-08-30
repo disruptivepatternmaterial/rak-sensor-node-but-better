@@ -1,0 +1,90 @@
+---
+alwaysApply: true
+---
+
+# Never tell the operator to connect a pin to a voltage nobody has measured
+
+**Seven GPIO pads have been destroyed across two RAK4631 cores**
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+Every one was the pad carrying the RAK9154's data line. Every one was connected on an agent's
+instruction. And the voltage on that data line **has never been measured** — not once, on any
+node, in the whole life of this project. It was assumed to be 3.3 V because pin 4 is labelled
+`3V3_In`, and a label is not a measurement.
+
+That is the defect this rule exists to stop. Not a wiring mistake — a **reasoning** mistake that
+agents keep repeating: treating an unverified electrical level as a known one, and spending the
+operator's hardware to find out.
+
+## The asymmetry that governs every probe decision
+
+| Instrument | Survives | Source |
+|---|---|---|
+| nRF52840 GPIO pad, powered | `VDD + 0.3 V` ≈ **3.6 V** | [CIT-NRF-GPIO] |
+| nRF52840 GPIO pad, **unpowered** | **0.3 V** | [CIT-NRF-BACKPOWER] |
+| Saleae Logic Pro 8 input | **−25 V to +25 V** continuous, ±10 V analog range, 2 MΩ | [CIT-SALEAE-LOGICPRO8] |
+
+The analyzer tolerates roughly **seven times** what the pad tolerates, and loads the line with
+2 MΩ instead of an ESD diode. **So the analyzer always goes first.** There is no measurement worth
+taking that justifies risking a core to take it, and there never was.
+
+## Forbidden instructions
+
+Do not tell the operator to do any of these. Not as a suggestion, not as a next step, not
+hedged, not "just to test":
+
+- **Connect any wire to any nRF52840 pad when that wire's voltage has not been measured or
+  datasheet-sourced.** The pack's data line is the live example: unmeasured to this day.
+- **Connect a pad to any rail above 3.3 V**, or to a rail whose regulation has not been metered
+  under load. `5 V`, `VBUS`, `P+`, and buck output all fail this test until a meter says otherwise.
+- **Drive the one-wire pad as a push-pull output.** `setTX()` is `digitalWrite(tx, HIGH);
+  pinMode(tx, OUTPUT);` — our end sources current into a line the pack can pull low, which is a
+  hard short with nothing but two CMOS on-resistances in it
+  ([#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99)).
+- **Offer a series resistor as protection.** A 1 kΩ resistor was inline when `SDA`/P0.13 died, so
+  it is refuted by our own bench, and TI says so independently
+  ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)).
+  The value that would protect collapses the signal against the pack's 15 kΩ pull-down.
+- **Fit a replacement core into a harness that has not been cleared.** #102 is explicit: until
+  the data-line measurement is in `docs/EVIDENCE.md`, that harness does not touch another core.
+
+## The order of operations, every time
+
+1. **Is the level established?** Look for a measurement in [`../../docs/EVIDENCE.md`](../../docs/EVIDENCE.md)
+   or a figure in a datasheet, cited per rule 20. A silkscreen label, a pin name, a forum post,
+   and a reference implementation are **none of them** a level.
+2. **If not, measure it with the analyzer** — probe on the wire, ground on the source's own
+   ground, **node disconnected**, so no pad is exposed while the level is still unknown. The
+   procedure for the one-wire line is in
+   [`../../docs/HARDWARE.md`](../../docs/HARDWARE.md) § "Qualifying the pack harness".
+3. **Record the number** in `docs/EVIDENCE.md` with date, what was probed, and the raw reading.
+4. **Only then** name a connection, and cite the measurement when you do.
+
+Step 2 costs a probe clip. Skipping it has cost seven pads and three cores.
+
+## Language that gives the game away
+
+If a sentence about a physical connection contains any of these, the level is not established and
+the instruction must not be given:
+
+> "should be", "presumably", "is nominally", "the label says", "the reference design uses",
+> "it's a 3.3 V part so", "try connecting", "if that doesn't work, try"
+
+Say instead what is actually true: *"that line's level has never been measured; probe it first."*
+
+## When the operator says an agent told them to do this
+
+Believe them, and treat it as a live defect in the rules rather than a misunderstanding to
+correct. Find the instruction in `docs/`, delete or gate it, and file the issue. Do not explain
+why the advice was reasonable at the time.
+
+## Citations
+
+- CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification — absolute maximum on any GPIO
+  is `VDD + 0.3 V`, and per-pin absolute maximum current is a damage threshold, not an operating
+  point.
+- CITE(prior-art): [CIT-NRF-BACKPOWER] Nordic DevZone — "for an unpowered device, max GPIO
+  voltage is 0.3 V. Any voltage above this level will make the ESD protection diode conduct and
+  you will backpower the device via the GPIO."
+- CITE(datasheet): [CIT-SALEAE-LOGICPRO8] [Saleae Logic Pro 8 data sheet](http://downloads.saleae.com/specs/Logic+Pro+8+Data+Sheet.pdf)
+  — absolute maximum input −25 V to +25 V, analog input range −10 V to +10 V, input impedance
+  2 MΩ ∥ 10 pF, 4.88 mV per LSB.

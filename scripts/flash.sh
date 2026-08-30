@@ -12,10 +12,20 @@
 #   scripts/flash.sh --yes           skip the prompt (CI / repeat bench cycles)
 #   scripts/flash.sh --port /dev/cu.usbmodemXXXX
 #   scripts/flash.sh --env stage1    flash one of the staged bring-up images
+#   scripts/flash.sh --wait          sit through a sleep interval and flash on the next wake
+#   scripts/flash.sh --wait 300      the same, bounded to 300 s
 #
 # The --env flag exists for first bring-up (docs/FIRST_FLASH.md), where each stage adds a
 # single subsystem so that a failure has exactly one candidate cause. Defaults to the full
 # image.
+#
+# --wait exists because a sleeping node is NOT on the USB bus at all: src/power.cpp detaches
+# USB for the whole sleep interval once kBootGraceMs (180 s) expires with nothing holding the
+# console open (issue #60). Without it this script probes for a port once, finds nothing, and
+# hands the operator a "wait for the next wake and flash inside the window" message -- which
+# makes catching a 900 s cadence by hand the operator's problem. With it, the poll and the
+# upload run inside a SINGLE remote shell, so the upload starts within a second of the port
+# appearing instead of after an SSH round trip.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,11 +36,18 @@ die() { echo "${RED}ERROR${NC} $*" >&2; exit 1; }
 ASSUME_YES=0
 PORT=""
 ENV_NAME=""
+WAIT_S=0
+# One full 900 s reporting interval plus a minute of slack, so a bare `--wait` is guaranteed to
+# span at least one wake at the production cadence without the operator doing arithmetic.
+WAIT_DEFAULT_S=960
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes|-y)  ASSUME_YES=1; shift ;;
     --port)    PORT="${2:?--port needs a value}"; shift 2 ;;
     --env|-e)  ENV_NAME="${2:?--env needs a value}"; shift 2 ;;
+    --wait)
+      if [[ "${2:-}" =~ ^[0-9]+$ ]]; then WAIT_S="$2"; shift 2
+      else WAIT_S="$WAIT_DEFAULT_S"; shift; fi ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -95,13 +112,24 @@ echo
 echo "${BLUE}== target ==${NC}"
 scripts/remote.sh devices
 
-DETECTED=$(scripts/remote.sh run 'ls /dev/cu.usbmodem* 2>/dev/null | head -1' | tr -d '\r\n' || true)
-[[ -n "$PORT" || -n "$DETECTED" ]] || die "no RAK4631 found on the build host USB. Plug it in, or pass --port.
-      Hardware may simply not have arrived yet -- README status is 'not deployed'."
+# `find`, not a glob. The remote shell is zsh, where an unmatched glob is an error and the
+# command never runs at all -- so `ls /dev/cu.usbmodem*` on a sleeping node printed a zsh
+# "no matches found" line to stderr instead of returning empty quietly. `find` with a quoted
+# pattern does its own matching and exits 0 with no output when nothing matches, in both shells.
+DETECTED=$(scripts/remote.sh run 'find /dev -maxdepth 1 -name "cu.usbmodem*" 2>/dev/null | sort | head -1' | tr -d '\r\n' || true)
+if [[ -z "$PORT" && -z "$DETECTED" && "$WAIT_S" -eq 0 ]]; then
+  die "no RAK4631 on the build host USB right now.
+      A sleeping node is absent from the bus entirely -- it is not necessarily unplugged or
+      bricked (src/power.cpp detaches USB while asleep, issue #60). To flash on its next wake
+      instead of guessing the window by hand:
+        scripts/flash.sh --wait${ENV_NAME:+ --env $ENV_NAME}
+      Otherwise plug it in, double-tap RESET to force DFU, or pass --port."
+fi
 
-echo "${DIM}   port:   ${PORT:-${DETECTED} (auto)}${NC}"
+echo "${DIM}   port:   ${PORT:-${DETECTED:-none yet (waiting)} (auto)}${NC}"
 echo "${DIM}   env:    ${ENV_NAME:-rak4631 (full image)}${NC}"
 echo "${DIM}   commit: ${SHORT}${NC}"
+[[ "$WAIT_S" -gt 0 ]] && echo "${DIM}   wait:   up to ${WAIT_S}s for the node to appear on USB${NC}"
 
 if [[ "$ASSUME_YES" -ne 1 ]]; then
   echo
@@ -134,14 +162,35 @@ UPLOAD_FAIL_RE='Failed to upgrade target|Timed out waiting for acknowledgement|N
 UPLOAD_LOG=$(mktemp -t rak-flash)
 trap 'rm -f "$UPLOAD_LOG"' EXIT
 
+# The poll and the upload go to the build host as ONE command, deliberately. Polling from here
+# and then launching the upload in a second `remote.sh run` puts a fresh SSH handshake between
+# "the port exists" and "pio starts", and the whole point is to be inside the node's attach
+# window when that happens. One shell, one second of granularity, no round trip.
+#
+# Single-quoted so $_p and $_i reach the remote zsh unexpanded; bash does not re-expand the
+# result of a parameter expansion, so interpolating this into the command string below is safe.
+WAIT_SNIPPET=""
+if [[ "$WAIT_S" -gt 0 ]]; then
+  WAIT_SNIPPET='for _i in $(seq 1 '"$WAIT_S"'); do
+                  _p=$(find /dev -maxdepth 1 -name "cu.usbmodem*" 2>/dev/null | sort | head -1)
+                  if [ -n "$_p" ]; then echo "=== PORT UP after ${_i}s: $_p ==="; break; fi
+                  if [ $(( _i % 30 )) -eq 0 ]; then echo "=== WAITING FOR WAKE ${_i}s ==="; fi
+                  sleep 1
+                done
+                if [ -z "$_p" ]; then echo "=== PORT WAIT TIMEOUT after '"$WAIT_S"'s ==="; fi; '
+fi
+
 set +e
-scripts/remote.sh run "pio run ${ENV_NAME:+-e $ENV_NAME} -t upload ${PORT:+--upload-port $PORT}" 2>&1 \
+scripts/remote.sh run "${WAIT_SNIPPET}pio run ${ENV_NAME:+-e $ENV_NAME} -t upload ${PORT:+--upload-port $PORT}" 2>&1 \
   | tee "$UPLOAD_LOG"
 UPLOAD_RC=${PIPESTATUS[0]}
 set -e
 
 FAIL_REASON=""
 [[ "$UPLOAD_RC" -ne 0 ]] && FAIL_REASON="pio exited ${UPLOAD_RC}"
+if grep -q 'PORT WAIT TIMEOUT' "$UPLOAD_LOG" 2>/dev/null; then
+  FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }node never appeared on USB within ${WAIT_S}s"
+fi
 if HIT=$(grep -m1 -E "$UPLOAD_FAIL_RE" "$UPLOAD_LOG"); then
   FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }DFU tool reported: $(echo "$HIT" | sed 's/^[[:space:]]*//')"
 fi
@@ -270,8 +319,10 @@ else
     echo "before sleeping -- see issue #60 and src/power.cpp."
     echo
     echo "Options, cheapest first:"
-    echo "  1. ${GREEN}Wait for the next wake${NC} and flash inside the window. The node attaches"
-    echo "     on wake and, from the #60 fix onward, stays attached 180 s after every boot."
+    echo "  1. ${GREEN}scripts/flash.sh --wait${ENV_NAME:+ --env $ENV_NAME}${NC} -- sits on the build host"
+    echo "     polling once a second and starts the upload the moment the node attaches. The node"
+    echo "     stays on the bus 180 s after every boot (#60), so the window is wide once it opens."
+    echo "     Do this instead of timing a wake by hand."
     echo "  2. ${GREEN}Double-tap RESET on the RAK19007${NC} to enter DFU immediately."
     echo
     echo "${YELLOW}Do not conclude the board is dead from this message.${NC} Check again after"

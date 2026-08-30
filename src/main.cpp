@@ -27,12 +27,14 @@
 #include "sensors/battery.h"
 #include "sensors/rk900.h"
 
-// Bench instruments. Both headers are self-gating and compile to nothing unless their own
-// environment is selected, so a field image carries neither. They live outside main.cpp
-// because together they were 521 lines -- roughly two thirds of this file -- of code that
-// never runs on a deployed node, and reading the cycle meant scrolling past all of it.
+// Bench instrument. Self-gating, so it compiles to nothing unless its own environment is
+// selected and a field image never carries it. It lives outside main.cpp because it was hundreds
+// of lines of code that never runs on a deployed node, and reading the cycle meant scrolling
+// past all of it.
+//
+// Its one-wire counterpart, diagnostics/owscan.h, was DELETED 2026-08-30 — it destroyed seven
+// GPIO pads. Do not add it back. src/build_features.h holds the measurements.
 #include "diagnostics/busscan.h"
-#include "diagnostics/owscan.h"
 
 namespace {
 
@@ -52,19 +54,19 @@ namespace {
 // per-core recovery path selected at build time rather than the wiring every node inherits.
 // IO2 is not an alternative either way — it controls the RAK5802's 3V3_S rail.
 //
-// OWSCAN_PIN overrides both, and exists for one reason: a "held low" reading is only evidence
-// about a pin if some other pin on the same core reads differently. On 2026-08-30 both IO1 and
-// A1 sampled 100 % low against the internal pull-up with the harness fully disconnected, which
-// is not credible as two independent faults, so the scan needs to reach a pad that was never
-// wired to anything. Diagnostic only — the battery driver never sees it.
+// FEATURE_BATTERY_PIN_SDA is the second recovery pad, WB_I2C1_SDA/P0.13. It carried a working
+// pack read, then failed the way A1 and IO1 did. On a FRESH core it is fine and is where the
+// harness already lands — the 5.6 kohm reading below is a property of one damaged core.
 //
-// FEATURE_BATTERY_PIN_SDA is the second recovery pad, added 2026-08-30 after node 002's core lost
-// A1 the way earlier cores lost IO1. WB_I2C1_SDA/P0.13 was qualified by census before selection —
-// idle HIGH, 0 of 1,848,823 samples low, in both pull-up and floating modes (env:owscan_sda) —
-// while IO1 and A1 on the same core read 100 % low across two harnesses and with the harness
-// removed entirely. This project uses no I2C sensor, so nothing contends for the pin.
-#if defined(OWSCAN_PIN)
-constexpr uint8_t kBatteryPin = OWSCAN_PIN;
+// FEATURE_BATTERY_PIN_SCL is the third and last pad, WB_I2C1_SCL/P0.14, held in reserve. On
+// 2026-08-30 the operator's meter separated damage from suspicion for the first time: SDA read
+// 5.6 kohm to ground against 240 kohm on SCL, same core, same meter, powered down. 43x apart, so
+// SDA was genuinely damaged and SCL is genuinely healthy. build_features.h carries the reasoning
+// and the reason nothing should move to SCL until the transmit path is fixed.
+//
+// OWSCAN_PIN is gone along with the diagnostic that used it (deleted 2026-08-30).
+#if FEATURE_BATTERY_PIN_SCL
+constexpr uint8_t kBatteryPin = WB_I2C1_SCL;
 #elif FEATURE_BATTERY_PIN_SDA
 constexpr uint8_t kBatteryPin = WB_I2C1_SDA;
 #elif FEATURE_BATTERY_PIN_A1
@@ -325,14 +327,10 @@ void loop()
     return;
 #endif
 
-#if FEATURE_ONEWIRE_SCAN
-    // Same deal for the battery link: measure, print, and stop. No reading is produced and
-    // no uplink is built, so nothing downstream can dress a raw byte up as a voltage. The pin
-    // is passed in so this file stays the only place it is declared.
-    diagnostics::onewire_scan(kBatteryPin);
-    delay(5000);
-    return;
-#endif
+    // There is deliberately no one-wire scan branch here. src/diagnostics/owscan.{h,cpp} and
+    // FEATURE_ONEWIRE_SCAN were deleted 2026-08-30 after that diagnostic destroyed seven GPIO
+    // pads across two cores — see the block in src/build_features.h for the measurements. Qualify
+    // a pad with a meter or the logic analyzer, never by driving it from firmware.
 
     WeatherReading weather;
     BatteryReading pack;

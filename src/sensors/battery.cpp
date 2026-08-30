@@ -1432,7 +1432,11 @@ BatteryReading Battery::read()
     //   raises, and the reason the module is unpowered by the time Battery::read() runs.
     // CITE(bench): docs/EVIDENCE.md 2026-08-30 — the production cycle runs Battery::read() with
     //   3V3_S already dropped by RK900::power_off(), confirmed by owscan's rail A/B phase.
-    SwitchedRailHold rail_hold(m_pin == WB_I2C1_SDA);
+    // Both RAK5802 spring terminals that can carry this link — `SDA` and `SCL` — sit on the same
+    // switched rail, so the hold covers both. SCL became the live candidate on 2026-08-30 when SDA
+    // measured 5.6 kohm to ground against 240 kohm on SCL (docs/EVIDENCE.md); leaving it out here
+    // would reintroduce, on the last usable pad, exactly the asymmetry this hold exists to remove.
+    SwitchedRailHold rail_hold(m_pin == WB_I2C1_SDA || m_pin == WB_I2C1_SCL);
 
     // begin() caches the port registers, arms the GPIOTE falling-edge interrupt, and leaves
     // the pin as input-with-pull-up so the idle line reads high. Everything after this point

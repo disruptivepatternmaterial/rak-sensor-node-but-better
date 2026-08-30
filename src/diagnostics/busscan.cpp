@@ -22,7 +22,8 @@ namespace {
 // this bus at all. ADR-0004 put it on its own one-wire line, raw Modbus at 0x6E over that line
 // returned zero bytes on every cycle because the adapter does not bridge it, and the path was
 // removed in b6bbf31. Re-adding 0x6E here cannot produce a reply — it can only manufacture the
-// same false negative again. Battery bring-up belongs to env:battdiag and env:owscan.
+// same false negative again. Battery bring-up belongs to env:battdiag — env:owscan and every
+// other one-wire scan target were deleted 2026-08-30 for destroying GPIO pads.
 //
 // CITE(datasheet): [CIT-RK900] slave 0x01, FC 0x03, holding registers 0x0000-0x0004. The
 //   datasheet baud is 4800; the unit on this node answers at 9600 (ADR-0006), which is why

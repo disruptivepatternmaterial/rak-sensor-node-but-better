@@ -3,8 +3,63 @@
 Read this first. The detailed rules live in [`.cursor/rules/`](.cursor/rules/) and load
 automatically; this is the index and the short version.
 
+## NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC. IT DESTROYED SEVEN GPIO PADS.
+
+**Read this before writing any code that touches the RAK9154 link.** On 2026-08-30
+`src/diagnostics/owscan.{h,cpp}`, `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN` and
+the five `owscan*` build environments were **deleted**. Do not recreate any of them — not a
+passive variant, not behind a flag, not "just to check something."
+
+That diagnostic destroyed the hardware it was built to measure: **seven GPIO pads across two
+RAK4631 cores, every one of them the pad carrying the pack's data line**
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+
+| | Bytes driven per cycle | Cadence |
+|---|---|---|
+| `owscan` phase 0 | **192** (64 × `0x55` at three baud rates) | seconds |
+| Production battery read | ~14 | 900 s |
+
+`0x55` toggles every bit, the worst possible pattern for the contention path in
+[#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
+
+**The mechanism, measured 2026-08-30** ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)): the pack actively
+drives its end — **+3.3118 V idle, +0.0867 V driven low, 9,520 edges in 57 s**. Our end idles
+push-pull HIGH. Two live drivers in opposition pass ~3.3 mA through the pad **even with the 1 kΩ
+series resistor fitted**. Earlier sessions compared that to the nRF52840's **15 mA absolute
+maximum**, found it under, and cleared contention. **That is the wrong limit.** The pin's standard
+drive continuous rating is **1–2 mA**, so the resistor left it 2–3× over the rating that governs
+sustained use, on every low bit of every frame. Chronic degradation, not one event.
+
+**The signature agrees:** `SDA`/P0.13 measures **5.6 kΩ** to ground against **240 kΩ** on the
+never-connected `SCL` control pin — same core, same meter, powered down. 43× apart. The 0.121 V
+seen on that powered pin implies ~495 Ω at 3.3 V, so it is a **non-linear damaged junction**, a
+punched-through ESD clamp on the **ground** side — the direction where our pin sinks the pack's
+active high.
+
+**Why deleting beat warning.** The operator never invoked those environments; **agents flashed
+them over SSH, repeatedly, across sessions.** A warning comment gets read by exactly the sessions
+that already ignored one.
+
+**The replacement is better anyway.** Two multimeter readings settled in one minute what the
+firmware census got wrong across several sessions and several discarded cores — and a firmware
+census structurally cannot make that comparison, because reaching a pad means driving it.
+
+| Need | Use |
+|---|---|
+| Is this pad usable? | A meter, against a known-good pin on the same core |
+| What is on the wire? | The Saleae Logic Pro 8 — ±25 V, 2 MΩ, versus a pad rated 3.6 V powered and **0.3 V unpowered** |
+| Does the pack work? | `env:battdiag*` — the production driver, ~14 bytes per cycle |
+
+Procedure: [`docs/HARDWARE.md`](docs/HARDWARE.md) § "Qualifying the pack harness". Rule:
+[`.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc`](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc).
+
+**The production image is not the problem.** Node 001 has run it for weeks in the field and is
+alive. Every pad that died, died under a diagnostic.
+
 ## Non-negotiables
 
+- **Never add a diagnostic that drives the one-wire pad.** See the section above. Deleted
+  2026-08-30 after seven destroyed pads; the meter and the logic analyzer replace it.
 - Specs in `docs/` are the contract; do not invent pinouts or Modbus maps.
 - Prefer libraries in [`docs/LIBRARIES.md`](docs/LIBRARIES.md).
 - Cross-check RAK9154 against `forest-weather-machines/rak-4-5-wire` (local sibling, pinned at

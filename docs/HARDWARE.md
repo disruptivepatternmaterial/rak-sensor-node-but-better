@@ -176,6 +176,109 @@ Both pads are on the 2.54 mm header along the edge of the RAK19007, silkscreened
 `BAT IO2 IO1 A1 IN1` and `SDA SCL TX1 RX1 GND VDD BOOT0`. Neither signal appears on any screw
 terminal, so both are solder joints.
 
+### Qualifying the pack harness — measure the data line before it touches a pad
+
+**Answered 2026-08-30 — the pack is not the overvoltage source.** For the whole life of this
+project the data-line level was an assumption: 3.3 V, because pin 4 is *labelled* `3V3_In`. It is
+now a measurement ([`EVIDENCE.md`](EVIDENCE.md), capture 13, 2,347,642 samples over 60.1 s, no
+Core in the loop):
+
+| Property | Measured | Against |
+|---|---|---|
+| Idle / HIGH | **+3.3118 V** | pad max `VDD + 0.3 V` = **3.600 V** [CIT-NRF-GPIO] |
+| Driven LOW | **+0.0867 V** | pad min **−0.300 V** |
+| Absolute peak | **+3.318 V** | **282 mV of headroom** |
+| Absolute floor | **+0.014 V** | no negative excursion across 9,520 edges |
+
+**And it cannot become the overvoltage source.** Its driver sits on pin 4 — data HIGH at +3.3118 V
+against pin 4's +3.291 V, 21 mV apart, one rail within the analyzer's 4.88 mV LSB — and the build
+feeds pin 4 from the node's own `VDD`. The pack runs on the same rail the nRF52840's I/O does.
+
+**Two things the same numbers do *not* clear:**
+
+- The pack is an **active low-side driver** (+0.0867 V, not a passive pull-down), so a transmit
+  overlap is two live drivers in opposition, and our end idles push-pull HIGH
+  ([#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99)).
+- The line idles at **+3.31 V** while an *unpowered* pad's maximum is **0.3 V**
+  [CIT-NRF-BACKPOWER] — **11× over** whenever the harness is mated to a dark core. That is the
+  connector-sequencing rule below, and it is now measured rather than assumed
+  ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)).
+
+Seven pads remain unexplained
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)). What
+follows is how the above was measured, and how to re-qualify any replacement harness or pack. It
+risks no silicon.
+
+**Why the analyzer and not a core:** the failure being tested for is overvoltage, and the two
+instruments have wildly different tolerance for it.
+
+| Instrument | Absolute maximum input | Loads the line with |
+|---|---|---|
+| nRF52840 GPIO pad, powered | `VDD + 0.3 V` ≈ 3.6 V [CIT-NRF-GPIO] | an ESD clamp diode |
+| nRF52840 GPIO pad, unpowered | **0.3 V** [CIT-NRF-BACKPOWER] | an ESD clamp diode |
+| Saleae Logic Pro 8 | **−25 V to +25 V** [CIT-SALEAE-LOGICPRO8] | 2 MΩ ∥ 10 pF |
+
+The analyzer tolerates roughly seven times what the pad tolerates and presents 2 MΩ, so it cannot
+meaningfully load the pack's measured 15 kΩ pull-down. It reads the answer without spending a
+core. Its analog range saturates at +10 V, so a reading pinned at 10 V still convicts — it means
+"at least 10 V", which is already three times the pad's limit.
+
+**The obvious version of this test does not work, and it was measured failing.** Probing the data
+wire with the harness fully unplugged from the node returns **0.000 V, dead flat** — measured
+2026-08-30, 786,429 samples over 20.1 s, 0.74 mV of noise, 98.6 % of samples on one ADC code
+([`EVIDENCE.md`](EVIDENCE.md)). That is not a floating clip; it is 105× quieter than this
+analyzer's open-probe baseline, so it is a genuine low-impedance tie to ground.
+
+It reads 0 V for a structural reason: **the pack's data-line reference is its own pin 4
+(`3V3_In`), and pin 4 is fed *from the node*.** Unplug the node and the pack's driver has no
+rail, so the line rests at 0 V through the pack's measured 15 kΩ pull-down — whether the harness
+is lethal or benign. So the measurement named in
+[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)
+cannot convict or clear anything, and a 0 V result must never be recorded as a cleared harness.
+
+**Setup that does work — energise pin 4, expose no pad.** The RAK19007's 3.3 V regulator is on
+the **base board, not the Core** — RAK diagnosed the identical symptom set with the Core
+physically removed and `VDD` still dead, which a Core-generated rail cannot do
+[CIT-RAK19007]. So a powered base board **with no Core fitted** presents 3.3 V on `VDD` and puts
+no nRF52840 pad anywhere near the line.
+
+| Item | State |
+|---|---|
+| RAK4631 Core | **removed from the base board** — this is what makes the test free |
+| Base board | powered (USB-C, or the Green Power connector) |
+| Pack pin 4 (`3V3_In`) | on the base-board `VDD` pad, as built |
+| Joined data wire (pins 3+5) | **to the analyzer only — not to `SDA`** |
+| Analyzer channel 0 | the joined data wire |
+| Analyzer `GND` | pack pin 2 (`P−`) |
+| Pack | powered |
+
+Ground on the **pack's own** return, not the node's, because the question is what the pack
+presents relative to its own reference. The only powered silicon in the loop is the base board's
+3.3 V regulator sourcing a reference current, and the analyzer, which takes ±25 V.
+
+**Reading the result.** `scripts/owprobe.py <analog.csv>` applies the table below to a Saleae
+analog export and exits 0 (within a powered pad's rating), 2 (out of spec — do not connect a
+core), or 1 (the capture is not evidence, e.g. a floating clip). It refuses to clear a harness
+from a capture that never leaves the open-probe noise band, because a disconnected probe and a
+healthy line at 0 V are indistinguishable, and reading one as the other is how a core dies.
+
+| Idle level, data wire to pack `P−` | Verdict |
+|---|---|
+| **0 V, flat, under 20 mV of noise** | **Not an answer.** The pack's reference is not energised — pin 4 has no supply. Fix the setup above and re-run. Never record this as cleared. |
+| 0 V, but over 20 mV of noise | The probe is not on the wire, or the ground lead is not on the pack's return. |
+| ≤ 3.3 V | Harness cleared as an overvoltage source. #102 stays open; move to the next candidate. |
+| 3.6 V – 5 V | Out of spec. Every connection has been overstressing the pad. Needs a level translator, not a resistor. |
+| > 5 V, or saturated at +10 V | **This is the pin killer.** Do not connect another core to this harness. |
+| swinging below 0 V | Ground-offset or undershoot path — the direction that matches the measured short-to-ground signature. Capture the transient before concluding. |
+
+The last row is the one only an analyzer can answer. A meter averages a transient undershoot away;
+a 781.25 kS/s analog capture shows it. That matters because every dead pad here reads short to
+**ground**, which is the *lower* clamp's failure direction, and no mechanism proposed so far
+predicts that.
+
+Record the number, the date, and the raw capture path in [`EVIDENCE.md`](EVIDENCE.md). A verdict
+with no number attached is how this got to seven pads.
+
 ### THE RULE THAT SAVES PINS — connector sequencing
 
 **CAUSE NOT ESTABLISHED. This section previously claimed it was, and that claim was wrong.**

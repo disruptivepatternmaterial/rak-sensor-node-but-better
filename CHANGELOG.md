@@ -8,7 +8,47 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Removed
+
+- **The one-wire scan diagnostic is deleted, because it destroyed the hardware it measured.**
+  `src/diagnostics/owscan.{h,cpp}`, `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN`
+  and the five `owscan*`/`owcensus` environments are gone. Seven GPIO pads across two RAK4631
+  cores, every one the pad carrying the pack's data line ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)). Phase 0 drove 192 bytes per
+  cycle — 64 × `0x55` at three baud rates, cycling in seconds — against ~14 bytes per 900 s from
+  the production read, and `0x55` toggles every bit, the worst case for the contention path in
+  [#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99). **The operator never invoked those environments; agents flashed them over SSH,
+  repeatedly**, which is why the code is deleted rather than commented — a warning is read by
+  exactly the sessions that already ignored one. It was also the weaker instrument: two
+  multimeter readings settled in a minute what the firmware census got wrong across several
+  sessions and several discarded cores, and a firmware census structurally cannot make that
+  comparison, because reaching a pad means driving it.
+
 ### Added
+
+- **The pack's data line is measured, ending the project's oldest unsourced assumption.** Its
+  logic level had never been established on any node — it was taken to be 3.3 V because pin 4 is
+  *labelled* `3V3_In`. With pin 4 energised from a bench supply and no Core in the loop, the line
+  idles at **+3.3118 V**, drives low to **+0.0867 V**, peaks at **+3.318 V** against the pad's
+  3.600 V maximum, and never goes negative across 9,520 edges. So the pack cannot overdrive the
+  pad, and structurally never could: its driver sits on pin 4, which the build feeds from the
+  node's own `VDD`. Two things the same numbers do *not* clear — the pack is an **active** low-side
+  driver rather than a pull-down, and the line idles 11× over an *unpowered* pad's 0.3 V limit.
+- **The pack's announcement frame decoded off the wire.** It broadcasts 92 bytes every ~2.2 s
+  **unprompted** at 9600 8N1, identifying itself as ASCII `"RAK2560-io"`, with six consecutive
+  ID/value triplets. All nine captured frames were byte-identical, so this is an announcement and
+  not telemetry — listen-only cannot be assumed sufficient.
+- **`scripts/owprobe.py` turns a Saleae analog export into a verdict** against the nRF52840's real
+  limits, and refuses to call a capture evidence when it cannot be. It separates the three
+  near-zero cases by **noise** rather than magnitude — floating clip above 20 mV stdev,
+  de-energised driver below it, genuine driven low — because an open clip and a healthy line at
+  0 V are indistinguishable by level alone, and reading one as the other is how a core dies.
+- **`FEATURE_BATTERY_PIN_SCL`**, `WB_I2C1_SCL`/P0.14, held in reserve as the last pad on node
+  002's core. Deliberately selected by **no build environment**, so nothing can move the link to
+  the last good pad before the transmit path is fixed.
+- **`scripts/flash.sh --wait`** sits on the build host polling once a second and starts the upload
+  the moment the node attaches, with the poll and the upload in one SSH session so there is no
+  round trip inside the wake window. A sleeping node is absent from the USB bus entirely ([#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)),
+  and catching that window by hand was previously the operator's problem.
 
 - **The boot banner now names why the node reset.** `RESETREAS` was read and everything except
   the watchdog bit discarded, so a reset was anonymous and its cause had to be inferred from
