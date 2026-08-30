@@ -159,7 +159,8 @@ Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is e
 ### The two data rules, stated plainly
 
 > **Pack pins 3 and 5 (TXD and RXD) are joined together, and that single joined wire goes to
-> the `A1` pad on the base board.**
+> the `SDA` pad on the base board — through the protection network below, never straight to
+> the pad.**
 >
 > **Pack pin 4 (`3V3_In`) goes to the `VDD` pad on the base board. Not to the RAK5802's `3V3`
 > terminal, and never to 5 V.**
@@ -168,13 +169,78 @@ Both pads are on the 2.54 mm header along the edge of the RAK19007, silkscreened
 `BAT IO2 IO1 A1 IN1` and `SDA SCL TX1 RX1 GND VDD BOOT0`. Neither signal appears on any screw
 terminal, so both are solder joints.
 
+### REQUIRED — the one-wire protection network
+
+**Do not solder the pack's data wire directly to a base-board pad.** Four GPIO pads have been
+destroyed on this project (`IO1` on three cores, `A1` on a fourth) and **no mechanism was ever
+established** — six hypotheses were tested and all were refuted or weakened
+([`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
+[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+
+This network makes the cause irrelevant: nothing on the harness can deliver enough current or
+voltage to reach the pad. Fit it on **every** node, including 003.
+
+#### Bill of materials
+
+| Ref | Part | Value | Notes |
+|---|---|---|---|
+| R1 | resistor | **1 kΩ**, ¼ W, 1 % or 5 % | in series in the data wire |
+| D1 | **BAT54S** dual Schottky, SOT-23 | — | or a single 3.3 V TVS such as `PESD3V3L1BA` |
+| R2 | resistor | **2.2 kΩ**, ¼ W | pull-up to `3V3` |
+
+#### Wiring
+
+```
+pack pins 3+5 ──── R1 (1 kΩ) ────┬──── SDA pad (nRF P0.13)
+     (joined)                    │
+                                 ├──── R2 (2.2 kΩ) ──── 3V3
+                                 │
+                            D1 BAT54S
+                          ┌──────┴──────┐
+                    cathode→3V3    anode→GND
+```
+
+R1 goes in the wire itself — cut the data wire and solder R1 inline, heat-shrink it. Everything
+else lands on the **pin side** of R1, meaning the `SDA` end.
+
+A BAT54S is two Schottky diodes in one SOT-23 with a common node on pin 3. Put the **common node
+on the signal**, the diode that goes to `3V3` on one end pin, and the one to `GND` on the other.
+If you use a TVS instead, it is a two-terminal part: signal to `GND`, either way round.
+
+#### What each part does
+
+| Part | Protects against |
+|---|---|
+| R1, 1 kΩ | Limits any fault current to about 3 mA — well under the nRF52840's 15 mA per-pin absolute maximum, which is a **damage** limit and not an operating point [CIT-NRF-GPIO]. Covers a short, a driver collision, or a stray touch of the 12 V rail |
+| D1 | Clamps the pad to within a diode drop of `GND` and `3V3`. Overvoltage on the wire is shunted to the rail instead of into the pin. This is the part that makes a 12 V contact survivable |
+| R2, 2.2 kΩ | Fixes the idle level. Measured 2026-08-30: the pack presents **15 kΩ** to its own ground, which against the nRF52840's ~13 kΩ internal pull-up leaves the line near **1.7 V** — inside the undefined band between V_IL and V_IH. With R2 fitted, idle sits near 2.9 V and reads as a solid HIGH |
+
+Neither R1 nor R2 costs anything at 9600 baud: the RC time constant against any realistic harness
+capacitance is far shorter than one bit period.
+
+#### Two rules that cost nothing and go with it
+
+- **Never mate or unmate the pack connector with the board powered.** Pins on the SP11 do not
+  mate simultaneously, so a powered hot-plug can leave the data line referenced to nothing for a
+  moment. Unplug USB, unmate the pack, do the work, mate the pack, then power up.
+- **Meter every new core before it goes into a baseboard** — `IO1` to `GND` on the core
+  connector, expect megohms. A few ohms means it arrived shorted; send it back. No core's `IO1`
+  has ever been measured *before* installation, which is precisely why "arrived shorted" cannot
+  be told apart from "shorted here."
+
+#### If a pin still dies with this fitted
+
+Then the harness is exonerated by construction and the fault is inside the core module. That is a
+warranty conversation with RAKwireless, not a debugging session — and it is the first time this
+project would have evidence strong enough to make that claim.
+
 ### The whole harness on one screen
 
 | From (pack, 5-pin SP11) | To | Why |
 |---|---|---|
 | Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
 | Pin 2 `P−` | buck negative **and** RK900 negative **and** the base board `GND` pad | all three |
-| Pins 3 + 5 joined | `SDA` pad (`WB_I2C1_SDA`, nRF P0.13) | one-wire half-duplex to the pack |
+| Pins 3 + 5 joined | **R1 1 kΩ inline**, then `SDA` pad (`WB_I2C1_SDA`, nRF P0.13), with D1 + R2 at that end | one-wire half-duplex to the pack — see the protection network above, **required** |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
 
 `IO1` was the original one-wire pad and `A1` replaced it. **`SDA`/P0.13 is now the wiring this
