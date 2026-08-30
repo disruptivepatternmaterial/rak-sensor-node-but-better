@@ -18,13 +18,14 @@ What it reports, and why each one settles a different argument:
   shortest pulse   inverse of the baud. 9600 8N1 puts one bit at 104 us.
 
 CITE(prior-art): Saleae Logic 2 automation API — Manager.connect(), CaptureConfiguration with
-  ManualCaptureMode, and Capture.export_raw_data_csv(). The automation server is off by default
+  TimedCaptureMode, and Capture.export_raw_data_csv(). The automation server is off by default
   and is enabled either in Preferences or with the --automation launch flag.
   https://saleae.github.io/logic2-automation/
 CITE(prior-art): [CIT-NRF-GPIO-TOTAL] — VIH = 0.7 x VDD and the 11/13/16 kohm internal pull
   range, which is what makes the idle-level number above actionable rather than merely curious.
-CITE(datasheet): [CIT-RAK-ONEWIRESERIAL] — the pack announces unprompted, so a passive capture
-  with no node attached is a valid test of whether the pack transmits at all.
+CITE(prior-art): [CIT-RAK-ONEWIRESERIAL] — the pack announces unprompted, so a passive capture
+  with no node attached is a valid test of whether the pack transmits at all. Marked prior-art,
+  not datasheet: the registry classifies it as a GitHub library rather than a vendor document.
 """
 
 import argparse
@@ -149,8 +150,20 @@ def main() -> int:
             print("no physical Saleae found — check it is on USB and that Logic 2 lists it",
                   file=sys.stderr)
             return 1
-        device_id = args.device or physical[0].device_id
-        print(f"device         : {device_id} ({physical[0].device_type.name})")
+        # Resolve the id back to its descriptor rather than printing physical[0] blindly. A
+        # --device that names a simulation device, or one that is not attached, would otherwise be
+        # reported as whatever real hardware happened to be first in the list — and a capture
+        # labelled with the wrong device is worse than a failure, because it looks like evidence.
+        selected = physical[0]
+        if args.device:
+            matches = [d for d in physical if d.device_id == args.device]
+            if not matches:
+                print(f"--device {args.device} is not an attached physical device; "
+                      f"available: {[d.device_id for d in physical]}", file=sys.stderr)
+                return 1
+            selected = matches[0]
+        device_id = selected.device_id
+        print(f"device         : {device_id} ({selected.device_type.name})")
 
         device_configuration = automation.LogicDeviceConfiguration(
             enabled_analog_channels=[args.channel],

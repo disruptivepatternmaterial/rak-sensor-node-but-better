@@ -602,8 +602,10 @@ constexpr uint32_t kSwitchedRailSettleMs = 20;
 //
 // A guard rather than a pair of calls because Battery::read() returns from several places, and
 // the failure mode of missing one is not a lost reading — it is leaving the RAK5802 powered
-// through sleep, which `docs/POWER_BUDGET.md` prices at roughly a milliamp and which dominates
-// the budget at an hourly cadence. The destructor cannot be forgotten.
+// through sleep. The size of that leak is **unmeasured**: `docs/POWER_BUDGET.md` lists the
+// RS-485 module's current as TBD, and the ~1 mA figure quoted in rk900.cpp is the nRF's own
+// UART/SPI clocks [CIT-NRF-PERIPH-SLEEP], not the transceiver. Unmeasured is reason enough for a
+// destructor that cannot be forgotten, on a node that has to last months.
 class SwitchedRailHold {
   public:
     explicit SwitchedRailHold(bool engage) : m_engaged(engage)
