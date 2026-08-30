@@ -57,8 +57,16 @@ namespace {
 // A1 sampled 100 % low against the internal pull-up with the harness fully disconnected, which
 // is not credible as two independent faults, so the scan needs to reach a pad that was never
 // wired to anything. Diagnostic only — the battery driver never sees it.
+//
+// FEATURE_BATTERY_PIN_SDA is the second recovery pad, added 2026-08-30 after node 002's core lost
+// A1 the way earlier cores lost IO1. WB_I2C1_SDA/P0.13 was qualified by census before selection —
+// idle HIGH, 0 of 1,848,823 samples low, in both pull-up and floating modes (env:owscan_sda) —
+// while IO1 and A1 on the same core read 100 % low across two harnesses and with the harness
+// removed entirely. This project uses no I2C sensor, so nothing contends for the pin.
 #if defined(OWSCAN_PIN)
 constexpr uint8_t kBatteryPin = OWSCAN_PIN;
+#elif FEATURE_BATTERY_PIN_SDA
+constexpr uint8_t kBatteryPin = WB_I2C1_SDA;
 #elif FEATURE_BATTERY_PIN_A1
 constexpr uint8_t kBatteryPin = WB_A1;
 #else

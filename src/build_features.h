@@ -141,6 +141,20 @@
 #define FEATURE_BATTERY_PIN_A1 0
 #endif
 
+// The second recovery pad, WB_I2C1_SDA/P0.13. Takes precedence over FEATURE_BATTERY_PIN_A1 so a
+// board cannot be built for two pins at once.
+//
+// Added because node 002's core lost A1 the same way earlier cores lost IO1: on 2026-08-30 both
+// IO1 and A1 sampled 100 % low against the internal pull-up — across two separate harnesses and
+// again with the harness entirely removed — while SDA read idle HIGH, 0 of 1,848,823 samples low
+// (env:owscan_sda, issue #96). Why two pads on one core failed is unexplained and still open, so
+// this is a route around a measured fault, not a claim about the cause. Never select a pad without
+// running the census on it first: A1 was chosen by decision rather than measurement, and that is
+// part of how this got expensive.
+#ifndef FEATURE_BATTERY_PIN_SDA
+#define FEATURE_BATTERY_PIN_SDA 0
+#endif
+
 #if FEATURE_CONSOLE && defined(ARDUINO)
 #define LOG(x)        Serial.print(x)
 #define LOGLN(x)      Serial.println(x)
