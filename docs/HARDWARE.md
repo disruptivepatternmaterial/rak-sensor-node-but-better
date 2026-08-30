@@ -601,6 +601,54 @@ Figures 12–13 of its datasheet, and the board ships with `M2.5 × 4` screws fo
 [CIT-RAK19007]. Keep the 3 mm standoff — the underside carries the sensor-slot connectors and
 the pad header being soldered to.
 
+## A board that shows 5 V at USB-C but no VDD — RAK's own two-point test
+
+Written down because it was re-derived from scratch during a bench session and the answer is
+short, authoritative, and belongs somewhere findable. **Two independently-failing parts sit
+between the USB-C connector and the Core, and one meter reading tells you which one died.**
+
+The path is: USB-C **or** the solar connector → the **TP4054 charger** → the charger output
+node, which is `VBAT` → the base board's **3.3 V step-down** → `3V3` / `VDD` → the 40-pin edge
+connector → the Core. Both input connectors enter through the *same* charger, so neither one
+bypasses a failed charger.
+
+| Measure | Reading | Conclusion |
+|---|---|---|
+| `VBAT` | 3.2–4.2 V | charger is fine |
+| `VBAT` | anything else | **charger is damaged** |
+| `VDD` | 3.3 V | regulator is fine |
+| `VDD` | 0 V | **3.3 V regulator is damaged — base board replacement** |
+
+Two things make this decisive rather than suggestive. **The 3.3 V regulator is on the base
+board, not on the Core** — RAK diagnosed the identical symptom set with the Core physically
+removed and `VDD` still at 0 V, which a Core-generated rail cannot do. And **the Core usually
+survives it**: RAK's advice in every such thread is to test the Core in a different base board,
+which is also why a good SWD `DPIDR` from a "dead" node means the chip is fine and the board is
+not.
+
+The RAK4631 needs **both** `VBAT` and `3.3 V`; it does not regulate its own 3.3 V. A switch that
+cuts one rail and leaves the other live is the configuration RAK warns against — put any battery
+disconnect on the battery side of the JST so both rails drop together.
+
+- [CITE(prior-art): RAK forum — "USB-C Charger Broke RAK4631 or RAK19007?", the two-point test and the Core-removed measurement](https://forum.rakwireless.com/t/usb-c-charger-broke-rak4631-or-rak19007/13532)
+- [CITE(prior-art): RAK forum — RAK19007 charging circuit, both supply rails and the battery-side switch recommendation](https://forum.rakwireless.com/t/rak19007-charging-circuit-causing-rak4631-to-fail/13388)
+- [CITE(datasheet): RAK19007 user guide — charger output feeds a step-down generating 3.3 V, 750 mA ceiling](https://manuals.plus/rak/rak19007-wisblock-base-board-2nd-gen-manual)
+
+Powering the board when the USB path itself is dead: the **solar / "Green Power" connector**
+(JST ZHR-2, 1.5 mm pitch) takes a regulated **4.5–5.5 V** and is RAK staff's own recommended way
+to run a WisBlock independent of USB — a 4.98 V buck is already the right supply, just on a
+different connector. Below about 4.5 V the regulator is documented to enter an undefined state
+and draw *more* current, so this is not a place to economise.
+
+- [CITE(prior-art): RAK forum — "better to use the Green Power connector to supply a regulated voltage with up to 5.5 V… independent of the USB connector"](https://forum.rakwireless.com/t/rak19007-rak4631-usb-and-j12-vdd-can-be-connected-at-the-same-time/9870)
+- [CITE(prior-art): RAK forum — the 4.5 V floor, and why 3 V over the solar input misbehaves](https://forum.rakwireless.com/t/powering-my-rak-board/7750)
+
+**Polarity is not documented in text for either JST connector** — only in datasheet figures. Go
+by the `+` silkscreen on the PCB. Reversing the battery connector has burned boards, and in the
+recorded case left USB working while the battery input never worked again.
+
+- [CITE(prior-art): RAK forum — reverse-polarity damage, "had I took a moment to notice the '+' symbol on the PCB"](https://forum.rakwireless.com/t/cross-polarization-damage-to-wisblock/12903)
+
 ## Reflashing a sealed field node
 
 The power decision — 12 V from the pack into a buck, buck out to the RAK4631's **USB-C**
