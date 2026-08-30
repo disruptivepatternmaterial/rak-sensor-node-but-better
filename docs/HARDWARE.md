@@ -107,16 +107,23 @@ undocumented part.
 
 ## RAK5802 terminal blocks — what each one actually is
 
-Two 4-way spring terminals, silkscreened `BAT GND A/RX B/TX` and `SCL SDA 3V3 AIN`.
+Two 4-way spring terminals, silkscreened `BAT GND A/RX B/TX` and `SCL SDA 3V3 AIN`. Eight clips
+total. **Six of the node's seven external connections land in them**, which is why the build below
+uses this module as the wiring hub rather than the base-board header.
 
-| Terminal | Direction | Notes |
-|---|---|---|
-| `BAT` | **output** | Battery rail, 2.6–4.2 V, for powering a sensor [CIT-RAK5802]. Not an input. |
-| `GND` | — | Common ground. Worth landing the RS-485 ground here, not just A/B. |
-| `A/RX` | RS-485 A | Non-inverting |
-| `B/TX` | RS-485 B | Inverting |
-| `3V3` | **output** | On the **switched** `3V3_S` rail — see the warning below |
-| `SCL` / `SDA` / `AIN` | — | I²C and one analog input. Unused here. |
+| Block | Clip | What it is | What this node puts in it |
+|---|---|---|---|
+| 1 | `BAT` | battery rail **output**, 2.6–4.2 V, for powering a sensor [CIT-RAK5802] | *empty* |
+| 1 | `GND` | common ground — same net as the base-board `GND` pad | pack pin 2 (`P−`) |
+| 1 | `A/RX` | RS-485 A, non-inverting | RK900 `A` |
+| 1 | `B/TX` | RS-485 B, inverting | RK900 `B` |
+| 2 | `SCL` | I²C clock, an otherwise unused GPIO | *empty* |
+| 2 | `SDA` | **nRF P0.13 — the one-wire pin**, direct passthrough, no buffer | pack pins 3+5 joined |
+| 2 | `3V3` | **switched** output on `3V3_S` — dies mid-cycle | *empty. never use* |
+| 2 | `AIN` | one analog input | *empty* |
+
+Each clip takes **one** conductor. `P−` has to fan out to the buck negative and the RK900 negative
+as well, so that junction is made at the pack connector and a single wire runs from it to `GND`.
 
 **`BAT` and `3V3` are outputs to power a sensor, not supply inputs.** Neither can run the RK900,
 which needs 12 V — that comes from the pack, through the buck, and never through this module.
@@ -285,22 +292,114 @@ The same thing as a plain schematic, because the boxes above hide the topology:
 board side of R1. That ordering is the design: R1 limits the current, then D1 and R2 protect and
 bias a node R1 has already made safe.
 
-#### Build steps — the one-part version
+#### The whole node, one picture
 
-1. **Power everything down.** USB unplugged, pack connector unmated.
-2. **Join pack pins 3 and 5** at the connector. One wire leaves that junction.
-3. **Cut that wire** about 30 mm from the board end.
-4. **Solder R1 (1 kΩ) inline** across the cut. Heat-shrink the body so it cannot touch anything.
-5. **Push the board side of R1 into the RAK5802 `SDA` spring clip.**
-6. **Pack pin 2 (`P−`)** into the RAK5802 `GND` clip. **Pack pin 4** to the `VDD` pad on the edge
-   header — *not* the module's `3V3` clip, which switches off mid-cycle.
-7. **Meter `SDA` clip to `GND` clip** before applying power. It must not read near 0 Ω. Then mate
-   the pack, then USB.
+Solid lines are spring clips. The single dashed line is the one solder joint.
 
-If you are also fitting the optional parts: R2 from the `SDA` clip to the **`VDD` pad** (measure
-`SDA` to `VDD` first — under 10 kΩ means the board already has a pull-up and R2 is redundant), and
-D1 from the `SDA` clip to the `GND` clip. Both attach on the board side of R1, so R1 protects them
-too.
+```mermaid
+flowchart LR
+    subgraph PACK["RAK9154 pack — SP11 connector"]
+        direction TB
+        P1["pin 1<br/><b>P+</b> 12 V"]
+        P2["pin 2<br/><b>P−</b> ground"]
+        P35["pins 3 + 5<br/><b>joined</b> = data"]
+        P4["pin 4<br/><b>3V3_In</b> reference"]
+    end
+
+    R1(["R1 1 kΩ<br/><i>optional</i>"])
+
+    subgraph B5802["RAK5802 — the wiring hub"]
+        direction TB
+        CBAT["BAT — empty"]
+        CGND["<b>GND</b>"]
+        CA["<b>A/RX</b>"]
+        CB["<b>B/TX</b>"]
+        CSCL["SCL — empty"]
+        CSDA["<b>SDA</b> = nRF P0.13"]
+        C3V3["3V3 — NEVER USE<br/><i>switches off mid-cycle</i>"]
+        CAIN["AIN — empty"]
+    end
+
+    subgraph RK["RK900-09 weather"]
+        direction TB
+        RKV["12 V"]
+        RKG["GND"]
+        RKA["A"]
+        RKB["B"]
+    end
+
+    subgraph BUCK["Buck 12 V → 5 V"]
+        direction TB
+        BVI["VIN+"]
+        BVG["VIN−"]
+        BUSB["USB-C out → core"]
+    end
+
+    VDD["<b>VDD</b> pad<br/>base-board header<br/>always on"]
+
+    P1 --> BVI
+    P1 --> RKV
+    P2 --> BVG
+    P2 --> RKG
+    P2 --> CGND
+    P35 --> R1
+    R1 --> CSDA
+    P4 -.->|<b>SOLDER</b>| VDD
+    RKA --> CA
+    RKB --> CB
+    BUSB --> CORE["RAK4631 core<br/>USB-C"]
+
+    style P35 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style CSDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
+    style R1 fill:#ffe9b3,stroke:#b8860b,stroke-width:2px
+    style VDD fill:#d9ecff,stroke:#1f6feb,stroke-width:3px
+    style P4 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
+    style C3V3 fill:#ffd6d6,stroke:#b22222,stroke-dasharray: 4 3
+    style P1 fill:#fff3cd,stroke:#856404,stroke-width:2px
+    style CBAT fill:#eeeeee,stroke:#bbbbbb
+    style CSCL fill:#eeeeee,stroke:#bbbbbb
+    style CAIN fill:#eeeeee,stroke:#bbbbbb
+```
+
+Read it as five wires out of the pack:
+
+| Pack pin | Goes to | How |
+|---|---|---|
+| 1 `P+` 12 V | buck `VIN+` **and** RK900 12 V | never touches the RAK5802 |
+| 2 `P−` | buck `VIN−`, RK900 `GND`, and the `GND` clip | junction at the connector, one wire to the clip |
+| 3 + 5 joined | `SDA` clip, through R1 if fitted | **the one-wire link** |
+| 4 `3V3_In` | `VDD` pad | **the only solder joint** |
+
+Plus the RK900's own two data wires, `A` → `A/RX` and `B` → `B/TX`.
+
+#### Build steps
+
+**There is exactly one solder joint on the whole node: pack pin 4 to the `VDD` pad.** Everything
+else is a spring clip. Pin 4 cannot use a clip because the module's `3V3` clip switches off
+mid-cycle and its `BAT` clip is the wrong voltage and an output.
+
+1. **Power everything down.** USB unplugged, pack connector unmated. Nothing energised while a
+   wire is being moved — see the hot-plug rule below, it is the one mechanism that fits all four
+   dead pads.
+2. **At the pack connector, join pins 3 and 5.** One wire leaves that junction. That is the data
+   line.
+3. **At the pack connector, join pin 2 (`P−`) to the buck negative and the RK900 negative.** One
+   wire leaves that junction too.
+4. **Pack pin 1 (`P+`, 12 V) to the buck `VIN+` and the RK900 12 V input.** This never touches the
+   RAK5802.
+5. **Into the clips:** data wire → `SDA`. Ground wire → `GND`. RK900 `A` → `A/RX`. RK900 `B` →
+   `B/TX`.
+6. **Solder pack pin 4 to the `VDD` pad** on the base-board header. The only joint.
+7. **Meter `SDA` to `GND` before applying power.** It must not read near 0 Ω. Then mate the pack,
+   then USB.
+
+**R1, without soldering:** put one leg of the 1 kΩ in the `SDA` clip and join its other leg to the
+data wire with a lever-nut or Wago. If you build with no R1 at all, the node still works — node 002
+is running that way — you have simply not bought the insurance.
+
+If you are also fitting the optional parts: R2 from `SDA` to the **`VDD` pad** (meter `SDA` to
+`VDD` first; under 10 kΩ means the board already has a pull-up and R2 is redundant), and D1 from
+`SDA` to `GND`. Both go on the board side of R1 so R1 protects them too.
 
 #### Verify with a meter — power off, pack unmated
 

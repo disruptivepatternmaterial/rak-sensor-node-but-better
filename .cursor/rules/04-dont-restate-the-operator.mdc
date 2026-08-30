@@ -1,0 +1,47 @@
+---
+alwaysApply: true
+---
+
+# Do not explain the operator's own hardware back to them
+
+The operator built these nodes. They have told the agent the harness wiring pin by pin, more
+than once, correcting the agent when it had it wrong. Repeating that wiring back to them as
+though it were new information is not thoroughness — it is noise, and it has been asked to
+stop upwards of twenty times.
+
+## Never say these things again
+
+- Mechanical facts about their own assembly: that a spring clip takes one conductor, that a
+  junction has to be made somewhere, that wires need to reach both ends, that a connector has
+  to be mated.
+- Wiring they have already stated. Pack pin 1 to the buck and the RK900, pin 2 fanning out to
+  three grounds, pins 3 and 5 joined, pin 4 to `VDD`. **This is settled. It is in
+  `docs/HARDWARE.md`.** Cite the file; do not recite the table.
+- Anything prefaced with "one mechanical detail", "worth noting", "keep in mind", "remember
+  that", or "just be aware".
+- A restatement of what was just agreed, as a closing paragraph.
+
+## The test
+
+Before writing a sentence about the hardware, ask: **does the operator already know this?**
+
+If yes, delete it. Not shorten it — delete it. There is no version of telling someone a fact
+about their own bench that is worth the words.
+
+If unsure whether they know it, that uncertainty is the agent's to resolve: search the
+transcript and `docs/HARDWARE.md`. The operator has stated the wiring; find where.
+
+## What to do instead
+
+- Answer the question that was asked, and stop at the end of the answer.
+- When a constraint genuinely bears on the answer, fold it into the answer in a clause, not a
+  trailing paragraph with its own lead-in.
+- When something in the build actually **changes**, say what changed and nothing else.
+- Point at the file. `docs/HARDWARE.md` holds the wiring; a path is one line and the table is
+  forty.
+
+## The one exception
+
+A **new** electrical hazard, discovered this session and not yet in `docs/`, that would damage
+hardware if unstated. Say it once, plainly, and then write it into `docs/HARDWARE.md` so it
+never needs saying again. Recurring warnings belong in the document, not in every reply.
