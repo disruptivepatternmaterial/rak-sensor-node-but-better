@@ -592,6 +592,46 @@ constexpr size_t kProvCapacity = kRxCapacity;
 // inter-byte gap before the announcement can be answered — is recorded on Battery::receive()
 // below and on the declaration in battery_frame.h.
 
+// Settle after switching 3V3_S, matching kTransceiverSettleMs in rk900.cpp. A switched rail's
+// rise time is a property of the switch rather than of the load, so one figure covers both
+// modules that hang off it.
+// CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet — "IO2 controls the power switch of 3V3_S".
+constexpr uint32_t kSwitchedRailSettleMs = 20;
+
+// Holds 3V3_S up for the length of a one-wire transaction, and puts it back on every exit path.
+//
+// A guard rather than a pair of calls because Battery::read() returns from several places, and
+// the failure mode of missing one is not a lost reading — it is leaving the RAK5802 powered
+// through sleep, which `docs/POWER_BUDGET.md` prices at roughly a milliamp and which dominates
+// the budget at an hourly cadence. The destructor cannot be forgotten.
+class SwitchedRailHold {
+  public:
+    explicit SwitchedRailHold(bool engage) : m_engaged(engage)
+    {
+        if (!m_engaged) {
+            return;
+        }
+        pinMode(WB_IO2, OUTPUT);
+        digitalWrite(WB_IO2, HIGH);
+        delay(kSwitchedRailSettleMs);
+    }
+
+    ~SwitchedRailHold()
+    {
+        if (m_engaged) {
+            // Back to exactly what rk900.cpp::power_off() leaves, so the sleeping node's
+            // current draw is unchanged by this class existing.
+            digitalWrite(WB_IO2, LOW);
+        }
+    }
+
+    SwitchedRailHold(const SwitchedRailHold &)            = delete;
+    SwitchedRailHold &operator=(const SwitchedRailHold &) = delete;
+
+  private:
+    bool m_engaged;
+};
+
 } // namespace
 
 const char *battery_result_name(BatteryResult r)
@@ -1348,11 +1388,41 @@ BatteryReading Battery::read()
     BatteryReading out;
 
     // The pack's 3V3 reference is wired to the always-on VDD pad, not to the switched 3V3_S
-    // rail WB_IO2 gates, so there is deliberately no rail to raise here. That is a wiring
-    // decision: rk900.cpp drops WB_IO2 after the weather read, and routing the pack through
-    // the same rail would kill its reference mid-cycle.
+    // rail WB_IO2 gates, so the pack's *reference* needs no rail raised here. That much was
+    // always true and is still true.
     // CITE(datasheet): [CIT-RAK19007] RAK19007 Datasheet — "IO2 controls the power switch of
     //   3V3_S", which is a different net from the VDD pad the pack's pin 4 sits on.
+    //
+    // The pack's DATA is a different question, and getting it wrong cost four GPIO pads.
+    //
+    // When the data line enters the node through the RAK5802's SDA spring terminal, it passes
+    // through a module that sits on 3V3_S. The production cycle reads the RK900 first, and
+    // RK900::power_off() ends with `digitalWrite(WB_IO2, LOW)` and never raises it again — so
+    // by the time this function runs, that module has no supply, and the first thing the
+    // half-duplex driver below does is drive the line to 3.3 V. Driving a signal into an
+    // unpowered device forward-biases its protection structures and pushes current into a dead
+    // rail, which is a documented way to destroy the pin doing the driving.
+    //
+    // So raise the rail for the duration of the transaction whenever the data line is routed
+    // through the module, and put it back afterwards so the sleeping current is unchanged.
+    //
+    // SCOPE, because it would be easy to over-read this comment: **this is not the explanation
+    // for node 002's dead pads.** The SDA routing was introduced roughly twelve hours after two
+    // pads had already failed, and node 002's A1 pad died while the data line was on the
+    // always-on base-board header with no WB_IO2 dependency whatsoever. Chronology rules this
+    // mechanism out for the earlier failures. It is fixed here because driving a signal into an
+    // unpowered module is wrong on its own terms, not because it has been shown to damage
+    // anything. The cause of the seven destroyed pads remains unestablished — see issue #102,
+    // which records that the one-wire driver is unchanged since the image running safely on
+    // node 001, so no firmware theory can explain the difference between the two nodes.
+    //
+    // CITE(prior-art): [CIT-NRF-UNPOWERED-PIN] Nordic — applying a voltage to a pin of an
+    //   unpowered device drives current through parasitic paths; the hazard is specifically the
+    //   unpowered case, which is exactly what WB_IO2 LOW creates for the RAK5802.
+    // CITE(datasheet): [CIT-RAK5802] the module's terminals are on the switched 3V3_S rail.
+    // CITE(bench): docs/EVIDENCE.md 2026-08-30 — the production cycle runs Battery::read() with
+    //   3V3_S already dropped by RK900::power_off(), confirmed by owscan's rail A/B phase.
+    SwitchedRailHold rail_hold(m_pin == WB_I2C1_SDA);
 
     // begin() caches the port registers, arms the GPIOTE falling-edge interrupt, and leaves
     // the pin as input-with-pull-up so the idle line reads high. Everything after this point

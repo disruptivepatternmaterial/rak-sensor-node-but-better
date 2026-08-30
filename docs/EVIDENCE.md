@@ -4,6 +4,83 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 — SDA/P0.13 is the fourth dead one-wire pad, and a 1 kΩ series resistor did not prevent it
+
+**Host:** Heliotrope Ridge, `/dev/cu.usbmodem31101`. **Core:** node 002's third core. **Image:**
+`env:owscan_sda` at `afdaf48`. **Measured by the firmware**, not by meter, so it is repeatable.
+
+### Observation — the pin cannot be pulled up, with both plausible external causes removed
+
+Three readings, each with one more thing taken away:
+
+| Pack connector | 2.2 kΩ pull-up | `INPUT_PULLUP` result |
+|---|---|---|
+| connected | fitted | `idle LOW : 0 falling edge(s), 1735755 of 1735755 samples LOW` |
+| connected | lifted at one end | `idle LOW : 0 falling edge(s), 1746448 of 1746448 samples LOW` |
+| **unplugged** | **lifted** | `idle LOW : 0 falling edge(s), 1749426 of 1749426 samples LOW` |
+
+With nothing attached to the net and the chip's own ~13 kΩ internal pull-up enabled, the pin
+still reads LOW on every sample. **P0.13 is shorted to ground.** The Saleae agrees
+independently: 18.8 M analog samples over 12.024 s, median 0.121 V, range 0.106–0.205 V, and
+**zero edges even while the firmware was bit-banging 64 bytes of `0x55` at three bauds.**
+
+### Two hypotheses refuted here, both of them mine
+
+- **The pull-up was miswired to GND.** A 2.2 kΩ to ground would pin the line near 0.4 V and read
+  LOW, which fit. Lifting the resistor changed nothing, so it was not the cause.
+- **A powered pack clamps the bus low.** The 15 kΩ the operator measured was on a disconnected
+  pack, so it said nothing about the live case. Unplugging the pack changed nothing either.
+
+### The count is seven pads across two cores, operator-stated
+
+**Four on the core currently in node 002, three on the previous one.** Every one was the pin
+carrying the pack's data line at the time; no pin used for anything else has failed on either
+core. Earlier drafts of this entry said "four" because they counted only what the agent had
+personally measured that day — that undercount is corrected here and should not be reintroduced.
+
+**A 1 kΩ series resistor was inline when SDA died.** That is the mitigation `docs/HARDWARE.md`
+requires and the one this ledger recommended after the A1 failure, and it did not prevent the
+failure. Series resistance is therefore **refuted as sufficient protection** — which also means
+the "REQUIRED protection network" section of `HARDWARE.md` oversells what it delivers and needs
+revising rather than repeating
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+
+### No firmware change since 001's image can explain it — established by diff, not argument
+
+Node 001 has been in the woods since 2026-08-14 on `1c2df3c` with no pin damage. Diffing the
+whole one-wire path from that commit to `afdaf48`:
+
+| File | Change since `1c2df3c` |
+|---|---|
+| `src/sensors/battery.cpp` | **none** |
+| `src/sensors/battery_frame.{h,cpp}` | **none** |
+| `src/diagnostics/owscan.cpp` | 8 lines, **every one a comment or a log string** |
+| `src/build_features.h` | the two new pin-select flags, and the version bump |
+| `src/main.cpp` | `kBatteryPin` selection, the reset banner, a session-recovery callback |
+
+So the one-wire driver that has destroyed seven pads is **functionally identical to the one
+running without incident on 001.** The push-pull `pinMode(tx, OUTPUT)` in
+`SoftwareHalfSerial::setTX()`, the four wake bytes, the provisioning ladder and the `0x55`
+timing sweeps are all common to both nodes.
+
+**This refutes the bus-contention hypothesis as an explanation for the difference between the
+two nodes** — not as physics, but as a cause of *this* divergence, since both nodes run it. Any
+future theory has to account for two cores failing on one harness while a third core runs the
+same code safely on another.
+
+### What that leaves
+
+The variables never swapped are **node 002's harness and its pack**, present at all seven
+failures across two cores. The cheapest discriminating measurement puts no MCU at risk: with the
+**pack live and the harness unplugged from the node**, meter the joined data wire (pack pins
+3+5) against pack pin 2. Anything above 3.3 V there is the pin killer. Until that is cleared,
+**this harness must not be connected to another core.**
+
+Note also that back-powering through a pad's ESD diode [CIT-NRF-BACKPOWER] should short a pin to
+VDD, not to ground; Nordic's own thread raises that objection and leaves it unresolved
+[CIT-NRF-PINSHORT]. Every dead pad here measures short to *ground*. **The cause is
+unestablished. Only the correlation is solid.** Do not write it up as settled.
+
 ## 2026-08-30 — node 002 reads weather and transmits; opening the console resets the board
 
 **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31101`. **Core:** node 002's third core, one-wire on
