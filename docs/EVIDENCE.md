@@ -47,9 +47,10 @@ port: 12:35:47, 12:36:11, 12:37:38. The `f_cnt` steps read as fault evidence all
 reset each, and the resets line up with capture attempts, not with transmits.
 
 **Consequence: a counter jump observed while a capture is being started is not evidence of a
-fault.** This is inference from timing correlation, not a measured reset cause; `power.cpp` reads
-`RESETREAS` but only extracts the watchdog bit, so the cause was not logged
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+fault.** This is inference from timing correlation, not a measured reset cause: `power.cpp` read
+`RESETREAS` and discarded everything but the watchdog bit, so nothing recorded why the node
+reset. **Fixed in `d25f823`** — the boot banner now names the cause, which makes the next
+occurrence a measurement instead of another inference.
 
 ### Observation — the failure ladder behaves as specified with the pack absent
 
