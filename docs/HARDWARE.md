@@ -145,8 +145,14 @@ buses**, so neither can interfere with or block the other.
 
 > **12 V positive (`P+`) goes to BOTH the buck VIN+ AND the RK900's 12 V input.**
 >
-> **12 V negative (`P−`) goes to ALL THREE: the buck negative, `GND` on the RAK5802, and the
-> RK900's negative.**
+> **12 V negative (`P−`) goes to ALL THREE: the buck negative, the RK900's negative, and the
+> `GND` pad on the base-board header.**
+
+The base-board `GND` pad is the one that matters and it used to be missing from this rule, which
+is how a review on 2026-08-30 talked itself into a ground-float failure mechanism that does not
+exist. It is bonded twice over: directly by this wire, and again through the buck, which is
+non-isolated and therefore shares input and output ground whether or not it is converting.
+`GND` on the RAK5802 is not in the path as built.
 
 Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is exclusive.
 
@@ -167,7 +173,7 @@ terminal, so both are solder joints.
 | From (pack, 5-pin SP11) | To | Why |
 |---|---|---|
 | Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
-| Pin 2 `P−` | buck negative **and** RAK5802 `GND` **and** RK900 negative | all three |
+| Pin 2 `P−` | buck negative **and** RK900 negative **and** the base board `GND` pad | all three |
 | Pins 3 + 5 joined | `A1` pad (`WB_A1`, nRF P0.31) | one-wire half-duplex to the pack |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
 
