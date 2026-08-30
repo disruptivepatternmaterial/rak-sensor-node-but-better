@@ -1,0 +1,275 @@
+# Why the one-wire GPIO keeps dying — design review, 2026-08-30
+
+Five pads across four cores have now been declared dead on the RAK9154 one-wire link. This
+review asks the only question worth asking: is the design doing this, or is it bad luck?
+
+**Verdict: the leading cause is the battery rail reaching the header during assembly, not the
+protocol.** Node 001 is built to this same design and has been alive in the field for weeks, and
+`owscan` ran against 001's IO1 repeatedly in August with no damage — so the design is survivable
+and something specific to the later builds is doing the killing. On node 002 the timeline is
+tight enough to name: **A1 read the pack successfully at 15:08:48Z and was dead by 16:45Z, and
+the only thing that happened in between was the physical assembly that introduced the 12 V pack
+rail into the enclosure.**
+
+The `BAT` pad sits on the same 2.54 mm row as the pads that die: the silkscreen reads
+`BAT IO2 IO1 A1 IN1`. Battery voltage is three pads from `A1` and two from `IO1`, on a row that
+gets hand-soldered. Every dead pad in this project has been on that row.
+
+Two secondary findings stand on their own and should be fixed either way:
+
+- **The interface has no current limiting and both ends are push-pull outputs**, so a
+  transmit collision is a hard short. This is a real design defect even if it turns out not to be
+  what killed these pads.
+- **`IO1` may never have been a free pin.** It is a module-slot signal, not a spare GPIO. If that
+  is what its held-low readings mean, three of the discarded cores were never damaged at all.
+
+Which of these killed which pad is **not** established. The mechanisms are established from
+source, datasheet, and the repo's own timeline; the attribution is not, and the measurements at
+the end are ordered to settle it cheaply.
+
+## What is actually established
+
+Facts, each with the thing that establishes it. No inference in this section.
+
+| # | Observation | Source |
+|---|---|---|
+| 1 | Our end of the wire is a **push-pull output**. `setTX()` is `digitalWrite(tx, HIGH); pinMode(tx, OUTPUT);` and `write()` drives the port register with `*reg \|= reg_mask` / `*reg &= inv_mask` for every bit. There is no open-drain configuration anywhere in the library. | `SoftwareHalfSerial.cpp` @ `c58c0f0` lines 150–198, 330–341 [CIT-ONEWIRE-SERIAL] |
+| 2 | **Nothing limits current** between the pack's data pin and the nRF52 pad. No series resistor appears in the harness build, the pad table, or the connector pinout. | [`HARDWARE.md`](../HARDWARE.md) §pack harness |
+| 3 | Our own comments call this line "open-drain" in at least four places. | `src/sensors/battery.cpp` :78, :286, :916, and the `owscan.cpp` phase-1 header |
+| 4 | The pack's **data-line logic level has never been established** — not from a datasheet, not from a measurement. `docs/research/rak9154-battery-protocol-sources.md` contains no level information. | grep of `docs/` for level/voltage terms, 2026-08-30 |
+| 5 | On node 002's core: `A1` (P0.31) reads **100 % LOW against the internal pull-up** with the original harness, with a second harness, and with the harness completely removed. 1,823,490 of 1,823,490 samples. | `env:owscan_a1` @ `0d5fc39`, captures 09:45–10:01Z |
+| 6 | On the same core, `IO1` (P0.17) reads **100 % LOW**, 1,822,564 of 1,822,564 samples, while wired to nothing. | `env:owscan` @ `15a9c1a`, capture 09:52Z |
+| 7 | On the same core, `A0` (P0.5) reads **idle HIGH**, 0 of 1,852,145 samples low. | `env:owscan_a0` @ `0d5fc39`, capture 09:57Z |
+| 8 | The census is a valid instrument: it has printed `idle HIGH` with 334 falling edges on a healthy bus, and printed HIGH on A0 today. A steady LOW is a real electrical state. | [`EVIDENCE.md`](../EVIDENCE.md) :1781, and #7 above |
+| 9 | Three earlier cores measured **~3.86 Ω from IO1 to ground** unpowered, against ~45 kΩ on A1. | [`EVIDENCE.md`](../EVIDENCE.md), bench isolation 2026-08-29 |
+| 10 | `WB_IO1` is **P0.17, a SLOT_A / SLOT_B module pin** — not a general-purpose spare. `WB_A1` is P0.31 on the IO slot. | `rakwireless/variants/rak4630/variant.h` :45, :53 |
+| 11 | `A2`, `A3`, `A4` are P0.28/29/30, which are **QSPI and SPI pins** for the on-board flash. `A0` and `A1` are the only analog pads that are not. | same file :86–88, :146–151 |
+| 12 | `A0` is **not brought out** on the RAK19007 edge header. The silkscreen is `BAT IO2 IO1 A1 IN1` and `SDA SCL TX1 RX1 GND VDD BOOT0`. | [`HARDWARE.md`](../HARDWARE.md) :161–162, confirmed by the operator |
+| 13 | **Node 001 is built to this same design and is working**, in the field, having accumulated 27.37 h of continuous field runtime with the pack live at 11.76 V. | operator, 2026-08-30; [`EVIDENCE.md`](../EVIDENCE.md) :1042 |
+| 14 | `owscan` — including its transmitting phases — ran against **001's IO1 (P0.17)** on 2026-08-04 and again on 2026-08-12, and 001's IO1 still works. | [`EVIDENCE.md`](../EVIDENCE.md) :1584, :1715, :2343 |
+| 15 | On node 002, A1 read the pack end-to-end at **15:08:48Z** (12.54 V, −0.02 A, 100 %, 22.0 °C, delivered to TTN). In that same uplink **the wind field was absent because the harness was not assembled yet** — 15 bytes, 4 fields, no wind channel. | [`EVIDENCE.md`](../EVIDENCE.md) :111–173 |
+| 16 | The assembly happened **after** that read: "later the same morning, with the node fully assembled," `env:stage1` got a full RK900 five-register read. The pack was silent from the next `battdiag_a1` capture onward, 16:28Z. | [`EVIDENCE.md`](../EVIDENCE.md) :140–158; capture 09:28 local |
+| 17 | The pack's `P+` rail (~12.5 V) is routed into the enclosure to feed **both the buck and the RK900**, so 12 V is present during assembly. | [`HARDWARE.md`](../HARDWARE.md), commit `92a5434` |
+| 18 | `BAT` is on the **same 2.54 mm header row** as the pads that die, two positions from `IO1` and three from `A1`. | fact 12's silkscreen order |
+
+## What changed between 001 and 002
+
+This is the question that matters, because 001 works. Differences the repo can establish:
+
+| | Node 001 | Node 002 |
+|---|---|---|
+| One-wire pad | `IO1` (P0.17) | `A1` (P0.31), then dead |
+| Core provenance | factory RAK4631 | **not captured** — die ID never read (#97); the SWD-converted RAK4631-R was discarded and is *not* this core |
+| `owscan` exposure | repeated, 2026-08-04 and 2026-08-12, including transmit phases | repeated, 2026-08-30 |
+| Pack read before assembly | — | **worked**, 15:08:48Z |
+| Pack read after assembly | working in field | **dead**, both `A1` and `IO1` held low |
+
+Fact 14 is what rules the diagnostic out as a sufficient cause on its own: `owscan` transmitted
+into 001's IO1 across two separate sessions and that pin is alive today. So the difference is not
+the tool and not the protocol — both nodes ran the same firmware against the same library.
+
+Fact 15 paired with fact 16 is what puts assembly in the frame. A1 carried a complete
+pack reading to TTN **before the harness existed**, and was held-low afterwards. The interval
+between those two states contains exactly one class of event: hands, solder, and a 12 V rail
+(fact 17) working on a header row where `BAT` sits three pads from `A1` (fact 18).
+
+## The leading hypothesis — H0, the battery rail reaching the header
+
+*Inference from facts 5, 6, 9, 15, 16, 17, 18.*
+
+A pad exposed to ~12.5 V is destroyed immediately and permanently. The nRF52840's absolute
+maximum on any GPIO is VDD + 0.3 V, so 12.5 V is roughly four times the damage threshold
+[CIT-NRF-GPIO]. The failure mode for that kind of overstress is a punched-through pad shorted to
+the substrate, which reads a permanent LOW that no pull-up can lift and measures a few ohms to
+ground.
+
+**That is fact 9 exactly — ~3.86 Ω — and facts 5 and 6.** It is also consistent with the ~9.6 mV
+measured on a powered dead pad: once the pad is a short to ground, whatever is feeding it through
+the bridge cannot raise its voltage.
+
+What makes H0 fit better than contention:
+
+- **It explains 001 surviving.** A bridge is a build defect, not a design property. A clean build
+  never sees it; the design is fine.
+- **It explains the timing.** A1 worked at 15:08Z and was dead after assembly. Contention would
+  have had equal opportunity to kill it during the exchange that produced the 12.54 V reading.
+- **It explains adjacency.** `IO1` and `A1` are neighbours on the row, both dead, and `A0` — not
+  on that header at all — is healthy. A single conductive path touching two neighbouring pads is
+  one event; two independent protocol failures on adjacent pads is a coincidence.
+- **It explains the earlier three cores.** Their harness was soldered at `IO1`, which is two pads
+  from `BAT` on the same row.
+
+What H0 does not explain, and I am not going to paper over: **why `IO1` on node 002's core reads
+held-low when the operator never wired it.** Either the bridge reached it too, or H3 below is
+right and IO1 was never readable with a module installed. Test 3 distinguishes them.
+
+## The mechanism — H1, driver contention
+
+*This is inference from facts 1, 2, and 9.*
+
+A single-wire half-duplex bus works only if neither end can source current. The standard ways to
+guarantee that are an open-drain output with a shared pull-up, or a series resistor at each end.
+**This design has neither.** Our end idles as a push-pull output driven HIGH — `setTX()` sets the
+pin HIGH *before* setting it to OUTPUT, and `write()` returns the pin to HIGH after the stop bit.
+
+So whenever our end drives HIGH while the pack drives LOW, the current path is:
+
+```
+3V3 ─ nRF52 pad PMOS (on) ─── wire ─── pack pad NMOS (on) ─ GND
+```
+
+Two CMOS output stages in series across the rail, with no resistance between them but their own
+on-resistance. That is tens of milliamps at minimum. The nRF52840 absolute maximum is 15 mA per
+pin, and absolute maximum is a damage threshold, not an operating point [CIT-NRF-GPIO].
+
+Repeated overstress of a CMOS output typically ends with the pad shorted to the substrate, which
+reads as a permanent LOW that cannot be lifted by a pull-up and measures a few ohms to ground.
+**That is exactly fact 9 and facts 5–6.** The failure signature matches the mechanism.
+
+Two things make contention likely rather than theoretical:
+
+- **There is no arbitration.** Half-duplex with software timing means any overlap — the pack
+  answering early, a wake byte, a retry landing on top of a reply — is a collision. The firmware
+  has a `kTurnaroundMs` guard precisely because turnaround timing was already known to be tight.
+- **The diagnostic transmits hard.** `owscan` phase 0 sends 64 bytes of `0x55` at three baud
+  rates every cycle — 192 bytes of alternating bits, push-pull, per cycle — then broadcasts BOOT
+  and SENDAT frames at five baud rates. `0x55` is the worst possible pattern for contention
+  because it toggles every bit. If H1 is right, **the tool used to diagnose the bus was also
+  stressing it**, and the A1 pad died during a session that ran that tool repeatedly.
+
+Why the reference implementations do not show this: the RAK2560 SensorHub is an integrated
+RAKwireless PCB where the pack and the MCU are laid out together, and Meshtastic's driver runs on
+that board [CIT-MESHTASTIC-9154]. We copied its firmware and its pin usage onto a hand-wired
+harness, and inherited none of its interface circuitry. **The bug is in the part of the reference
+we did not copy, which is why reading the reference code never surfaced it.**
+
+## The second finding — H3, IO1 may never have been free
+
+*This is inference from facts 6 and 10, and it deserves as much attention as H1.*
+
+`WB_IO1` is P0.17, and `variant.h` marks it `SLOT_A SLOT_B` — it is a **module slot signal**, not
+a spare GPIO. With a module installed in either slot, IO1 is connected to that module, so a
+held-low reading on IO1 is not evidence of a damaged pin. It could be the module holding it.
+
+Fact 6 is the uncomfortable one: IO1 read held-low on node 002's core while wired to nothing at
+all. Contention cannot explain that, because contention requires something on the other end of
+the wire. The RAK5802 was installed during that measurement.
+
+If the RAK5802 (or any slot module) holds IO1 low, then:
+
+- The three cores discarded as "damaged IO1" may have been healthy.
+- The ~3.86 Ω in fact 9 was measured with the core installed in a baseboard, and the earlier note
+  that "removing the RAK5802 changed nothing" was a resistance check, not this census.
+- **We may have thrown away three working $50 cores on a misdiagnosis**, and the design defect
+  was choosing a module-slot pin for a sensor link in the first place.
+
+This is a hypothesis with a one-command test, listed below. It is not a conclusion.
+
+## What was wrong in the documentation and the code
+
+- `battery.cpp` describes the line as open-drain in four places. It is not, and it never was.
+  Every timing argument built on "the pack has just finished driving this open-drain line" was
+  reasoning about a bus that does not exist as described.
+- [`HARDWARE.md`](../HARDWARE.md) presents IO1 and A1 as interchangeable pads for this link. They
+  are not equivalent: IO1 is a module-slot signal, A1 is an IO-slot pin, and A0 — which the
+  firmware was briefly taught to use today — is not on the header at all.
+- The pad options are far narrower than assumed. Per facts 11 and 12, the header offers `IO1`
+  (module slot), `IO2` (owned by the 3V3_S switch), `A1`, `IN1` (not a core GPIO in the variant),
+  `SDA`/`SCL` (P0.13/P0.14, genuinely free), and `TX1`/`RX1` (owned by the RS-485 module). That is
+  **two usable pads**, `A1` and `SDA`/`SCL`, and one of them is now dead.
+- Rule 20 requires a datasheet or spec citation for any electrical constant. The pack's data-line
+  logic level (fact 4) has never had one, and it is as load-bearing as any register address.
+
+## The fix
+
+Three changes. The first two are cheap and independent; either alone removes the failure mode,
+and together they make it structurally impossible.
+
+### 1. Series resistor in the data line — do this regardless
+
+A **470 Ω to 1 kΩ resistor** in series with the data wire, at the node end, bounds contention
+current to roughly 3–7 mA — under the nRF52840's 15 mA absolute maximum, and low enough that a
+collision is a wasted byte instead of accumulated damage. It costs one part and it is the single
+highest-value change in this document. At 9600 baud the RC penalty against any realistic line
+capacitance is negligible.
+
+### 2. Drive the pin open-drain, so our end can never source current
+
+The nRF52840 supports this natively: `PIN_CNF[n].DRIVE = S0D1` — standard drive on 0,
+**disconnected** on 1 [CIT-NRF-GPIO]. With `S0D1` plus a pull-up, our end can pull the line low
+and release it, but never drive it high, which is what the code has claimed to be doing all along.
+This is a firmware change plus one external pull-up (4.7 kΩ–10 kΩ to 3V3).
+
+It requires either a patch to the vendored library's `setTX()`/`write()` path or setting the DRIVE
+field after `begin()` on every transmit — the library reconfigures the pin each direction change,
+so the field has to be reapplied, not set once.
+
+### 3. Stop the diagnostic from transmitting into an unqualified pad
+
+`owscan` should run its passive census by default and require an explicit flag before it
+transmits anything. The census phases — idle level and falling-edge count — are the phases that
+produce the useful evidence, and they drive nothing. Phase 0's 192 bytes of `0x55` per cycle
+answers a timing question we have already answered.
+
+## Before another core is connected — five measurements
+
+In this order. **Do not put a new core into node 002's baseboard and harness until test 1 passes**
+— if there is a path from `BAT` to those pads, the next core dies the same way within seconds, and
+that is how this got expensive.
+
+1. **`BAT` pad to `IO1` pad, and `BAT` pad to `A1` pad. Resistance, everything powered down,
+   pack disconnected, core removed from the baseboard.** Expect open. Anything from a few ohms to
+   a few tens of kΩ is the answer to this whole review. Test the baseboard on its own first, then
+   with the harness plugged in, so a bridge on the board is told apart from one in the harness.
+   This is H0 and it costs nothing.
+2. **Inspect that header row under magnification** — `BAT IO2 IO1 A1 IN1`. Look for a solder
+   bridge, a stray wire strand, flux residue, or a wire pressed across the pads. Compare against
+   node 001's header, which is the known-good build of the same thing.
+3. **Pack data pin to pack ground, DC volts, harness disconnected from the node, pack powered.**
+   Must be ≤ 3.3 V. If it idles at 5 V or higher, every connection has been overstressing the pad
+   through its ESD diode and no series resistor makes that safe — it needs a level shifter. This
+   is fact 4, the oldest unsourced electrical assumption in the project.
+4. **Pack data pin to pack ground, resistance, pack unpowered.** Establishes whether the pack end
+   is open-drain-with-pull-up or push-pull, which decides whether fix 2 is sufficient alone.
+5. **`env:owscan` with every slot module physically removed.** This tests H3. If IO1 reads
+   `idle HIGH` with the RAK5802 out, then IO1 is not damaged on this core, the pin was never free
+   with a module installed, and the three discarded cores were probably fine.
+
+Tests 1 and 2 need a meter and a light, not a $50 core. Both should have been run before the
+second core went into this baseboard, and certainly before the third.
+
+## What I got wrong
+
+Recorded because the same errors are what cost the cores.
+
+- I concluded "IO1 is damaged on three cores" from a resistance reading without checking what
+  P0.17 is connected to on the baseboard. `variant.h` says `SLOT_A SLOT_B` on line 45 and has
+  said so the whole time.
+- I proposed and half-built an `A0` recovery path without reading the header pinout in our own
+  `HARDWARE.md`, which lists the pads and does not include A0. That work is reverted.
+- I ran `owscan` repeatedly against a pad I was trying to diagnose, without noticing that its
+  phase 0 transmits 192 bytes per cycle into a bus with no current limiting. If H1 is right, the
+  diagnostic contributed to the damage it was measuring.
+- I wrote "open-drain" into the battery driver's comments and reasoned from it for weeks without
+  reading `setTX()`, which is nine lines long and says `pinMode(tx, OUTPUT)`.
+- I did not compare against node 001 until the operator told me to. 001 is the same design,
+  working, with `owscan` history on the exact pin that supposedly cannot survive — which is the
+  single strongest piece of evidence available and it was sitting in `EVIDENCE.md` the whole time.
+  A design-defect verdict that cannot explain the working unit is not a verdict.
+- I blamed the harness, then the pack, then the silicon, and reached for a new pin each time,
+  before checking whether a 12 V rail runs along the same header row as the pads that keep dying.
+  Three cores were replaced without that check.
+
+## Citations
+
+- CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification, GPIO — `PIN_CNF[n].DRIVE`
+  provides `S0D1` (standard 0, disconnect 1) for open-drain operation, and the per-pin absolute
+  maximum current is the damage limit relied on above.
+- CITE(prior-art): [CIT-ONEWIRE-SERIAL] `RAK-OneWireSerial` @ `c58c0f0`,
+  `src/SoftwareHalfSerial.cpp` :150–198 and :330–341 — `write()` drives the port output register
+  per bit and `setTX()` configures the pin as `OUTPUT`, establishing push-pull, not open-drain.
+- CITE(prior-art): [CIT-MESHTASTIC-9154] `meshtastic/firmware` @ `02050a4`,
+  `variants/rak2560/RAK9154Sensor.cpp` — the same library driven on an integrated RAK2560 PCB,
+  which is why the reference shows no interface protection to copy.
+- CITE(bench): [`EVIDENCE.md`](../EVIDENCE.md) 2026-08-29 isolation and 2026-08-30 censuses —
+  the ~3.86 Ω / ~45 kΩ readings and the A1/IO1/A0 sample counts quoted throughout.
