@@ -171,11 +171,21 @@ terminal, so both are solder joints.
 | Pins 3 + 5 joined | `A1` pad (`WB_A1`, nRF P0.31) | one-wire half-duplex to the pack |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
 
-`IO1` was the original one-wire pad and must no longer be used on these cores. Bench isolation
-on 2026-08-29 found IO1 held at ~9.6 mV powered and ~3.86 Ω to ground unpowered on all three
-available cores; an empty baseboard was open, two baseboards behaved identically with a core
-installed, and removing the battery harness and RAK5802 changed nothing. A1 measured ~45 kΩ and
-is the replacement under test ([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+`IO1` was the original one-wire pad. **A1 is now the wiring this project builds**, and it is
+proven: node 002 returned 12.54 V, −0.02 A, 100 %, 22.0 °C over A1 on 2026-08-30 and the uplink
+landed at TTN ([`EVIDENCE.md`](EVIDENCE.md)). Build such a node from `env:rak4631_a1`, which
+sets `FEATURE_BATTERY_PIN_A1=1`; plain `env:rak4631` still drives IO1.
+
+Why the move happened: bench isolation on 2026-08-29 found IO1 held at ~9.6 mV powered and
+~3.86 Ω to ground unpowered on all three cores available then; an empty baseboard was open, two
+baseboards behaved identically with a core installed, and removing the battery harness and
+RAK5802 changed nothing. A1 measured ~45 kΩ.
+
+**Why those cores failed on IO1 was never established, and all three have been discarded.** The
+core now in node 002 is a different part and its IO1 was never measured — A1 was chosen for it
+by decision, not by diagnosis. So this table is the wiring in use, not a verdict that IO1 is
+unusable in general. Treat a fresh core's IO1 as unknown rather than assumed bad
+([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
 
 Do not substitute `IO2`: it controls the RAK19007 `3V3_S` switch that powers the RAK5802.
 Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 baud.

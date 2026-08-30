@@ -108,13 +108,69 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-30 — Node 002 reads the RAK9154 over A1 and the uplink lands at TTN
+
+**Host:** Heliotrope Ridge. **Commit:** `a48e996eac974670d6f722c06c0d150962f5a744`
+(`env:rak4631_a1`, `FEATURE_BATTERY_PIN_A1=1`), asserted by the build and DFU inputs and by
+`flash.sh`'s post-upload PID check — **not read back from a boot banner**, because the field
+image sleeps and detaches USB before a capture can attach.
+
+**Core identity: not captured.** The die ID was not read before the node went to sleep, so this
+entry is pinned to the *node* (`puma-concolor-002`, `DevEUI 42BB96EF76E200F2`) and not to a
+physical part. Said explicitly per `.cursor/rules/03-bench-claims.mdc` rather than implying a
+continuity that was never established — see the correction below.
+
+**Physical state:** RAK9154 pack wired to `WB_A1` (P0.31) per [`HARDWARE.md`](HARDWARE.md).
+**RK900 not answering** — see below.
+
+#### What the network recorded
+
+```
+puma-concolor-002  dev_addr 260C1AF4  f_port 2  f_cnt 448
+2026-08-30T15:08:48Z  gateway 3356-gateway-002  RSSI -101  SNR 8  SF7  905.1 MHz
+frm_payload  17b86415ba04e616b9fffe186700dc   (15 bytes)
+```
+
+Decoded: **12.54 V, −0.02 A, 100 %, 22.0 °C** — channel 21 `0xba` voltage, 22 `0xb9` current,
+23 `0xb8` capacity, 24 `0x67` temperature.
+
+This is the first RAK9154 reading this project has taken over **A1** rather than IO1, and it
+went end to end: pack → one-wire on P0.31 → encoder → radio → TTN → decoder.
+
+#### The wind sensor returned null, and the payload says so
+
+The uplink is **15 bytes carrying 4 fields**; a full one is 35 bytes carrying 9. No wind channel
+is present at all. That is the null policy behaving correctly — a failed RK900 read is omitted,
+never encoded as zero — so the absence is itself a true reading. The RK900 was silent this
+cycle and the cause is not yet investigated.
+
+#### Correction to the entry below
+
+The entry below describes converting a RAK4631-R core from RUI3 over SWD. **That core was
+discarded by the operator as unreliable and is not the core in node 002.** Its conversion
+procedure and the mechanisms it established remain valid and are worth keeping
+([`FIRST_FLASH.md`](FIRST_FLASH.md)); its board-level results describe a part that no longer
+exists. Neither entry captured a die ID, which is exactly why the two could be conflated
+([#97](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/97)).
+
+**Not established here:** whether this core's IO1 is intact — A1 was chosen by decision, not by
+measurement, and the three cores that failed on IO1 were never root-caused
+([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+Also not established: any wind reading, sleep current, or a board-asserted banner SHA.
+
 ### 2026-08-30 — A RAK4631-R (RUI3) core is converted to the Arduino bootloader over SWD and runs v0.4.4
 
 **Host:** Heliotrope Ridge. **Commit:** `31805bad9f6470765a6ea4f6179c878ad3f70bbb` (`v0.4.4`),
 asserted by the build and DFU inputs and by `flash.sh`'s post-upload PID check, **not read back
 from the boot banner** — the field image sleeps and detaches USB before a capture can attach.
-**Physical state:** replacement RAK4631 module screwed to its base board, USB-C to the build
-host, RAKDAP1 on SWD. **No RK900 and no RAK9154 attached** — no sensor claim is made here.
+**Physical state:** a RAK4631-R module screwed to its base board, USB-C to the build host,
+RAKDAP1 on SWD. **No RK900 and no RAK9154 attached** — no sensor claim is made here.
+
+> **This core was later discarded.** It kept dropping off USB and SWD and the operator replaced
+> it; it is **not** the core in node 002. No die ID was captured here, so nothing in this entry
+> can be matched to a surviving part. The **procedure** below — the SWD conversion and the two
+> mechanisms it establishes — is core-independent and remains valid. The board-level results are
+> history ([#97](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/97)).
 
 **What was established:** a board bought as RAK4631-R can be converted to this project's
 bootloader in place, and the converted core runs the field image.
