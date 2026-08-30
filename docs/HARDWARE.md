@@ -174,24 +174,45 @@ terminal, so both are solder joints.
 |---|---|---|
 | Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
 | Pin 2 `P−` | buck negative **and** RK900 negative **and** the base board `GND` pad | all three |
-| Pins 3 + 5 joined | `A1` pad (`WB_A1`, nRF P0.31) | one-wire half-duplex to the pack |
+| Pins 3 + 5 joined | `SDA` pad (`WB_I2C1_SDA`, nRF P0.13) | one-wire half-duplex to the pack |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
 
-`IO1` was the original one-wire pad. **A1 is now the wiring this project builds**, and it is
-proven: node 002 returned 12.54 V, −0.02 A, 100 %, 22.0 °C over A1 on 2026-08-30 and the uplink
-landed at TTN ([`EVIDENCE.md`](EVIDENCE.md)). Build such a node from `env:rak4631_a1`, which
-sets `FEATURE_BATTERY_PIN_A1=1`; plain `env:rak4631` still drives IO1.
+`IO1` was the original one-wire pad and `A1` replaced it. **`SDA`/P0.13 is now the wiring this
+project builds**, and it is proven: node 002 read 12.43 V, -0.01 A, 100 %, 24.0 C over SDA on
+2026-08-30 across nine cycles in two sessions, and the field image's uplink landed at TTN
+(`f_cnt 832`) ([`EVIDENCE.md`](EVIDENCE.md)). Build such a node from `env:rak4631_sda`, with
+`env:battdiag_sda` for fast pack questions and `env:owscan_sda` to qualify the pad.
 
-Why the move happened: bench isolation on 2026-08-29 found IO1 held at ~9.6 mV powered and
-~3.86 Ω to ground unpowered on all three cores available then; an empty baseboard was open, two
-baseboards behaved identically with a core installed, and removing the battery harness and
-RAK5802 changed nothing. A1 measured ~45 kΩ.
+**Qualify the pad before you solder to it.** `scripts`-side that means `env:owscan_*`: SDA was
+selected only after its census returned idle HIGH, 0 of 1,848,823 samples low. A1 was chosen by
+decision rather than measurement and that is part of what made 2026-08-30 expensive.
 
-**Why those cores failed on IO1 was never established, and all three have been discarded.** The
-core now in node 002 is a different part and its IO1 was never measured — A1 was chosen for it
-by decision, not by diagnosis. So this table is the wiring in use, not a verdict that IO1 is
-unusable in general. Treat a fresh core's IO1 as unknown rather than assumed bad
-([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+Why the moves happened, and what is still unknown: three cores have shown `IO1` shorted to ground
+(~3.86 ohm, 2026-08-29), and on 2026-08-30 node 002's core also lost `A1` — held 100 % low against
+the internal pull-up with two different harnesses and with the harness removed entirely, and with
+the RAK5802 pulled. On the same core `A0` and `SDA` read idle HIGH, so the instrument is sound and
+the dead pads are real.
+
+**No mechanism has been established.** Six hypotheses were tested and refuted or weakened on
+2026-08-30 — driver contention, ground float, a 5 V `VDD`, a miswired harness, a slot module
+holding IO1, and ESD. The pack is cleared as an overvoltage source by measurement: its data line
+reads **20 mV** and **15 kohm** to pack minus with the wire off the board. Node 001, from the same
+parts order, reads its pack on `IO1` in the field. See
+[`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
+[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96) and
+[#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
+
+Two rules that follow, both cheap:
+
+- **Incoming test every core before it goes in a baseboard** — `IO1` to `GND` on the core
+  connector, expect megohms. No core's IO1 has ever been measured *before* installation, which is
+  exactly why "arrived shorted" cannot be told from "shorted here."
+- **Never mate or unmate the pack connector with the board powered.** Pins on the SP11 do not
+  mate simultaneously.
+
+That 15 kohm pack pull-down also means the idle line sits near 1.7 V against the nRF52840's ~13
+kohm internal pull-up, inside the undefined band between V_IL and V_IH. An external 2.2-4.7 kohm
+pull-up to 3V3 puts idle near 2.9 V and is worth fitting.
 
 Do not substitute `IO2`: it controls the RAK19007 `3V3_S` switch that powers the RAK5802.
 Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 baud.

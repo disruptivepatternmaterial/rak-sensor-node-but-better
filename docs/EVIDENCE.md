@@ -108,6 +108,105 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-30 — Node 002 moves to SDA/P0.13 after A1 dies; pack reads and the uplink lands
+
+**Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`. **Commit:** `7ad5daa` (`env:rak4631_sda`,
+`FEATURE_BATTERY_PIN_SDA=1`), asserted from build and DFU inputs — the field image sleeps and
+drops USB before a capture can attach, so no banner was read back (`banner_commit=NOT OBSERVED`).
+
+**Core identity: not captured.** Die ID not read. Pinned to the node (`puma-concolor-002`,
+`DevEUI 42BB96EF76E200F2`) per `.cursor/rules/03-bench-claims.mdc`, not to a physical part.
+
+#### What failed first
+
+`A1` (P0.31) carried a complete pack reading at 15:08:48Z (12.54 V, entry above) and was
+**held low** by 16:45Z. Measured with `env:owscan_a1`:
+
+| Pin | Reading | Conditions |
+|---|---|---|
+| `A1` P0.31 | idle LOW, 1,823,490 of 1,823,490 samples | original harness, **a second harness**, and harness **fully removed** |
+| `IO1` P0.17 | idle LOW, 1,822,564 of 1,822,564 samples | never wired; **and again with the RAK5802 removed**, 1,814,723 of 1,814,723 |
+| `A0` P0.5 | idle HIGH, 0 of 1,852,145 low | never wired — validates the instrument |
+| `SDA` P0.13 | idle HIGH, 0 of 1,848,823 low | never wired |
+
+`A0` and `SDA` reading HIGH on the same core is what makes the LOW readings real rather than an
+artefact: the census has also printed `idle HIGH` with 334 falling edges on a healthy bus
+(2026-08-04 entry below).
+
+**Pulling the RAK5802 did not lift IO1**, which refutes the hypothesis that a slot module was
+holding it — `WB_IO1` is a `SLOT_A`/`SLOT_B` signal per `variant.h` :45, so that was worth testing
+and it came back negative.
+
+#### The pack is not an overvoltage source — measured, first time in this project
+
+Operator meter readings, joined 3+5 wire **unplugged from the board**, pack live:
+
+- **20 mV DC** to pack minus. So the pack's data line is not a 5 V or 12 V source, closing the
+  oldest unsourced electrical assumption in the harness (previously flagged as never measured).
+- **15 kΩ** to pack minus. A pull-down, not a driver clamping the line.
+
+**Consequence worth acting on:** 15 kΩ against the nRF52840's ~13 kΩ internal pull-up puts the
+idle line near 1.7 V, inside the undefined band between V_IL and V_IH. This bus has been marginal
+by construction. An external 2.2 kΩ–4.7 kΩ pull-up to 3V3 puts idle near 2.9 V.
+
+#### SDA baseline before the pack was connected
+
+Qualified **before** any code selected it, unlike A1 which was chosen by decision:
+`env:owscan_sda` after full assembly with the pack disconnected — `idle HIGH`, 0 of 1,847,336
+samples low. This is the first "before" measurement the project has ever taken on a one-wire pad.
+
+#### The pack reads on SDA, and the pad survived the connect
+
+`env:battdiag_sda` at `7ad5daa`, 10 s cycles. Two separate sessions:
+
+```
+[cycle 9]  battery : sampling confirmed — pack is reporting live values
+           battery : 12.44 V  +0.00 A  100%  24.0 C
+           battery : sendat FF 7E 00 15 02 01 00 01 16 03 10 02 15 BA DC 04 16 B9 00 00
+                     17 B8 64 18 67 F0 00 36
+```
+
+Cycles 9–12 clean. After the pack was unmated and remated, cycles 15–19 clean at
+**12.43 V, −0.01 A, 100 %, 24.0 °C**. Latched at `0x01` both times.
+
+Cycles 1–8 and 9–14 returned `all-zero records (pack not sampled)` — the documented warm-up,
+longer here than the usual ~2 cycles. `AGENTS.md` already calls that line load-bearing.
+
+#### Field image and TTN
+
+`env:rak4631_sda` flashed at `7ad5daa`. Console showed `sleep : 3600 s`. TTN then reported
+`updated_at 2026-08-30T17:56:24Z` — the boot second — with `last_f_cnt_up 832`, `dev_addr
+260C1AF4`, `session started_at 2026-08-30T04:00:02Z`. **Session restored, not rejoined.**
+
+**Not established:** a decoded payload for this cycle (no storage integration queried), any wind
+reading on this image, a board-asserted banner SHA, and sleep current.
+
+#### Why the pads failed: still unknown, and six hypotheses are dead
+
+Recorded so none of them is re-derived. Full reasoning in
+[`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md).
+
+| Hypothesis | Status |
+|---|---|
+| Driver contention (push-pull TX, no current limiting) | **Real defect, not sufficient.** `owscan` transmitted into node 001's IO1 on 2026-08-04 and 2026-08-12; 001's IO1 works. Tracked as #99 |
+| Ground-reference float on host USB | **Refuted.** The buck is non-isolated, and `P−` also lands directly on the base-board `GND` pad |
+| `VDD` at 5 V overdriving the pack reference | **Refuted.** RAK19007 J12 `VDD` is 3.3 V [CIT-RAK19007] |
+| Miswired replacement harness | **Refuted.** Operator confirmed pin-by-pin; 3+5 joined, pin 4 alone to `VDD` |
+| Slot module holding IO1 low | **Refuted.** RAK5802 removed, IO1 still 100 % low |
+| Electrostatic discharge during handling | **Weak.** Operator reports ~66 % ambient RH, no carpet, no pets |
+
+Three cores have now shown a dead IO1 while node 001 — from the same order — reads its pack on
+IO1 in the field. An empty baseboard measures open and two baseboards behaved identically with a
+core installed, so the short is on the core side.
+
+**The gap that matters: no core's IO1 has ever been measured before installation.** Every reading
+is post-hoc, so "arrived shorted" cannot be told from "shorted here." Incoming test on every new
+core — `IO1` to `GND` on the core connector, expect megohms — is the cheapest thing that would
+close it.
+
+**Node 002 is not cleared for the field.** One pack read and one uplink is not a soak, and the
+pad-failure mechanism is unexplained.
+
 ### 2026-08-30 — Node 002 reads the RAK9154 over A1 and the uplink lands at TTN
 
 **Host:** Heliotrope Ridge. **Commit:** `a48e996eac974670d6f722c06c0d150962f5a744`
