@@ -51,7 +51,15 @@ namespace {
 // the raw sequence. That is a property of those damaged cores, not of the design, so A1 is a
 // per-core recovery path selected at build time rather than the wiring every node inherits.
 // IO2 is not an alternative either way — it controls the RAK5802's 3V3_S rail.
-#if FEATURE_BATTERY_PIN_A1
+//
+// OWSCAN_PIN overrides both, and exists for one reason: a "held low" reading is only evidence
+// about a pin if some other pin on the same core reads differently. On 2026-08-30 both IO1 and
+// A1 sampled 100 % low against the internal pull-up with the harness fully disconnected, which
+// is not credible as two independent faults, so the scan needs to reach a pad that was never
+// wired to anything. Diagnostic only — the battery driver never sees it.
+#if defined(OWSCAN_PIN)
+constexpr uint8_t kBatteryPin = OWSCAN_PIN;
+#elif FEATURE_BATTERY_PIN_A1
 constexpr uint8_t kBatteryPin = WB_A1;
 #else
 constexpr uint8_t kBatteryPin = WB_IO1;
