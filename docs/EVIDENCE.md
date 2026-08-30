@@ -108,6 +108,76 @@ not by the date embedded in its heading — two 2026-08-03 entries and two 2026-
 span more than one commit, so heading dates alone don't disambiguate order. If you add an entry,
 add it at the top.
 
+### 2026-08-30 — A RAK4631-R (RUI3) core is converted to the Arduino bootloader over SWD and runs v0.4.4
+
+**Host:** Heliotrope Ridge. **Commit:** `31805bad9f6470765a6ea4f6179c878ad3f70bbb` (`v0.4.4`),
+asserted by the build and DFU inputs and by `flash.sh`'s post-upload PID check, **not read back
+from the boot banner** — the field image sleeps and detaches USB before a capture can attach.
+**Physical state:** replacement RAK4631 module screwed to its base board, USB-C to the build
+host, RAKDAP1 on SWD. **No RK900 and no RAK9154 attached** — no sensor claim is made here.
+
+**What was established:** a board bought as RAK4631-R can be converted to this project's
+bootloader in place, and the converted core runs the field image.
+
+#### The conversion
+
+The replacement core enumerated as **`1915:521F`** (RUI3), which neither `adafruit-nrfutil` nor
+Nordic `nrfutil dfu` could program. The Arduino S140 bootloader was written over SWD:
+
+```
+** Programming Finished **
+** Verify Started **
+** Verified OK **
+```
+
+197 s at 1000 kHz. Two mechanisms had to be understood first, both recorded with their
+citations in [`FIRST_FLASH.md`](FIRST_FLASH.md):
+
+- OpenOCD's nRF5 driver executes its flash loader **on the target**, which a mass-erased part
+  cannot do — it double-faults into lockup at `pc 0xfffffffe`. `configure -work-area-size 0`
+  denies it the RAM scratch area and forces direct NVMC writes ([CIT-OPENOCD-NRF5], `nrf5.c:1143-1145`).
+- The software half of APPROTECT re-arms on **every** reset unless running firmware writes
+  `SwDisable`, so any reset between erase and program re-locks the part mid-recovery
+  ([CIT-NRF-APPROTECT]).
+
+UICR read back correct: `NRFFW[0] = 0x000F4000` (bootloader), `NRFFW[1] = 0x000FE000` (MBR
+params). Post-conversion the board enumerated **`239A:0029`** — `WisBlock RAK4631`, UF2
+bootloader, no application — confirming the conversion rather than inferring it.
+
+#### Flash
+
+```
+=== FLASH OK ===
+host:   Heliotrope Ridge
+commit: 31805bad9f6470765a6ea4f6179c878ad3f70bbb
+port:   /dev/cu.usbmodem31201
+usb:    239A:8029 (application running)
+```
+
+#### A debug-power failure that reads as a dead chip
+
+Between the conversion and the flash, every SWD attempt failed **after** `SWD DPIDR 0x2ba01477`
+read cleanly:
+
+```
+Debug: DAP: wait CDBGPWRUPACK
+Debug: DAP: poll 4 timeout
+Debug: Command 'dap init' failed with error code -5
+```
+
+pyOCD failed the same way at the same point. `DPIDR` answering while `CDBGPWRUPACK` never
+arrives means the debug port's always-on logic is alive but the die has no core power — and it
+looks exactly like a destroyed chip, because the probe appears to be talking to something. **A
+power cycle of the base board restored it**: on the 13th retry the same command returned
+`Cortex-M4 r0p1 processor detected`, and the `239A` USB device reappeared on the same attempt.
+No damage. Recorded because the misreading cost an hour and the correct test — power-cycle,
+then retry — takes ten seconds.
+
+**Not established here:** anything about sensors, IO1 continuity on this core, sleep current,
+or a board-asserted banner SHA. `FEATURE_BATTERY_PIN_A1` defaults to 0, so this image drives the
+one-wire link on WB_IO1; whether **this** core's IO1 is intact is untested and remains open in
+[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96).
+
 ### 2026-08-28 — Node 002 runs v0.4.4 without sensors: bounded failures, session checkpoint/restore, TTN delivery, sleep
 
 **Host:** Heliotrope Ridge. **Commit:** `9e2fcb4a14a6db21165ee2ce23502c544673d99d`
