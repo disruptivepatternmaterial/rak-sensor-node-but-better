@@ -263,7 +263,25 @@ pack's data line is close to the nRF52840's own internal pull range of 11–16 k
 [CIT-NRF-GPIO-TOTAL], but nothing in RAK's documentation says what the pack presents.
 
 
-## 2026-08-30 — cause of the dead one-wire pads established: back-powering an unpowered core
+## 2026-08-30 — RETRACTED: this entry claimed the cause was established. It is not.
+
+> **Retraction, same day.** The heading below read "cause of the dead one-wire pads established:
+> back-powering an unpowered core". That was wrong on two counts and is left in place, struck
+> through by this note, because deleting a wrong claim hides that it was made.
+>
+> 1. **Direction.** Back-powering conducts through the pad's *upper* ESD diode and shorts a pin to
+>    **VDD**. All measured pads here read short to **ground**. Nordic's own engineers hit this same
+>    signature and say the remaining possibilities are a negative voltage on the pin or ground
+>    lifted above it — not back-powering [CIT-NRF-GNDLIFT].
+> 2. **Count.** The entry says four pads across four cores. The count is **seven pads across two
+>    cores**.
+>
+> The mechanism that does match the signature is loss of the ground return, which makes the data
+> pin carry the core's entire supply current [CIT-NRF-GNDLOSS]. That is a candidate too, not a
+> proven cause. Tracking:
+> [#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102).
+
+## 2026-08-30 — (superseded heading) cause of the dead one-wire pads: back-powering an unpowered core
 
 **Host:** research and analysis on the workstation; failure observations from the Heliotrope Ridge
 bench earlier the same day. **Commit:** documented at the commit carrying this entry.
@@ -271,10 +289,11 @@ bench earlier the same day. **Commit:** documented at the commit carrying this e
 
 ### Observation
 
-Four GPIO pads have died across four RAK4631 cores on this project. In every case the dead pad was
-**the pad carrying the RAK9154 one-wire link** — `IO1` (P0.17) on three cores, `A1` (P0.31) on the
-fourth. Pads on the same cores that were never connected to the pack (`A0`, `SCL`) remained
-healthy, and `SDA` (P0.13), connected 2026-08-30, works.
+**Count corrected: seven GPIO pads across two RAK4631 cores** — four on node 002's current core,
+three on its predecessor (the "four cores" in the original text was wrong). In every case the dead
+pad was **the pad carrying the RAK9154 one-wire link**. Pads on the same cores never connected to
+the pack (`A0`, `SCL`) remained healthy. `SDA` (P0.13) is listed below as working; **it died later
+the same day**, which is what took the count to seven.
 
 A dead pad reads permanently LOW as an input and measures ~3.9 Ω to ground. The rest of each chip
 kept working.

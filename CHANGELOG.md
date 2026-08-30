@@ -8,15 +8,63 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Added
+
+- **The boot banner now names why the node reset.** `RESETREAS` was read and everything except
+  the watchdog bit discarded, so a reset was anonymous and its cause had to be inferred from
+  frame-counter arithmetic afterwards. That inference was wrong repeatedly on 2026-08-30:
+  uniform `+32` counter steps were read as a failing node when they were the `kCounterMargin`
+  signature of resets caused by **a console attach**, three times out of three. All nine bits
+  are decoded now, and an all-zero word is the load-bearing case — `RESETREAS` is cleared by a
+  power-on reset, so no bits set means the rail dropped, which is otherwise indistinguishable
+  from a healthy first boot.
+- **`scripts/owscope.py` measures the one-wire line with a Saleae Logic instead of inferring
+  it.** From the node's side, `no reply, 0 bytes` is the same output for three different
+  faults: a pack that never spoke, a pack that spoke below the pin's input-high threshold, and
+  a damaged pin. Three sessions argued between them from that one string. The script drives
+  Logic 2's automation server and reports edge count, resting analog level against the 2.31 V
+  VIH, and shortest pulse width as a baud check. Analog rather than digital deliberately — a
+  digital capture thresholds away the quantity in question. Logic 2's MCP server is also usable
+  directly; see `docs/HARDWARE.md`.
+
+### Fixed
+
+- **`3V3_S` is now held up while the one-wire data line runs through the RAK5802.** When the
+  pack's data line enters via the module's SDA spring terminal, it passes through a module on
+  the switched rail. The cycle reads the RK900 first, and `RK900::power_off()` drops `WB_IO2`
+  and never raises it, so `Battery::read()` was driving 3.3 V into an unpowered module every
+  cycle. A scope guard, not paired calls, because `read()` returns from several places and
+  forgetting one leaves the RAK5802 powered through sleep — about a milliamp, which dominates
+  the budget at an hourly cadence. **This is not the explanation for the destroyed pads**: the
+  SDA routing postdates two of the failures by roughly twelve hours, and A1 died with the wire
+  on the always-on header. Fixed because driving a signal into an unpowered module is wrong on
+  its own terms.
+
 ### Changed
 
-- **Battery one-wire moves from damaged `IO1` to the free `A1` pad.** Bench isolation found
-  IO1 held at ~9.6 mV powered and ~3.86 Ω to ground unpowered on all available cores, while an
-  empty baseboard was open and A1 measured ~45 kΩ. Two baseboards, removing RAK5802, and
-  removing the battery harness did not change the result. `WB_A1` maps to nRF P0.31 and is
-  unused; IO2 is not available because it controls the RAK5802 `3V3_S` power rail. This remains
-  hardware-unverified until `owscan`, `battdiag`, and the full image pass on A1.
-  ([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96))
+- **Battery one-wire moved `IO1` → `A1` → `SDA`, and none of those pads survived.** The
+  previous entry here recorded the move to `A1` as a fix; it was not. **Seven GPIO pads have
+  now been destroyed across two cores** — four on the core currently in node 002, three on its
+  predecessor — and every one was the pin carrying the pack's data line at the time. A 1 kΩ
+  series resistor was inline when `SDA`/P0.13 died, so **series resistance is refuted as
+  sufficient protection**, and node 002's harness has been replaced three times, so the harness
+  is not the constant either.
+
+  Critically, `src/sensors/battery.cpp` is **unchanged since `1c2df3c` (v0.4.3)** — the image
+  running without incident on node 001 in the field. The push-pull `pinMode(tx, OUTPUT)` in
+  `SoftwareHalfSerial::setTX()`, the four wake bytes, the provisioning ladder and the `0x55`
+  timing sweeps are common to both nodes, which refutes every firmware explanation for the
+  divergence, including the bus-contention theory raised and discarded during the session.
+  **The cause is unestablished**, and the remaining untested variables are node 002's pack and
+  the bench procedure of attaching a host USB cable while the pack is live.
+  ([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96),
+  [#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102))
+- **Node 002 works as a wind-only node.** On the SDA field image it reads the RK900
+  (`0.00 m/s, 26.3 °C, 43.7 %RH, 1007.8 hPa`), transmits 20 bytes on port 2, and closes the
+  cycle on a normal sleep. Battery telemetry on this core is finished — the pads are gone.
+- **The interval floor is 900 s and downlinks below it are correctly refused.** Recorded
+  because an afternoon was spent wondering why the cadence never changed:
+  `config : rejected interval 300 s (allowed 900-86400)`.
 
 ## [0.4.4] — 2026-08-28
 

@@ -178,10 +178,28 @@ terminal, so both are solder joints.
 
 ### THE RULE THAT SAVES PINS — connector sequencing
 
-**Cause established 2026-08-30.** Four dead pads across four cores, and in every case the dead pad
-was the pad carrying the pack. The mechanism is not the protocol and not `owscan`; it is that
-**the pack's data line is live while the core has no power.** Nordic states the limit and the
-consequence [CIT-NRF-BACKPOWER]:
+**CAUSE NOT ESTABLISHED. This section previously claimed it was, and that claim was wrong.**
+
+**Seven dead pads across two cores** as of 2026-08-30, and in every case the dead pad was the one
+carrying the pack's data line. That correlation is solid. The mechanism is not
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+
+Three things refute the explanation that used to stand here:
+
+- **The pads fail shorted to *ground*.** Back-powering conducts through the pad's *upper* ESD
+  diode, which would leave a pin shorted to *VDD*. Nordic's own thread raises this objection and
+  leaves it open [CIT-NRF-PINSHORT]. Every pad measured here reads short to ground.
+- **A 1 kΩ series resistor was inline when `SDA`/P0.13 died.** The current-limiting argument below
+  predicted that would be survivable. It was not.
+- **Node 002's harness has been replaced three times**, so the harness is not the constant, and
+  `src/sensors/battery.cpp` is unchanged since the image running without incident on node 001 —
+  so no firmware difference explains it either.
+
+The sequencing rule below is still worth following, and the reasoning that produced it is
+recorded here because it is sound physics even though it has not been shown to be *this* failure.
+What it is **not** is a proven fix.
+
+Nordic states the limit and the consequence [CIT-NRF-BACKPOWER]:
 
 > "Max voltage on any GPIO is VDD + 0.3 V. Meaning that for an **unpowered** device, max GPIO
 > voltage is **0.3 V**. Any voltage above this level will make the ESD protection diode conduct and
@@ -190,48 +208,165 @@ consequence [CIT-NRF-BACKPOWER]:
 The pack idles its data line at a level referenced to `3V3_In` and has no idea whether the core is
 powered. So an unpowered core with the harness mated sees ~3.3 V on a 0.3 V maximum, and the
 current goes in through the pad's ESD diode. Nordic's word for the result is "the high current flow
-can permanently damage the pin" [CIT-NRF-PINSHORT] — which is the ~3.9 Ω-to-ground signature
-measured on all four.
+can permanently damage the pin" [CIT-NRF-PINSHORT]. The measured signature here is ~3.9 Ω to
+ground — note again that this is the *wrong direction* for that mechanism, which is the single
+strongest reason not to treat it as settled.
 
-**Why this bites this build in particular:** the buck powers the core *through the USB-C connector*,
-so the buck and a host cable are mutually exclusive. Every swap between bench and pack power
-therefore contains a window with the core dark and the harness mated. Node 002 went through that
-window a dozen times in one day of bring-up. Node 001 was wired once and deployed, and has never
-been through it — that is the entire difference between them.
+**The one difference between the two nodes that survives scrutiny:** the buck powers the core
+*through the USB-C connector*, so the buck and a host cable are mutually exclusive. Every swap
+between bench and pack power therefore contains a window with the core dark and the harness mated.
+Node 002 went through that window a dozen times in one day of bring-up. Node 001 was wired once
+and deployed, and has never been through it.
 
-> **Order of operations. Follow it every single time.**
->
-> | Going to bench USB | Going to pack / buck |
-> |---|---|
-> | 1. **Unmate the pack connector first** | 1. **Connect the buck first** |
-> | 2. Then remove buck power | 2. Then mate the pack connector |
-> | 3. Then plug in host USB | 3. Then confirm the boot banner |
->
-> The pack connector is mated **last** and unmated **first**. Always.
+That makes the bench procedure the best-supported remaining suspect — the pack itself being the
+other, since 002's pack has never been swapped. Both are untested. Neither is a conclusion.
 
-Hot-plugging is the same hazard with a worse edge: on a mating connector the pins touch in an
-unpredictable order, and wire inductance during the plug can break down the clamp diode on its own
-[CIT-NRF-UNPOWERED-PIN].
+### THE GROUND IS THE PROBLEM — two conductors, first to mate, last to break
 
-### REQUIRED — the one-wire protection network
+**This is the mechanism that fits the measured signature, and it is sourced rather than reasoned.**
 
-The sequencing rule above is the fix. This resistor is the **insurance against forgetting it**,
-and it is worth fitting precisely because the rule will eventually be forgotten at 9 p.m. with
-cold hands.
+Every dead pad reads short to **ground**. Nordic's own engineers hit this exact signature on this
+exact chip and state that it requires one of only two conditions — and note that back-powering
+gives the *opposite* result:
 
-Nordic's damage mode is **current** through the ESD diode, not voltage across it
-[CIT-NRF-BACKPOWER]. A bare wire limits that current only by the diode's own resistance. **1 kΩ
-bounds it to about 3 mA**, which the pin survives indefinitely — so the resistor converts a
-sequencing mistake from fatal into a non-event
-([`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
-[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+> "If diode current would be exceeded it could short SWDIO **to VCC and not to GND** which happens
+> in our cases... We were unable to figure out how **a negative voltage could be applied to the
+> SWDIO pin (or ground lifted above SWDIO)**"
 
-**The whole build is one resistor.** Put a 1 kΩ resistor inline in the pack's data wire and land
-it in the RAK5802's `SDA` spring clip. That is it. Nothing is soldered to the board.
+[CITE(prior-art): Nordic DevZone 73811 — nRF52840 pins failing short to GND, and the direction problem stated by Nordic](https://devzone.nordicsemi.com/f/nordic-q-a/73811/swdio-pin-shorted-to-ground)
 
-The series resistor is the part that actually saves the pin: it limits the current into P0.13 in
-every failure mode at once — a stuck driver, a hot-plug transient, a miswire onto the 12 V rail —
-without needing to know which one killed the last four. Fit it on **every** node.
+And there is a documented cause with precisely that shape, for UART pins between two boards on
+this same part:
+
+> "Poor connections between the PCBs and the cable, **especially the GND pin. If the GND pin
+> becomes disconnected, then the entire current consumed by the nRF52840 has no other way but the
+> TX/RX pins.** Again, the connectors may be good enough to pass your test, but will fail in the
+> environment due to vibration."
+
+[CITE(prior-art): electronics.stackexchange 661745 — ground loss makes a data pin the chip's return path, and the redundant-ground remedy](https://electronics.stackexchange.com/questions/661745/possible-esd-damage-on-uart-pins-between-nrf52840-and-atmega1284p)
+
+**If the ground return is interrupted for even an instant, the core's whole supply current comes
+home through the data pin.** That is tens of milliamps through a pad rated for a few, and it is
+indifferent to which pad you chose — which is why moving `IO1` → `A1` → `SDA` changed nothing,
+why identical firmware is fine on node 001, and why **three harness replacements did not help: each
+new harness rebuilt the same single hand-made ground junction.**
+
+The same source names the fix, and it is not a resistor:
+
+> "running the GND via **both pin 1 and pin 8** of the cable will help. This configuration would
+> ensure that **GND is the first line to make contact (or the last line to lose contact)** even if
+> the connector becomes tilted sideways."
+
+So: **two independent ground conductors, and ground that mates first and breaks last.**
+
+```mermaid
+flowchart TB
+    subgraph PACK["RAK9154 pack — SP11 connector"]
+        P1["pin 1 — P+ 12 V"]
+        P2["pin 2 — P−"]
+        P35["pins 3+5 — data"]
+        P4["pin 4 — 3V3_In"]
+    end
+
+    J["ground junction at the connector<br/>SOLDERED, then heat-shrunk<br/>never a twist or a clip"]
+
+    subgraph NODE["node"]
+        GND1["base-board GND pad<br/>GROUND A"]
+        GND2["RAK5802 GND clip<br/>GROUND B — redundant"]
+        SDA["RAK5802 SDA clip<br/>= nRF P0.13"]
+        VDD["base-board VDD pad"]
+    end
+
+    BUCK["12 V→5 V buck"]
+    RK["RK900"]
+
+    P1 --> BUCK
+    P1 --> RK
+    P2 --> J
+    J --> GND1
+    J --> GND2
+    J --> BUCK
+    J --> RK
+    P35 -->|"1 kΩ inline"| SDA
+    P4 --> VDD
+
+    style J fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+    style GND1 fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+    style GND2 fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+    style SDA fill:#fff3cd,stroke:#b8860b,stroke-width:2px
+```
+
+**Two green paths, not one.** `GROUND A` and `GROUND B` are separate wires from the junction to two
+separate points on the node. Losing either one leaves the other carrying the return, so the data
+pin never becomes the backup.
+
+The red junction is the part that has failed seven times. It must be **soldered and heat-shrunk**,
+never a twist, never a spring clip alone. A clip holding one conductor of a four-way junction is
+the exact "connector good enough to pass your test" the source warns about.
+
+### EXPLICIT ASSEMBLY ORDER
+
+Ground first, ground last. No exceptions, no shortcuts, and never two power sources at once.
+
+**Building a node from parts:**
+
+1. Make the pack-side ground junction: pack pin 2, buck negative, RK900 negative, and **two**
+   separate wires for `GROUND A` and `GROUND B`. **Solder it. Heat-shrink it.**
+2. Land `GROUND A` on the base-board `GND` pad.
+3. Land `GROUND B` in the RAK5802's `GND` spring clip.
+4. **Verify both grounds before anything else:** meter continuity from pack pin 2 to the base-board
+   `GND` pad, then to the RAK5802 `GND` clip. Both must read a dead short. If either is open or
+   intermittent, stop — this is the failure that costs pads.
+5. Pack pin 4 → base-board `VDD` pad.
+6. Pack pin 1 → buck input positive, and → RK900 12 V.
+7. RK900 `A` and `B` → RAK5802 `A/RX` and `B/TX`.
+8. Pack data (pins 3+5 joined) → 1 kΩ inline → RAK5802 `SDA` clip. **This wire goes on last.**
+9. Census the pad before trusting it: flash `env:owscan_sda` and confirm idle **HIGH**. A pad that
+   reads LOW here is already gone; do not proceed.
+10. Only now apply power.
+
+**Switching a built node from pack power to bench USB:**
+
+1. **Unmate the pack connector.** First. Always.
+2. Remove buck power.
+3. Plug in host USB.
+
+**Switching from bench USB back to pack power:**
+
+1. Unplug host USB.
+2. Connect the buck.
+3. Confirm the boot banner.
+4. **Mate the pack connector last.**
+
+**Never do these:**
+
+- Never have the host USB cable connected while the pack is mated. The buck feeds the core through
+  the USB-C connector, so the two supplies are mutually exclusive by design — and every node that
+  has lost a pad was repeatedly put in this state, while node 001, which never has been, is intact.
+- Never hot-plug the pack connector on a live node. On a mating connector the pins touch in an
+  unpredictable order, and wire inductance during the plug can break down the clamp diode by itself
+  [CIT-NRF-UNPOWERED-PIN].
+- Never move the data wire to a fresh pad without running the census in step 9 first.
+
+### The one-wire series resistor — fit it, but do not trust it
+
+**This section used to be titled "REQUIRED — the one-wire protection network" and claimed the
+series resistor "actually saves the pin". A 1 kΩ resistor was inline when `SDA`/P0.13 died, so
+that claim is refuted by measurement and has been removed
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).**
+
+The reasoning was: Nordic's damage mode is **current** through the ESD diode rather than voltage
+across it [CIT-NRF-BACKPOWER], a bare wire limits that current only by the diode's own resistance,
+and 1 kΩ bounds it to roughly 3 mA. That arithmetic is still correct. What it evidently does not
+cover is whatever actually killed these pads — which is consistent with the failures being short
+to ground rather than the back-powering the arithmetic was aimed at.
+
+**Still fit it.** It costs one part, it cannot hurt, and it does bound the failure modes it was
+designed for. Put a 1 kΩ resistor inline in the pack's data wire and land it in the RAK5802's
+`SDA` spring clip; nothing is soldered to the board for this.
+
+**Do not treat a fitted resistor as permission to skip the sequencing rule**, and do not record a
+node as protected because it has one. Seven pads say otherwise.
 
 | Ref | What | Value | Suggested part |
 |---|---|---|---|
@@ -262,7 +397,7 @@ side only [CIT-RAK5802].
 
 **Land the pack's data wire in the RAK5802's `SDA` spring terminal.** It is the same net as the
 pad, and it is better in three ways: no soldering, trivial rework, and it keeps you entirely off
-the 2.54 mm header row where all four dead pads have been.
+the 2.54 mm header row where all seven dead pads have been.
 
 > **Trap — do not use the RAK5802's `3V3` terminal for anything.** That terminal sits on the
 > switched `3V3_S` rail, and `src/sensors/rk900.cpp` deliberately drops `WB_IO2` LOW after each
@@ -421,7 +556,9 @@ else is a spring clip. Pin 4 cannot use a clip because the module's `3V3` clip s
 mid-cycle and its `BAT` clip is the wrong voltage and an output.
 
 1. **Power everything down.** USB unplugged, pack connector unmated. Nothing energised while a
-   wire is being moved — see the hot-plug rule below, it is the one mechanism that fits all four
+   wire is being moved — see the hot-plug rule below. It fits the correlation across all seven,
+   but it predicts a short to VDD and every measured pad reads short to ground, so it is a
+   candidate and not the answer (#102)
    dead pads.
 2. **At the pack connector, join pins 3 and 5.** One wire leaves that junction. That is the data
    line.

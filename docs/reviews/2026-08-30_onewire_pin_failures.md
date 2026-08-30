@@ -1,5 +1,16 @@
 # Why the one-wire GPIO keeps dying — design review, 2026-08-30
 
+> **Superseded in part, 2026-08-30 (later).** The count is **seven pads across two cores**, not
+> five across four. The verdict below — back-powering an unpowered core — is **retracted as the
+> established cause**: it predicts a pin shorted to VDD, and every measured pad reads short to
+> ground [CIT-NRF-GNDLIFT]. The 1 kΩ series resistor recommended below was inline when `SDA`/P0.13
+> died, so it is refuted as sufficient protection. The mechanism that matches the signature is loss
+> of the ground return making the data pin carry the core's supply current [CIT-NRF-GNDLOSS], and
+> that is a candidate, not a conclusion. See
+> [#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102) and
+> the assembly order in [`../HARDWARE.md`](../HARDWARE.md). The analysis below is kept because its
+> refuted branches are worth not re-deriving.
+
 Five pads across four cores have now been declared dead on the RAK9154 one-wire link. This
 review asks the only question worth asking: is the design doing this, or is it bad luck?
 
