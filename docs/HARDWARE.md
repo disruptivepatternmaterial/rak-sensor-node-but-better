@@ -711,11 +711,22 @@ Seven GPIO pads are dead across two cores, every one the pad carrying this data 
 gating measurement is in [`EVIDENCE.md`](EVIDENCE.md), fitting another core to this harness spends
 hardware to re-learn something already known.
 
-**The measurement that clears it, and has not been taken:** an analyzer channel on each side of the
-1 kΩ series resistor while the node transmits. The difference divided by 1 kΩ is the contention
-current, directly. Under 1 mA and the contention hypothesis is dead; around 3 mA and it stands. It
-needs a flashable core, which is blocked on
-[#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95).
+**This line has been instrumented, and the pack side is cleared.** Do not read the stop above as
+"nothing is known". Measured 2026-08-30 with the Saleae Logic Pro 8 ([`EVIDENCE.md`](EVIDENCE.md)):
+the pack actively drives its end at **+3.3118 V idle** and **+0.0867 V driven low**, with **9,520
+edges in 57 s** — never out of pad spec, and with no 12 V bridge to the data line anywhere in the
+harness. The announcement frame was decoded off the wire at 9600 8N1. The pack alone is harmless.
+
+**Nor is the harness the sole suspect.** `A1` died against two different harnesses *and* with the
+harness removed entirely and the RAK5802 pulled, and node 001 — same parts order — reads its pack
+on `IO1` in the field and is alive. What correlates is the pad carrying this data line, not any one
+harness.
+
+**The one measurement still missing is our own end while transmitting:** an analyzer channel on
+each side of the 1 kΩ series resistor during a transmit. The difference divided by 1 kΩ is the
+contention current, directly. Under 1 mA and the contention hypothesis is dead; around 3 mA and it
+stands. That figure has only ever been arithmetic, never a reading. It needs a flashable core, which
+is blocked on [#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95).
 
 Once — and only once — that measurement is recorded, `env:battdiag_sda` is the right tool to ask
 whether the pack works: it is the production driver at roughly 14 bytes per cycle, not a census.
