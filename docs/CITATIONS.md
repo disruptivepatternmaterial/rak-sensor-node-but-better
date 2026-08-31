@@ -173,8 +173,8 @@ sleeping."**
 _Status: **the stated mechanism is false**, and false on RAK's own BSP. Established 2026-08-12 by
 reading the core's source. Acted on in `094d5f5` (`FEATURE_CONSOLE=0` in the field image) and
 **reverted the same day** — see
-[ADR-0008](decisions/ADR-0008-console-in-the-field-image.md) and
-[`reviews/2026-08-12_console_sleep_question.md`](reviews/2026-08-12_console_sleep_question.md)._
+[ADR-0008](decisions/ADR-0008-console-in-the-field-image.md), which is now the whole record;
+the working review that preceded it has been deleted._
 
 | Claim | What the primary source says | Counter-citation |
 |---|---|---|

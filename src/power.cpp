@@ -245,11 +245,9 @@ void sleep_seconds(uint32_t seconds)
     // case worse off than the deployment it is meant to protect. Unattended, there is no
     // host to disconnect, so the saving is taken.
     //
-    // The whole block is inside FEATURE_CONSOLE now. It was not: the detach below sat outside
-    // the guard while the matching attach and the Adafruit_TinyUSB include sat inside it, so a
-    // FEATURE_CONSOLE=0 build did not compile. Nothing set that flag to 0 until the field
-    // environment below started doing exactly that, which turned a latent break into a live
-    // one. Refs docs/reviews/2026-08-12_adversarial_review.md.
+    // The whole block must stay inside FEATURE_CONSOLE: the detach below once sat outside the
+    // guard while the matching attach and the Adafruit_TinyUSB include sat inside it, so a
+    // FEATURE_CONSOLE=0 build did not compile.
     const bool console_in_use = (bool)Serial;
 
     // The grace window is checked here rather than folded into console_in_use because the two

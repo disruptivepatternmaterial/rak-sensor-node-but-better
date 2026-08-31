@@ -4,6 +4,153 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-30 (sixth) — node 002's silent core takes the field image over SWD and RUNS it
+
+**Host:** Heliotrope Ridge. **Probe:** CMSIS-DAP-MuseLab, serial
+`07000001006900394e00000956304750a5a5a5a597969908`, USB `0D28:0204`. **Tool:** OpenOCD
+0.12.0-01004 (xPack) from `~/.platformio/packages/tool-openocd`, adapter speed 1000 kHz.
+**Commit:** `b7e6e92`. **Image:** `env:rak4631` — the field image, application only, no
+bootloader or SoftDevice written.
+
+**Core: NOT IDENTIFIED.** No die ID was captured, so this entry cannot be matched to a physical
+part, and it does **not** assert which core this was. `FICR.DEVICEID` was attempted twice
+afterwards and both attempts failed at `Error connecting DP: cannot read IDR` — see "the
+identity gap" below. It was a core reachable over SWD from this build host on this date, and
+that is the whole of the identity claim. Per
+[`03-bench-claims.mdc`](../.cursor/rules/03-bench-claims.mdc), "the replacement core" is not an
+identifier and neither is "the silent one".
+
+**What was attached is unknown and not claimed.** Nothing was inspected on the sensor side, so
+this entry makes no statement about the RK900, the RAK9154, the harness, or the antenna — not
+even that they were absent.
+
+### Observation — programmed, verified, and executing
+
+Flash 211,972 bytes (26.0% of 815,104), RAM 25,052 (10.1%). One OpenOCD session, no reset
+between connect and program:
+
+```
+Info : SWD DPIDR 0x2ba01477
+Info : [nrf52.cpu] Cortex-M4 r0p1 processor detected
+xPSR: 0x21000000 pc: 0x000fb702 msp: 0x2003ffd0     <- BEFORE: bootloader region
+** Programming Started **
+Info : nRF52840-xxAA(build code: D0) 1024kB Flash, 256kB RAM
+Warn : Adding extra erase range, 0x00059c04 .. 0x00059fff
+Warn : no working area available, falling back to slow memory writes
+** Programming Finished **
+** Verify Started **
+** Verified OK **
+```
+
+Then `reset run`, 500 ms, `halt`:
+
+```
+pc (/32): 0x00050a42                                 <- AFTER: application region
+```
+
+**The program counter moved from `0x000FB702` to `0x00050A42`.** Before the flash the core sat
+in the bootloader (`>= 0xF4000`); after it, it is executing inside the application
+(`0x26000 .. 0x59C04`, the range OpenOCD just wrote and verified). This is the first time an
+application built by this project has been placed on a core over SWD and observed running.
+
+The `no working area available` warning is the documented procedure working as intended, not a
+fault: `configure -work-area-size 0` denies OpenOCD the RAM scratch area so it writes words
+directly through the debug port instead of executing a loader on the target.
+
+A second, read-only session seven minutes later re-verified the image — `verified 211972 bytes
+in 4.458219s` — and found the core **already halted at `0x00050A42` on attach, before any reset
+was issued**. So the application is not merely reached once out of reset; it is still executing
+there minutes later. That is a stronger result than a single post-reset sample and is the reason
+this entry claims "runs" rather than "starts".
+
+### Observation — the flash contents, read rather than assumed
+
+Every address below was read over SWD in the same session. The previous entry on this core
+explicitly listed these as *queued and never read*; they are now read.
+
+| Address | Value | Reading |
+|---|---|---|
+| `0x10001014` | `0x000F4000` | UICR `NRFFW[0]` — bootloader pointer, correct |
+| `0x10001018` | `0x000FE000` | UICR `NRFFW[1]` — MBR params, correct |
+| `0x10001208` | `0xFFFFFFFF` | UICR `APPROTECT` unprogrammed — hardware protection not armed |
+| `0x00000000` | `0x20000400`, `0x00000A81` | MBR vector table present and plausible |
+| `0x00003000` | `0x2C` (low byte) | SoftDevice info struct size = 44 bytes |
+| `0x00003008` | `0x00026000` | `SD_SIZE` — SoftDevice extent, and the application start it implies |
+| `0x0000300C` | `0x00B6` (low half) | **`SD_FWID` = `0x00B6` = S140 6.1.1** |
+| `0x00026000` | `0x20040000`, `0x00050B2D` | application vector table, freshly written |
+| `0x000F4000` | `0x20040000`, `0x000FB26D` | bootloader vector table intact |
+
+`SD_FWID 0x00B6` is an **exact match** for `build.softdevice.sd_fwid` in
+`rakwireless/boards/rak4630.json`, so the SoftDevice resident on this core is precisely the one
+this build targets. The info struct sits at `0x3000` because Nordic places it at
+`SOFTDEVICE_INFO_STRUCT_OFFSET (0x2000) + MBR_SIZE (0x1000)` — read from the vendored header,
+not assumed.
+
+### What this retires
+
+**"A core that answers SWD but not USB is a dead chip" is finished as a hypothesis** — for
+whichever core this was. The earlier entry established only that SWD answered; this one
+establishes that the part accepts a write, verifies it, and then *executes* it. A damaged part
+does none of that. Bootloader, MBR, SoftDevice and UICR pointers are all present and correct,
+so this core is not software-bricked either — nothing is missing from flash.
+
+Scope that deliberately: it retires the hypothesis for **a** core, not for node 002 by name,
+because the identity was never captured.
+
+### The identity gap, and why it is not closed
+
+Immediately after the flash, `FICR.DEVICEID` at `0x10000060` was read twice to capture a die ID.
+Both attempts failed the same way:
+
+```
+Info : CMSIS-DAP: Interface ready
+Info : clock speed 1000 kHz
+Error: Error connecting DP: cannot read IDR
+```
+
+The second attempt added `reset_config srst_only srst_nogate connect_assert_srst`, the option
+that recovered a connection earlier the same day, and failed identically. Retries stopped at two
+per [`00-agent-liveness.mdc`](../.cursor/rules/00-agent-liveness.mdc).
+
+**The probe is not the suspect.** It initialised fully on both attempts — firmware version 2.1.0,
+serial, and line states `SWCLK/TCK = 1 SWDIO/TMS = 1 nRESET = 1` — so the failure is at the
+target end of the wires, not in the adapter. This is the same signature already recorded on this
+bench: one good connection followed by identical failures with no software change in between,
+which points at marginal probe contact rather than at a part that died in the interval. Note that
+the successful program-and-verify came *first* and the failures came after, so nothing here casts
+doubt on the write.
+
+**Consequence for the ledger:** future entries on this core cannot be chained to this one. Any
+session that gets a stable connection should read `mdw 0x10000060 2` before anything else and
+record it, so the results accumulated on this part stop being unattributable.
+
+### What this does NOT establish
+
+- **No board-asserted SHA.** There is no serial banner here, so `b7e6e92` is asserted by the
+  build and DFU inputs and by OpenOCD's own verify — not read back from the board.
+- **Nothing about USB.** There was **no `239A` device on the bus before the flash and none
+  after it**; the only devices present were the CMSIS-DAP probe and the Logic Pro 8. What this
+  does settle is the direction of the question: USB silence on this core is **not** explained by
+  a missing or invalid application, because the application demonstrably runs.
+- **No sensor, radio, join, uplink, or sleep claim.** Nothing on the sensor side was inspected
+  and nothing was captured, so this says nothing about what is or is not connected. The H1–H8
+  gates are untouched by this entry and the status stays `🚧 NOT YET DEPLOYED`.
+- **Which physical core this was.** See "the identity gap" above.
+
+CITE(prior-art): [CIT-OPENOCD-NRF5] — the `work-area-size 0` fallback to direct NVMC writes
+(`nrf5.c:1143-1145`) that the `no working area available` warning reports.
+CITE(datasheet): [CIT-NRF-APPROTECT] — why `UICR.APPROTECT = 0xFFFFFFFF` is the open state, and
+why no reset was issued between connect and program.
+CITE(datasheet): [CIT-RAK-BOOTLOADER] — the RAK4631 ships bootloader V0.4.4 paired with
+SoftDevice **S140 6.1.1**, which is what `SD_FWID 0x00B6` decodes to here.
+CITE(prior-art): `framework-arduinoadafruitnrf52` @ `cores/nRF5/nordic/softdevice/s140_nrf52_6.1.1_API/include/nrf_sdm.h:99-115`
+on the build host — `SOFTDEVICE_INFO_STRUCT_OFFSET 0x2000`, `SD_SIZE_OFFSET +0x08`,
+`SD_FWID_OFFSET +0x0C`, which is how the words above were located and decoded.
+CITE(bench): transcript preserved at `~/rak-swd-logs/20260830_b7e6e92_swd_flash.log` on the build
+host — the read-only re-verify session, which returned `verified 211972 bytes in 4.458219s`
+against the same `.pio/build/rak4631/firmware.hex`, plus the flash census reproduced word-for-word
+in the table above. Commit `b7e6e929550b8d085915aff21eaf5bb07624edb5`.
+
 ## 2026-08-30 (fifth) — the pack's announcement frame decoded off the wire: it broadcasts unprompted, and identifies as "RAK2560-io"
 
 **Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8 `AF11F852CEC20A9`, capture 15,
@@ -802,8 +949,9 @@ reading on this image, a board-asserted banner SHA, and sleep current.
 
 #### Why the pads failed: still unknown, and six hypotheses are dead
 
-Recorded so none of them is re-derived. Full reasoning in
-[`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md).
+Recorded so none of them is re-derived. The review that held the long-form reasoning was
+retracted and then deleted — it had the pad count and the mechanism both wrong, so the table
+below is now the record rather than a summary of one.
 
 | Hypothesis | Status |
 |---|---|

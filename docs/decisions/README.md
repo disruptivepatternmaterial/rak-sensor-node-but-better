@@ -8,7 +8,7 @@ better than the git log.
 
 Write an ADR when a choice:
 
-- closes one of the open decisions in [`../../plans/P0_HARDENED_NODE.md`](../../plans/P0_HARDENED_NODE.md);
+- closes an open decision from the issue tracker;
 - resolves a **conflict between sources** (rule 20 requires this — never silently pick a winner);
 - changes the payload contract, the wiring, or the LoRaWAN parameters;
 - would otherwise be re-litigated every time someone new reads the code.
@@ -40,7 +40,9 @@ Every ADR carries citations to the same standard as code (rule 20).
 
 ## Open decisions not yet ADR'd
 
-Carried in [`../../plans/P0_HARDENED_NODE.md`](../../plans/P0_HARDENED_NODE.md), to be
-resolved in the first firmware PR: BMS path (4-pin Modbus + baud switch vs 5-pin one-wire),
-enclosure choice, Probe IO junction, Arduino WisBlock-API-V2 vs RUI3, and TTN application
-reuse.
+Tracked as GitHub issues. The BMS path and the framework choice are both closed (ADR-0004,
+ADR-0003); what remains open is enclosure and cable entry
+([#20](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/20),
+[#21](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/21)) and
+the buck choice
+([#2](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/2)).

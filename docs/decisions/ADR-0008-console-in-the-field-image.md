@@ -28,9 +28,10 @@ predicted saving was stated as milliamps against a budget in microamps.
 
 The change was made on cited authority and never measured. Issue #56 was opened to meter it,
 and while writing that issue the premise was doubted, because the Adafruit core appeared to
-initialize USB before `setup()` regardless of the sketch. That doubt was then settled by
-reading the sources rather than the narrative:
-[`docs/reviews/2026-08-12_console_sleep_question.md`](../reviews/2026-08-12_console_sleep_question.md).
+initialize USB before `setup()` regardless of the sketch. That doubt was then settled by reading
+the Adafruit core's sources rather than the narrative, and the finding is recorded in the Decision
+and Consequences below — this ADR is the durable record, and the working review it came from has
+been deleted.
 
 ## Decision
 

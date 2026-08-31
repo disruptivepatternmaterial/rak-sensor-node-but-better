@@ -140,86 +140,13 @@ constexpr uint8_t kBroadcastId = 0xFF; // PID_UNKNOW — where an un-provisioned
 constexpr uint8_t kPldBoot         = 0x02; // PLD_PROVI_TYPE_BOOT
 constexpr uint8_t kPayloadSendData = 0x02; // PLD_SDATA_TPYE_SENDAT
 
-// The per-sensor sampling rule, which is the thing this revision is here to reach.
-//
-// A provisioned probe still needs each of its sensors switched from RULE_DISABLE to
-// RULE_PERIODIC before it samples anything; until then it answers a SENDAT with a
-// well-formed record set full of placeholder zeros, which is precisely the production
-// symptom. The reference exposes exactly one call for this — set.param(pid, sid, enable,
-// intv) — and it is addressed per *sensor id*, not per probe: the sid goes in payload[0]
-// and one request carries one sid.
-//
-// PLD_PARMGSET_TYPE_SNSR_UPDATE is the only payload type the reference's parameter command
-// will emit; every other member of PLD_PARMGSET_TYPE_E falls through to `return RET_ERROR`,
-// so RULE (0x03) — the one that reads like the obvious choice — is not actually reachable
-// and must not be used.
+// Sampling rules, read out of the descriptor a provisioned pack reports. The parameter-write
+// phase that would have *set* them is deleted (see below), so only the rule values remain.
 //
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h —
-//   SNHUB_TYPE_PARAMSET = 2 and SNHUB_TYPE_PARAMGET = 5 in SNHUBAPI_TYPE_E;
-//   PLD_PARMGSET_TYPE_E { PRB_INTV = 0x1, SNSR_INTV, RULE, SNSR_HTHR, SNSR_LTHR,
-//   PRB_TAGID, PRB_TAGEN, PRB_UPDATE, SNSR_UPDATE = 0x9, CONF_UPDATE };
 //   RULE_DISABLE 0x00 and RULE_PERIODIC 0x08.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
-//   api_set_snsr_param(pid, sid, enb, intv): `menu.intv = intv; menu.rule = (enb == 0) ?
-//   RULE_DISABLE : RULE_PERIODIC;` then snhub_paramget_command(pid, sid, SNHUB_GS_SET,
-//   PLD_PARMGSET_TYPE_SNSR_UPDATE). That command sets hub_api->type = SNHUB_TYPE_PARAMSET,
-//   payload_length = sizeof(SNHub_Api_Param_Snsr_t), payload[0] = sid, and only then fills
-//   paramset->intv / paramset->rule — so the sid byte and the struct's `sid` field are the
-//   same byte, and the addressing is per sensor.
-constexpr uint8_t  kPldParamSnsrUpdate = 0x09; // PLD_PARMGSET_TYPE_SNSR_UPDATE
-constexpr uint16_t kRuleDisable        = 0x0000;
-constexpr uint16_t kRulePeriodic       = 0x0008;
-
-// SNHub_Api_Param_Snsr_t, ATT_PACKED: sid(1) intv(4) rule(2) thr_above(10) thr_below(10)
-// tag(16) = 43. The widths and order are the struct's, not a guess, and the total is what
-// the reference puts in payload_length — so getting it wrong fails the pack's own
-// verify_snhublen() and draws silence rather than a diagnosable error.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h
-//   SNHub_Api_Param_Snsr_t { U8 sid; U32 intv; U16 rule; U8 thr_above[10];
-//   U8 thr_below[10]; U8 tag[16]; } ATT_PACKED; onewire_master_protocol.c
-//   verify_snhublen() requires rui3_len == payload_length + sizeof(SNHub_Api_t).
-constexpr size_t kParamSid   = 0;
-constexpr size_t kParamIntv  = 1;
-constexpr size_t kParamRule  = 5;
-constexpr size_t kParamBytes = 43;
-
-constexpr uint32_t kParamIntvMax     = 86400;
-
-// How long to wait for the pack to acknowledge a parameter write, and how many times to
-// repeat it.
-//
-// Sized to RAK's own budget, not to the reference library's. The reference leaves
-// `protocol_list[SNHUB_TYPE_PARAMSET]` with both `.req` and `.rsp` NULL, which reads as "expects
-// no response" and invites a drain of a few milliseconds — but RAK's tooling treats a
-// probe-configuration write as a request that must be *acknowledged*, allowing 3000 ms and three
-// attempts. A short drain cannot observe a 3000 ms acknowledgement, which makes the write not
-// merely unacknowledged but unobservable, and any capture taken against it ambiguous.
-//
-// CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 389344 —
-//   the `ATC+SNSR_CONF` command's config block is
-//   `"config":{"retries":3,"success":"+EVT:UPD_CONF","timeout":3000}`. RAK allows three
-//   attempts and three seconds per attempt for a probe-configuration write to be confirmed.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c —
-//   `protocol_list[SNHUB_TYPE_PARAMSET]` has `.req` and `.rsp` both NULL, so the reference
-//   master discards any PARAMSET response rather than requiring one. Waiting for it is
-//   therefore strictly additional evidence: a silent pack still falls through unharmed.
-constexpr uint32_t kParamAckTimeoutUs = 3000000; // 3 s, RAK's own per-attempt budget
-constexpr uint8_t  kParamAttempts     = 3;       // RAK's own retry count
-
-// Ceiling on the whole enable pass, independent of the per-write budget above.
-//
-// Three attempts at three seconds across six announced sensors is 54 s of worst-case silence,
-// and Battery::read() runs between two watchdog feeds in src/main.cpp — there is no feed
-// inside it. Added to the 20 s push listen that is 74 s inside a 120 s window, before the
-// weather read is counted. That is too close to a reset for a path whose whole purpose is
-// diagnostics, and a watchdog reset would destroy the very capture this change exists to
-// produce. The pass therefore checks a wall-clock deadline between sensors and stops early,
-// logging that it did, rather than risking the reset.
-//
-// CITE(datasheet): [CIT-NRF-WDT] nRF52840 PS, WDT — the timeout is fixed at TASKS_START and
-//   the watchdog cannot be stopped, so an awake path that overruns its window resets the
-//   chip. src/main.cpp starts it at 120 s and feeds it around, not inside, the sensor reads.
-constexpr uint32_t kEnablePassBudgetMs = 30000;
+constexpr uint16_t kRuleDisable  = 0x0000;
+constexpr uint16_t kRulePeriodic = 0x0008;
 
 // The pack's self-announcement is a PROVISION request of payload type VER3 — and VER3 is
 // the *only* provision payload type the reference master accepts. VER1, VER2 and BOOT all

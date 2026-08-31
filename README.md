@@ -19,7 +19,7 @@ Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment pro
 | Deployment procedure | [`docs/DEPLOY.md`](docs/DEPLOY.md) |
 | Hardware / wiring | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
 | Libraries & examples | [`docs/LIBRARIES.md`](docs/LIBRARIES.md) |
-| Build plan | [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md) |
+| Decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
 | Environments | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) |
 | Citation registry | [`docs/CITATIONS.md`](docs/CITATIONS.md) |
 | Evidence ledger | [`docs/EVIDENCE.md`](docs/EVIDENCE.md) |
@@ -86,7 +86,7 @@ Rules live in [`.cursor/rules/`](.cursor/rules/) and are indexed in [`AGENTS.md`
 - **Sleep current is unmeasured**, and the pack cannot measure it — its current telemetry has a 10 mA LSB while [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md) turns on ~1 mA, and a USB-powered bench node barely loads the pack ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-12, `4510763`). A meter is the only instrument that settles it. H2 stays open until it does.
 - **Downlink handling is only half exercised.** A `0x03` status request was delivered and drained on 2026-08-12, but `take_downlink()` has never been observed on the console and the malformed-downlink bounds checking is untested ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)).
 - **Buck converter** not yet selected, and it must be chosen on no-load quiescent current — a part drawing milliamps at idle exceeds the node's entire average draw.
-- Open decisions for the first firmware PR: [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
+- Open decisions are tracked as [GitHub issues](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues); the architectural ones become ADRs in [`docs/decisions/`](docs/decisions/).
 
 ## Sibling context
 

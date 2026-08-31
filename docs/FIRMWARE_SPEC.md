@@ -5,7 +5,7 @@
 Cross-links (sibling repos on this machine / org):
 
 - Hardware: [`HARDWARE.md`](HARDWARE.md)
-- Plan: [`../plans/P0_HARDENED_NODE.md`](../plans/P0_HARDENED_NODE.md)
+- Decisions: [`decisions/`](decisions/)
 - Libraries / examples: [`LIBRARIES.md`](LIBRARIES.md)
 - Field RAK2560 settings + Modbus maps: `forest-weather-machines/LoRaWAN/docs/RAK2560_weather_station_settings.md`
 - RAK9154 bench reverse-engineering: `forest-weather-machines/rak-4-5-wire/`

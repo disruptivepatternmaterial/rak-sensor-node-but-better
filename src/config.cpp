@@ -272,7 +272,8 @@ bool Config::set_brownout_engaged(bool engaged)
         return true; // no write — flash cycles are a consumable
     }
 
-    m_brownout_engaged = engaged;
+    const bool previous = m_brownout_engaged;
+    m_brownout_engaged  = engaged;
 
 #if FEATURE_BENCH_INTERVAL
     // A bench build never writes settings back, for the same reason it never reads them:
@@ -282,6 +283,11 @@ bool Config::set_brownout_engaged(bool engaged)
     return true;
 #else
     if (!save()) {
+        // Roll back, exactly as set_interval() above does. Without this the early-out at the
+        // top of this function reads the *intended* value on the next call, returns true, and
+        // never attempts the write again — so a hold that failed to persist once silently
+        // reports success forever and is lost on the next reset.
+        m_brownout_engaged = previous;
         LOGLN(F("   config  : brownout state active but NOT saved — clears on reset"));
         return false;
     }

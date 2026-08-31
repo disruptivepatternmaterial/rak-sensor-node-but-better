@@ -211,12 +211,14 @@ Per-release detail — what each version establishes on hardware and what it doe
   matched a line printed from inside `Radio::take_downlink()`, so that function is finally observed
   on hardware. It ran on a `stage3` image with sleep disabled — the downlink path is shared with
   the field image, the power path is not ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
-- Today's audits are in [`docs/reviews/`](docs/reviews/) — read them before re-deriving:
+- Surviving audits are in [`docs/reviews/`](docs/reviews/) — read them before re-deriving:
   [spec-versus-code drift](docs/reviews/2026-08-12_spec_drift.md),
   [RAK reference benchmark](docs/reviews/2026-08-12_rak_reference_benchmark.md),
-  [adversarial review](docs/reviews/2026-08-12_adversarial_review.md) and
-  [round 3](docs/reviews/2026-08-12_adversarial_review_round3.md),
   [deferred cruft pass](docs/reviews/2026-08-12_cruft_plan.md) ([#52](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/52)).
+  The two 2026-08-12 adversarial reviews, the 2026-07-30 downlink review, the console/sleep
+  question and the retracted 2026-08-30 one-wire review were **deleted** — their accepted
+  findings are issues, their reasoning is in ADRs, and the retracted one was wrong. The
+  tracker and `docs/decisions/` are the durable record; a review file is not.
 - **`scripts/preflight.sh` no longer prints `PREFLIGHT OK` over an unresolved payload field.**
   A `BLOCKED` entry in `payload/schema.yaml` ends the run with `=== PREFLIGHT BLOCKED ===`.
   Exit stays 0 so routine CI is not red for a deliberately open conflict; `--strict` exits 2
@@ -229,9 +231,10 @@ Per-release detail — what each version establishes on hardware and what it doe
   them, all benign ([#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72)).
   The ADR-0006 sibling-SHA warning ([#57](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/57))
   was a checker false positive — the SHA was on the citation's continuation line — and is closed.
-- Remaining open decisions are in [`plans/P0_HARDENED_NODE.md`](plans/P0_HARDENED_NODE.md).
-  Decision #1 (BMS bus) is closed by [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md);
-  decision #4 (framework) by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).
+- Open decisions live in the GitHub tracker; architectural ones become ADRs in
+  [`docs/decisions/`](docs/decisions/). The old `plans/` files were deleted — the BMS bus
+  decision is closed by [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md) and the
+  framework decision by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).
 
 ## The deployment goal, in one line
 

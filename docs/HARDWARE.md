@@ -761,7 +761,7 @@ the dead pads are real.
 holding IO1, and ESD. The pack is cleared as an overvoltage source by measurement: its data line
 reads **20 mV** and **15 kohm** to pack minus with the wire off the board. Node 001, from the same
 parts order, reads its pack on `IO1` in the field. See
-[`reviews/2026-08-30_onewire_pin_failures.md`](reviews/2026-08-30_onewire_pin_failures.md),
+[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102),
 [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96) and
 [#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
 

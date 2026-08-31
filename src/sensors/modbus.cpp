@@ -118,7 +118,7 @@ ModbusResult ModbusMaster::transact(uint8_t slave, uint16_t start, uint8_t count
     // clocked the last bit out before the slave will answer.
     m_serial.flush();
 
-    const size_t   expected = 5 + ((size_t)count * 2);
+    size_t         expected = 5 + ((size_t)count * 2);
     uint8_t        resp[kMaxFrame];
     size_t         got   = 0;
     const uint32_t start_ms = millis();
@@ -138,6 +138,18 @@ ModbusResult ModbusMaster::transact(uint8_t slave, uint16_t start, uint8_t count
         if (m_serial.available()) {
             resp[got++]  = (uint8_t)m_serial.read();
             last_byte_us = micros();
+
+            // An exception reply is five bytes, not 5 + 2N. Shrink the target as soon as the
+            // function code says so. Without this the loop keeps waiting for bytes the slave
+            // will never send, the inter-byte-gap branch below fires first, and a genuine
+            // refusal is reported as BadFrame and retried — the exception handler below is
+            // unreachable.
+            //
+            // CITE(spec): [CIT-MODBUS-APP] §7 — an exception response is slave, function with
+            //   the high bit set, one exception code, and a two-byte CRC.
+            if (got == 2 && (resp[1] & 0x80)) {
+                expected = 5;
+            }
         } else if (got > 0 && (micros() - last_byte_us) > gap_limit_us) {
             // The slave stopped talking mid-frame. Retrying immediately is better than
             // waiting out the ceiling, because the line is already quiet.

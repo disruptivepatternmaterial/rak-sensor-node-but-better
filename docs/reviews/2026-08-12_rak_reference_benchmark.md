@@ -113,8 +113,7 @@ Ranked by consequence:
    **and reverted the same day** once the mechanism was read in the core's source rather than
    taken from RAK's narrative.
 
-   Why it is withdrawn, in one line each — full derivation with line numbers in
-   [`2026-08-12_console_sleep_question.md`](2026-08-12_console_sleep_question.md), decision in
+   Why it is withdrawn, in one line each — decision and full reasoning in
    [ADR-0008](../decisions/ADR-0008-console-in-the-field-image.md):
 
    - `Adafruit_USBD_Device::begin()` calls `SerialTinyUSB.begin(115200)` itself
