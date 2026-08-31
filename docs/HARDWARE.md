@@ -204,7 +204,9 @@ feeds pin 4 from the node's own `VDD`. The pack runs on the same rail the nRF528
   connector-sequencing rule below, and it is now measured rather than assumed
   ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)).
 
-Seven pads remain unexplained
+**Nine pads remain electrically unexplained — but not unattributed.** Every one of them was running
+diagnostic firmware the operator never authorized, written and flashed by agents over SSH across
+multiple sessions. Zero pads have been destroyed by the production image
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)). What
 follows is how the above was measured, and how to re-qualify any replacement harness or pack. It
 risks no silicon.
@@ -277,7 +279,7 @@ a 781.25 kS/s analog capture shows it. That matters because every dead pad here 
 predicts that.
 
 Record the number, the date, and the raw capture path in [`EVIDENCE.md`](EVIDENCE.md). A verdict
-with no number attached is how this got to seven pads.
+with no number attached is how this got to nine pads.
 
 ### THE RULE THAT SAVES PINS — connector sequencing
 
@@ -471,7 +473,7 @@ designed for. Put a 1 kΩ resistor inline in the pack's data wire and land it in
 `SDA` spring clip; nothing is soldered to the board for this.
 
 **Do not treat a fitted resistor as permission to skip the sequencing rule**, and do not record a
-node as protected because it has one. Seven pads say otherwise.
+node as protected because it has one. Nine pads say otherwise.
 
 | Ref | What | Value | Suggested part |
 |---|---|---|---|
@@ -707,9 +709,11 @@ step, and no core is connected to the pack harness:
 
 **No harness has been cleared, so this procedure currently ends here**
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
-Seven GPIO pads are dead across two cores, every one the pad carrying this data line. Until the
-gating measurement is in [`EVIDENCE.md`](EVIDENCE.md), fitting another core to this harness spends
-hardware to re-learn something already known.
+Nine GPIO pads are dead, every one the pad carrying this data line, and **every one of them died
+running diagnostic firmware that the operator never authorized — written by agents, flashed by
+agents over SSH, repeatedly, across multiple sessions.** Zero pads have been destroyed by the
+production image. Until the gating measurement is in [`EVIDENCE.md`](EVIDENCE.md), fitting another
+core to this harness spends hardware to re-learn something already known.
 
 **This line has been instrumented, and the pack side is cleared.** Do not read the stop above as
 "nothing is known". Measured 2026-08-30 with the Saleae Logic Pro 8 ([`EVIDENCE.md`](EVIDENCE.md)):

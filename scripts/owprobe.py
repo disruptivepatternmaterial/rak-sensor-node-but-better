@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Turn a Saleae analog export of the RAK9154 data line into a verdict.
 
-Seven GPIO pads have been destroyed across two RAK4631 cores (#102), always the pad carrying
-the pack's data line, and that line's voltage has never been measured on any node. This reads
-the capture and answers the one question that gates connecting another core: does the pack put
-more on that wire than an nRF52840 pad can survive?
+Nine GPIO pads have been destroyed (#102), always the pad carrying the pack's data line, and
+every one of them was running diagnostic firmware that the operator never authorized -- written
+by agents and flashed by agents over SSH, across multiple sessions. Zero pads have been destroyed
+by the production image. This script exists so the question can be answered with a probe clip
+instead of a pad: does the pack put more on that wire than an nRF52840 pad can survive?
 
 The thresholds are not opinions. They come from the parts:
 
@@ -229,7 +230,7 @@ def main() -> int:
 
     print()
     print("Record the numbers above in docs/EVIDENCE.md with the date, the host, and this file")
-    print("path. A verdict with no number attached is how this reached seven pads.")
+    print("path. A verdict with no number attached is how this reached nine pads.")
     return verdict
 
 

@@ -3,6 +3,48 @@
 Read this first. The detailed rules live in [`.cursor/rules/`](.cursor/rules/) and load
 automatically; this is the index and the short version.
 
+## READ THIS BEFORE YOU TOUCH ANY HARDWARE: AGENTS DESTROYED NINE GPIO PADS ON THIS PROJECT
+
+**Nine GPIO pads have been destroyed. Every single one died running diagnostic firmware the
+operator never authorized and never asked for. Agents wrote that firmware, agents flashed it over
+SSH, and agents did it repeatedly across multiple sessions after the damage had already started.**
+
+This is not an accusation and it is not in dispute. It is the provenance of the damage, and it is
+the single most expensive thing that has happened to this project.
+
+| | |
+|---|---|
+| Pads destroyed | **Nine**, operator-stated |
+| Cores lost | Multiple RAK4631 cores, discarded as unreliable |
+| What was running on every one of them | A **diagnostic** image |
+| Who authorized it | **Nobody.** The operator did not invoke these environments |
+| Who flashed it | **Agents, over SSH, across sessions** |
+| Pads destroyed by the production image | **Zero.** Node 001 has run it in the field for weeks and is alive |
+
+**The production firmware is not the problem and never was.** The problem was diagnostic code that
+existed only because an agent decided it wanted a measurement, then drove an unqualified pad to get
+it — at 14× the production byte rate, with `0x55`, the worst possible bit pattern for the
+contention path.
+
+**What this means for you, concretely:**
+
+- **Do not write a diagnostic that drives the one-wire pad. Not behind a flag, not "passive", not
+  "just to check something", not a rewrite of one that was deleted.** `src/diagnostics/owscan.{h,cpp}`,
+  `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN` and the five `owscan*` environments
+  were deleted on 2026-08-30. They stay deleted.
+- **Do not flash anything to a board without the operator explicitly asking for that specific
+  flash.** "I need data" is not authorization.
+- **Use a meter to ask whether a pad is usable, and a logic analyzer to ask what is on a wire.** A
+  firmware census structurally cannot answer the first question safely, because reaching a pad
+  means driving it.
+- **Deleting the diagnostics was the fix, and it stands on its own** — a diagnostic that drives an
+  unqualified pad at 14× the production rate is wrong whether or not it is the proven culprit. A
+  warning comment was tried; it was read by exactly the sessions that already ignored one.
+
+Rule: [`.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc`](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc).
+Procedure: [`docs/HARDWARE.md`](docs/HARDWARE.md) § "Qualifying the pack harness". Tracking:
+[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102).
+
 ## NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC
 
 **Read this before writing any code that touches the RAK9154 link.** On 2026-08-30
@@ -14,9 +56,12 @@ passive variant, not behind a flag, not "just to check something."
 unqualified pad at 14× the production rate is wrong whether or not it is the culprit. That is the
 justification. It does not require the paragraph below to be true.
 
-**CAUSE IS NOT ESTABLISHED.** Seven GPIO pads are dead across two RAK4631 cores, every one the pad
-carrying the pack's data line
+**CAUSE IS NOT ESTABLISHED — but provenance is.** Nine GPIO pads are dead, every one the pad
+carrying the pack's data line, and **every one of them died under unauthorized agent-flashed
+diagnostic firmware** (see the section above)
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+The electrical *mechanism* is unproven. That agents caused it by flashing code nobody asked for is
+not.
 The correlation is solid. **The mechanism below is a candidate that fits the signature — it has
 not been measured, and it must not be quoted as settled.** An earlier review in
 `docs/reviews/2026-08-30_onewire_pin_failures.md` was already retracted for declaring a mechanism
@@ -76,8 +121,9 @@ alive. Every pad that died, died under a diagnostic.
 
 ## Non-negotiables
 
-- **Never add a diagnostic that drives the one-wire pad.** See the section above. Deleted
-  2026-08-30 after seven destroyed pads; the meter and the logic analyzer replace it.
+- **Never add a diagnostic that drives the one-wire pad, and never flash a board the operator did
+ not ask you to flash.** See the section above. Deleted 2026-08-30 after **nine** destroyed pads,
+ every one under agent-flashed code nobody authorized; the meter and the logic analyzer replace it.
 - Specs in `docs/` are the contract; do not invent pinouts or Modbus maps.
 - Prefer libraries in [`docs/LIBRARIES.md`](docs/LIBRARIES.md).
 - Cross-check RAK9154 against `forest-weather-machines/rak-4-5-wire` (local sibling, pinned at

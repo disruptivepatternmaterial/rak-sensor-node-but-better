@@ -92,8 +92,12 @@
 // DELETED 2026-08-30. DO NOT RECREATE ANY OF IT — not a passive variant, not behind a flag. A
 // diagnostic that drives an unqualified pad at 14x the production rate (192 bytes of 0x55 per
 // cycle, against ~14 bytes per 900 s) is wrong on its own terms, whether or not it is what
-// destroyed the seven pads — which is NOT established. Qualify a pad with a meter against a
+// destroyed the NINE dead pads — the electrical mechanism is NOT established, but the provenance
+// is: every one of those pads died running agent-written diagnostic firmware that the operator
+// never authorized and never invoked, flashed by agents over SSH across multiple sessions. Zero
+// pads have been destroyed by the production image. Qualify a pad with a meter against a
 // known-good pin on the same core; read an unknown line with the logic analyzer, never a pad.
+// And do not flash this board unless the operator asked for that specific flash.
 //
 // Full reasoning, and the line between what was measured and what is inferred:
 // AGENTS.md § "NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC".

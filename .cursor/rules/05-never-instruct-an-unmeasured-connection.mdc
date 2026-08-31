@@ -4,12 +4,23 @@ alwaysApply: true
 
 # Never tell the operator to connect a pin to a voltage nobody has measured
 
-**Seven GPIO pads have been destroyed across two RAK4631 cores**
+**Nine GPIO pads have been destroyed, and agents destroyed all nine of them**
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
 Every one was the pad carrying the RAK9154's data line. Every one was connected on an agent's
-instruction. And the voltage on that data line **has never been measured** — not once, on any
-node, in the whole life of this project. It was assumed to be 3.3 V because pin 4 is labelled
-`3V3_In`, and a label is not a measurement.
+instruction. **And every one was running diagnostic firmware that the operator never authorized,
+never asked for, and never invoked — written by agents and flashed by agents over SSH, repeatedly,
+across multiple sessions, after the damage had already begun.** Zero pads have been destroyed by
+the production image; node 001 has run it in the field for weeks and is alive.
+
+If you are an agent reading this and you are about to flash something to diagnose a hardware
+question: **that is the exact action that cost this project nine pads and several cores.** Do not
+do it unless the operator asked for that specific flash. Wanting data is not authorization.
+
+The one number that would have settled the original question was cheap and nobody took it: the
+voltage on that data line went **unmeasured for the entire life of the project** until 2026-08-30.
+It was assumed to be 3.3 V because pin 4 is labelled `3V3_In`, and a label is not a measurement.
+When it finally *was* measured — with a logic analyzer, in minutes, with no core connected — it
+came back **+3.3118 V idle and +0.0867 V driven low, never out of pad spec.**
 
 That is the defect this rule exists to stop. Not a wiring mistake — a **reasoning** mistake that
 agents keep repeating: treating an unverified electrical level as a known one, and spending the
@@ -59,7 +70,8 @@ hedged, not "just to test":
 3. **Record the number** in `docs/EVIDENCE.md` with date, what was probed, and the raw reading.
 4. **Only then** name a connection, and cite the measurement when you do.
 
-Step 2 costs a probe clip. Skipping it has cost seven pads and three cores.
+Step 2 costs a probe clip. Skipping it has cost **nine pads and several cores**, every one of them
+under firmware an agent flashed without being asked.
 
 ## Language that gives the game away
 
