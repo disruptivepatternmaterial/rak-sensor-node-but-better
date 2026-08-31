@@ -695,14 +695,30 @@ If you are also fitting the optional parts: R2 from `SDA` to the **`VDD` pad** (
 | pack pin 2 and `GND` clip | near 0 Ω | ground wire not seated in the clip |
 | `BAT` pad and `SDA` clip | open | a bridge on the header row. **Do not power up** |
 
-Then confirm the pad **with the meter, not with firmware**:
+Then confirm the pad **with the meter, and with the board powered down**. No firmware runs at this
+step, and no core is connected to the pack harness:
 
-```bash
-# Pad resistance to ground, powered down, against a known-good pin on the same core.
-# A healthy pad reads hundreds of kΩ; SDA/P0.13 read 5.6 kΩ against 240 kΩ on the
-# never-connected control pin when it died. 43x apart is the signature.
-scripts/flash.sh --yes --env battdiag_sda # expect: 12.xx V within ~15 cycles
-```
+> Pad resistance to ground, powered down, compared against a known-good pin on the **same core**.
+> A healthy pad reads hundreds of kΩ. `SDA`/P0.13 measured **5.6 kΩ** against **240 kΩ** on the
+> never-connected control pin when it died — 43× apart is the signature, and the absolute number
+> matters less than the comparison.
+
+### STOP — do not connect a core to the pack harness yet
+
+**No harness has been cleared, so this procedure currently ends here**
+([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+Seven GPIO pads are dead across two cores, every one the pad carrying this data line. Until the
+gating measurement is in [`EVIDENCE.md`](EVIDENCE.md), fitting another core to this harness spends
+hardware to re-learn something already known.
+
+**The measurement that clears it, and has not been taken:** an analyzer channel on each side of the
+1 kΩ series resistor while the node transmits. The difference divided by 1 kΩ is the contention
+current, directly. Under 1 mA and the contention hypothesis is dead; around 3 mA and it stands. It
+needs a flashable core, which is blocked on
+[#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95).
+
+Once — and only once — that measurement is recorded, `env:battdiag_sda` is the right tool to ask
+whether the pack works: it is the production driver at roughly 14 bytes per cycle, not a census.
 
 **There is no firmware pad census, and there must not be one.** `env:owscan*`,
 `FEATURE_ONEWIRE_SCAN` and `src/diagnostics/owscan.*` were deleted on 2026-08-30 after seven GPIO
@@ -757,7 +773,10 @@ first time this project had evidence strong enough to make that claim stick.
 project builds**, and it is proven: node 002 read 12.43 V, -0.01 A, 100 %, 24.0 C over SDA on
 2026-08-30 across nine cycles in two sessions, and the field image's uplink landed at TTN
 (`f_cnt 832`) ([`EVIDENCE.md`](EVIDENCE.md)). Build such a node from `env:rak4631_sda`, with
-`env:battdiag_sda` for fast pack questions.
+`env:battdiag_sda` for fast pack questions — **but not until the harness is cleared under
+[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)**. That
+`SDA` pad is one of the seven that died. Nothing here is an instruction to connect a core to this
+harness today; see the STOP notice above.
 
 **Qualify the pad before you solder to it — with a meter.** SDA was originally selected on a
 firmware census, and that census is now deleted: it drove the pad it was measuring and is the
