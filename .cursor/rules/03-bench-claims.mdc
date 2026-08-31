@@ -1,62 +1,29 @@
+---
+description: Bench claims — a claim about hardware needs the same standard as a constant in source. Includes topics the operator has closed.
+alwaysApply: true
+---
+
 # Bench claims — what the logs prove, and nothing past it
 
-Written after a session on 2026-08-30 that produced three confident physical diagnoses in a
-row, each rejected by the operator, none of them measured. The firmware side of this project
-has strict citation discipline (rule 20) and the bench side had none. This closes that gap:
-**a claim about hardware needs the same standard as a constant in the source.**
+A log line is evidence; what it implies about the physical world is a hypothesis until
+something measures it.
 
-## Separate the reading from the conclusion
+- **Separate the reading from the conclusion.** State the observation, then the labelled
+  inference, then the test that decides it. "No `239A` device on the bus" is evidence; "the
+  board is dead" is a guess.
+- **Two hypotheses is the limit.** After two rejected physical explanations, stop proposing a
+  third: say what is measured, what is unresolved, and ask what the operator is seeing. When a
+  hypothesis is rejected, drop it — do not restate it in new words next turn.
+- **Never assume what is connected.** A successful flash says nothing about sensors, harness,
+  or pack. Ask, or scope the claim to what was observed.
+- **Evidence names the core.** Capture a die identity with the result — the USB serial number
+  (`ioreg -p IOUSB`) or `FICR.DEVICEID` over SWD. "The replacement core" is not an identifier;
+  if no identity was captured, the `docs/EVIDENCE.md` entry says so explicitly.
 
-A log line is evidence. What it implies about the physical world is a hypothesis, and it must
-be labelled as one until something measures it.
+## Closed topic — never mention data-versus-charge cables
 
-| Say this | Not this |
-|---|---|
-| "`CDBGPWRUPACK` times out while `DPIDR` reads. That handshake needs die power, so the most likely cause is no core power — a meter on 3V3 settles it." | "The chip is not powered." |
-| "No `239A` device and no USB kernel events." | "The board is dead." |
-| "The RK900 field is absent, so the read returned null." | "The wind sensor is broken." |
-
-State the observation first, then the inference, then the test that would decide it. When the
-operator rejects a hypothesis, **drop it** — do not restate it in new words next turn.
-
-## Two hypotheses is the limit
-
-After two physical explanations have been offered and rejected, stop proposing a third. Say
-what is measured, say what is unresolved, and ask what the operator is seeing. They are looking
-at the bench; the agent is looking at a log with no ground truth in it.
-
-This is rule 00's bounded-retry rule applied to explanations rather than commands. A third
-guess is not diagnosis, it is noise, and it burns the operator's patience at exactly the moment
-their information is most needed.
-
-## Never assume what is connected
-
-Do not infer from a successful flash that sensors are attached, that a harness is wired, or
-that a pack is present. Nobody said so. Ask, or scope the claim to what was actually observed.
-
-Running a "sensor check" against a board with no sensors on it produces a null result that
-means nothing and reads as competence. It is worse than not running it.
-
-## Evidence must name the core
-
-`docs/EVIDENCE.md` entries are worthless if a board was swapped and nothing records which
-physical part produced the result. **Capture a core identity in the same breath as the result**,
-and put it in the entry:
-
-```bash
-# unique per die, survives reflash; exposed as the USB serial number
-ioreg -p IOUSB -w0 -l | grep -A20 'idVendor. = 9114' | grep kUSBSerialNumberString
-# or over SWD, FICR.DEVICEID
-mdw 0x10000060 2
-```
-
-"The replacement core" is not an identifier. If no identity was captured, the entry must say so
-explicitly rather than implying continuity that was never established.
-
-## Do not restate the obvious
-
-An image built with the A1 flag uses the A1 pin. A sleeping node is asleep. Saying so as though
-it were a finding wastes the reader's time and insults them. Before writing a consequence, ask
-whether it follows trivially from the name of the thing — if it does, delete it.
-
-See `01-response-style.mdc`; this is the same rule, in the place where it keeps getting broken.
+The operator's cables carry data. Do not suggest, ask about, or list a "charge-only cable" as a
+possibility, ever. A board absent from USB is: asleep (the sleep path detaches USB — check TTN
+`last_f_cnt_up` before touching it), in DFU or app-less (`239A:0029`/`002A`), unseated, held in
+reset/APPROTECT-locked, or unpowered — and power is measured with a meter, not guessed. See
+`docs/FIRST_FLASH.md`. If the physical setup is genuinely unknown, ask what is plugged into what.

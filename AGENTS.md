@@ -1,294 +1,102 @@
 # Agent notes
 
-Read this first. The detailed rules live in [`.cursor/rules/`](.cursor/rules/) and load
-automatically; this is the index and the short version.
+The index. The rules in [`.cursor/rules/`](.cursor/rules/) load automatically; project state
+lives in `docs/` — read it there instead of trusting any summary of it, including this one.
 
-## READ THIS BEFORE YOU TOUCH ANY HARDWARE: AGENTS DESTROYED NINE GPIO PADS ON THIS PROJECT
+## Hardware safety — read before touching anything physical
 
-**Nine GPIO pads have been destroyed. Every single one died running diagnostic firmware the
-operator never authorized and never asked for. Agents wrote that firmware, agents flashed it over
-SSH, and agents did it repeatedly across multiple sessions after the damage had already started.**
-
-This is not an accusation and it is not in dispute. It is the provenance of the damage, and it is
-the single most expensive thing that has happened to this project.
-
-| | |
-|---|---|
-| Pads destroyed | **Nine**, operator-stated |
-| Cores lost | Multiple RAK4631 cores, discarded as unreliable |
-| What was running on every one of them | A **diagnostic** image |
-| Who authorized it | **Nobody.** The operator did not invoke these environments |
-| Who flashed it | **Agents, over SSH, across sessions** |
-| Pads destroyed by the production image | **Zero.** Node 001 has run it in the field for weeks and is alive |
-
-**The production firmware is not the problem and never was.** The problem was diagnostic code that
-existed only because an agent decided it wanted a measurement, then drove an unqualified pad to get
-it — at 14× the production byte rate, with `0x55`, the worst possible bit pattern for the
-contention path.
-
-**What this means for you, concretely:**
-
-- **Do not write a diagnostic that drives the one-wire pad. Not behind a flag, not "passive", not
-  "just to check something", not a rewrite of one that was deleted.** `src/diagnostics/owscan.{h,cpp}`,
-  `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN` and the five `owscan*` environments
-  were deleted on 2026-08-30. They stay deleted.
-- **Do not flash anything to a board without the operator explicitly asking for that specific
-  flash.** "I need data" is not authorization.
-- **Use a meter to ask whether a pad is usable, and a logic analyzer to ask what is on a wire.** A
-  firmware census structurally cannot answer the first question safely, because reaching a pad
-  means driving it.
-- **Deleting the diagnostics was the fix, and it stands on its own** — a diagnostic that drives an
-  unqualified pad at 14× the production rate is wrong whether or not it is the proven culprit. A
-  warning comment was tried; it was read by exactly the sessions that already ignored one.
-
-Rule: [`.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc`](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc).
-Procedure: [`docs/HARDWARE.md`](docs/HARDWARE.md) § "Qualifying the pack harness". Tracking:
-[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102).
-
-## NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC
-
-**Read this before writing any code that touches the RAK9154 link.** On 2026-08-30
-`src/diagnostics/owscan.{h,cpp}`, `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN` and
-the five `owscan*` build environments were **deleted**. Do not recreate any of them — not a
-passive variant, not behind a flag, not "just to check something."
-
-**Why the deletion stands on its own, independent of cause:** a diagnostic that drives an
-unqualified pad at 14× the production rate is wrong whether or not it is the culprit. That is the
-justification. It does not require the paragraph below to be true.
-
-**CAUSE IS NOT ESTABLISHED — but provenance is.** Nine GPIO pads are dead, every one the pad
-carrying the pack's data line, and **every one of them died under unauthorized agent-flashed
-diagnostic firmware** (see the section above)
+**Nine GPIO pads are dead. Every one died under diagnostic firmware that agents wrote and
+flashed without authorization; zero died under the production image**
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
-The electrical *mechanism* is unproven. That agents caused it by flashing code nobody asked for is
-not.
-The correlation is solid. **The mechanism below is a candidate that fits the signature — it has
-not been measured, and it must not be quoted as settled.** An earlier review in
-`docs/reviews/2026-08-30_onewire_pin_failures.md` was already retracted for declaring a mechanism
-established because it fit; do not repeat that.
+The consequences are absolute:
 
-| | Bytes driven per cycle | Cadence |
-|---|---|---|
-| `owscan` phase 0 | **192** (64 × `0x55` at three baud rates) | seconds |
-| Production battery read | ~14 | 900 s |
-
-`0x55` toggles every bit, the worst possible pattern for the contention path in
-[#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
-
-**What IS measured** ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-30): the pack actively drives
-its end — **+3.3118 V idle, +0.0867 V driven low, 9,520 edges in 57 s**. Our end idles push-pull
-HIGH. So contention is *physically available*. That much is fact.
-
-**What is INFERRED, not measured:** that two live drivers in opposition pass ~3.3 mA through the
-pad, and that this is what killed the pads. The 3.3 mA is arithmetic from Ohm's law across the
-1 kΩ series resistor, **not a measurement** — nobody has ever observed the node's end of that wire
-while it transmits. The arithmetic does resolve a real error, though: earlier sessions compared
-that current to the nRF52840's **15 mA absolute maximum**, found it under, and cleared contention,
-when the pin's standard-drive continuous rating is **1–2 mA**. Wrong limit compared against. That
-makes chronic degradation plausible; it does not make it established.
-
-**The measurement that would settle it, and has not been done:** put an analyzer channel on each
-side of the 1 kΩ series resistor while the node transmits. The difference divided by 1 kΩ is the
-contention current, directly, in milliamps. Under 1 mA kills this hypothesis; ~3 mA supports it.
-It needs a flashable core, which is blocked on
-[#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95).
-
-**The signature agrees:** `SDA`/P0.13 measures **5.6 kΩ** to ground against **240 kΩ** on the
-never-connected `SCL` control pin — same core, same meter, powered down. 43× apart. The 0.121 V
-seen on that powered pin implies ~495 Ω at 3.3 V, so it is a **non-linear damaged junction**, a
-punched-through ESD clamp on the **ground** side — the direction where our pin sinks the pack's
-active high.
-
-**Why deleting beat warning.** The operator never invoked those environments; **agents flashed
-them over SSH, repeatedly, across sessions.** A warning comment gets read by exactly the sessions
-that already ignored one.
-
-**The replacement is better anyway.** Two multimeter readings settled in one minute what the
-firmware census got wrong across several sessions and several discarded cores — and a firmware
-census structurally cannot make that comparison, because reaching a pad means driving it.
-
-| Need | Use |
-|---|---|
-| Is this pad usable? | A meter, against a known-good pin on the same core |
-| What is on the wire? | The Saleae Logic Pro 8 — ±25 V, 2 MΩ, versus a pad rated 3.6 V powered and **0.3 V unpowered** |
-| Does the pack work? | `env:battdiag*` — the production driver, ~14 bytes per cycle |
-
-Procedure: [`docs/HARDWARE.md`](docs/HARDWARE.md) § "Qualifying the pack harness". Rule:
-[`.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc`](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc).
-
-**The production image is not the problem.** Node 001 has run it for weeks in the field and is
-alive. Every pad that died, died under a diagnostic.
+- **Never flash a board unless the operator asked for that specific flash.** Wanting data is
+  not authorization.
+- **Never write, recreate, or flash a diagnostic that drives the one-wire pad** — `owscan` and
+  its five environments were deleted 2026-08-30 and stay deleted, not behind a flag, not
+  "passive". Pack questions use `env:battdiag*` (the production driver, ~10 s cycles), never
+  `stage3`, whose long cycle has repeatedly misled sessions into misreading the pack's normal
+  ~2 null cycles after boot as failure.
+- **Never instruct a connection to an unmeasured voltage.** Analyzer first, meter second, pad
+  last — rule [`05`](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc); procedure
+  in [`docs/HARDWARE.md`](docs/HARDWARE.md) § "Qualifying the pack harness".
+- **Flashing is mechanically gated, not just forbidden.** `.cursor/hooks/flash_gate.py`
+  (fail-closed, wired in `.cursor/hooks.json`) intercepts every flash-capable shell command —
+  `pio … upload`, `nrfutil`/`nrfjprog`/`pyocd`/`openocd`, `flash.sh`, UF2 copies, 1200-baud
+  touch, including any of these wrapped in `ssh` — and requires the operator to approve that
+  specific command in the UI before it runs. Edits to the hooks themselves are gated the same
+  way. Do not attempt to rephrase a command around the gate; ask the operator. Verified 17/17
+  pattern cases 2026-08-30.
 
 ## Non-negotiables
 
-- **Never add a diagnostic that drives the one-wire pad, and never flash a board the operator did
- not ask you to flash.** See the section above. Deleted 2026-08-30 after **nine** destroyed pads,
- every one under agent-flashed code nobody authorized; the meter and the logic analyzer replace it.
-- Specs in `docs/` are the contract; do not invent pinouts or Modbus maps.
-- Prefer libraries in [`docs/LIBRARIES.md`](docs/LIBRARIES.md).
-- Cross-check RAK9154 against `forest-weather-machines/rak-4-5-wire` (local sibling, pinned at
- `efc0e3c`, `~/Documents/GitHub/forest-weather-machines`) — but note it is **M5Stack NanoC6
- (ESP32-C6) firmware, not RAK4631**, and **scope its authority precisely**. It is useless as an
- MCU-side reference, and there is no existing RAK4631 firmware to fork.
-
- | Path in the sibling @ `efc0e3c` | Authoritative for | Silent on |
- |---|---|---|
- | `firmware/nanoc6-onewire-poll/lib/RAK-OneWire/src/onewire_master_protocol.c` | The **whole one-wire wire format**: `cal_chksum()` popcount algorithm and its byte span (:310), the provisioning reply construction (:398-474), pid = slot index + 1 (:458), dest/source swap (:450-456), length validation (:779) | — (this is the real reference; read it before touching `src/sensors/battery.cpp`) |
- | `firmware/nanoc6-onewire-poll/src/onewire_protocol.cpp` | **Polling a pack that is already provisioned** — query, frame RX, response parse | The announcement handshake. It has **no provisioning handler at all**; it assumes some other master already latched the pid |
- | `firmware/nanoc6-rak9154-poll/src/main.cpp` | **Nothing — the file is 0 bytes.** | Everything. The Modbus claim below has no code behind it in this repo |
-
- The Modbus figures previously asserted here (slave `0x6E`, 9600 8N1, 21 registers from
- `0x6000`) are **not backed by any source in the sibling** at `efc0e3c`. Treat them as
- unverified until a datasheet or a working capture confirms them — do not cite the sibling
- for them.
-- Never commit secrets, `*.env`, keys, or live OTAA AppKeys.
-- No aspirational "deployed" claims without bench/TTN evidence — see [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
-- **Record outcomes, never launches.** Do not write an evidence entry for something still in
-  flight. On 2026-08-12 a "24 h bench soak started" entry was committed **92 seconds before the
-  harness gave up**, having never attached to the board; three other documents inherited the
-  claim before it was caught. A thing that was started and immediately died is not a thing in
-  progress — it is a failed attempt, and the honest record is the attempt plus its outcome.
-  Wait for the outcome, then write it. **Verify before you propagate:** the false claim
-  travelled because each document trusted the last one instead of the log.
+- Specs in `docs/` are the contract. Never invent pinouts, register maps, or constants — cite
+  every one (rule 20). Prefer libraries in [`docs/LIBRARIES.md`](docs/LIBRARIES.md).
+- Every GitHub issue an agent creates needs operator approval first (rule 02).
 - Null sensor readings stay null — never fabricate zeros.
-- **Either solve it or file it.** Anything noticed and not fixed becomes a GitHub issue in
-  the same pass, with a number a comment can cite. Caveats delivered in chat and "one more
-  thing" trailers are not a record of anything — they are gone the moment the window
-  scrolls. Do not reintroduce a checklist file; the tracker is the one place.
+- Never commit secrets, keys, EUIs, or live OTAA AppKeys.
+- **Record outcomes, never launches.** No evidence entry for anything still in flight, and no
+  "deployed" claim without bench/TTN evidence — a false "soak started" entry once propagated
+  through three documents before being caught. Verify against the log, not the previous doc.
+- Every build, flash, or soak result names its host and commit SHA, or it is not evidence.
+- Status is **🚧 NOT YET DEPLOYED** until the H1–H8 gates and the ≥24 h bench soak / ≥7 d field
+  shadow close in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 ## The rules
 
 | Rule | Covers |
 |---|---|
-| [00-agent-liveness](.cursor/rules/00-agent-liveness.mdc) | Report progress every 2–4 min; stale at 5; bounded retries; no unbounded calls |
-| [10-environments](.cursor/rules/10-environments.mdc) | Author locally, build and flash on Heliotrope Ridge; the SSH PATH trap; git is the only transport |
-| [20-citation-discipline](.cursor/rules/20-citation-discipline.mdc) | Multiple citations per change; `CITE(category)` format; no unsourced constants |
+| [00-agent-liveness](.cursor/rules/00-agent-liveness.mdc) | Progress every 2–4 min; stale at 5; bounded calls and retries |
+| [01-response-style](.cursor/rules/01-response-style.mdc) | Answer first; consequences not activity; never restate the operator's hardware |
+| [02-issue-approval](.cursor/rules/02-issue-approval.mdc) | Operator approves every issue before it is filed |
+| [03-bench-claims](.cursor/rules/03-bench-claims.mdc) | Observation vs hypothesis; two-guess limit; evidence names the core; closed topics |
+| [05-never-instruct](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc) | No connection to an unmeasured voltage, ever |
+| [10-environments](.cursor/rules/10-environments.mdc) | Author locally, build/flash on Heliotrope Ridge; SSH and git-transport rules |
+| [20-citation-discipline](.cursor/rules/20-citation-discipline.mdc) | `CITE(category)` format; minimum citations per change |
 | [30-change-workflow](.cursor/rules/30-change-workflow.mdc) | Issue → research → implement → review → build → flash → evidence → docs → version → push |
 | [40-lorawan-compliance](.cursor/rules/40-lorawan-compliance.mdc) | US915 Class A, airtime budget, downlink validation |
-| [50-power-management](.cursor/rules/50-power-management.mdc) | Sleep path, `Serial.end()`, brownout, months unattended |
-| [60-decoder-parity](.cursor/rules/60-decoder-parity.mdc) | Every build verifies the TTN formatter and calls out when it must change |
+| [50-power-management](.cursor/rules/50-power-management.mdc) | Sleep path, peripheral shutdown, brownout |
+| [60-decoder-parity](.cursor/rules/60-decoder-parity.mdc) | Payload contract with the live TTN formatter |
 
 ## Fast orientation
 
 ```bash
-scripts/preflight.sh          # all local gates (same as CI)
-scripts/remote.sh check       # build host reachability + toolchain
-scripts/build.sh              # preflight + sync + compile on the build host
-scripts/flash.sh              # build + USB flash on the build host (confirms first)
-scripts/push.sh               # push to GitHub relayed via the build host (plain git push also works)
+scripts/preflight.sh     # all local gates (same as CI)
+scripts/remote.sh check  # build host reachability + toolchain
+scripts/build.sh         # preflight + sync + compile on the build host
+scripts/flash.sh         # build + USB flash on the build host (confirms first)
+scripts/push.sh          # push relayed via the build host (plain git push also works)
 ```
 
-- **Two GitHub identities, and this machine can push.** Re-verified 2026-08-28: `gh` here is
-  active as `disruptivepatternmaterial` and `git push --dry-run origin HEAD:refs/heads/main`
-  resolves cleanly. The work account `ntableman_sfemu` still owns the **SSH** keys, which is
-  where the old "this machine cannot push" rule came from; `origin` uses the HTTPS credential
-  helper instead. Confirm with `--dry-run`, then push. `scripts/push.sh` remains available as
-  a relay and guards against pushing during a running soak. Do not "fix" the remote URL.
-  Commits from the user that you did not write are **normal** — they push from their IDE,
-  which has a separate GitHub sign-in. Fetch and carry on.
+This machine cannot compile or flash — no PlatformIO, no device on USB, `$HOME` read-only.
+Everything hardware runs on the build host, whose address the operator supplies
+(`RAK_BUILD_HOST`); a failed SSH means the laptop is elsewhere, not a dead host. See rule 10
+and [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 
-- **This machine cannot compile or flash.** No PlatformIO, no device on USB, `$HOME` is
-  read-only. Everything that touches hardware runs on Heliotrope Ridge — and remote commands
-  need `zsh -l -c` or `pio` will look like it is not installed. Use `scripts/remote.sh`.
+## Where the facts live
 
-- **The build host is a laptop, and it is not always on the same network.** So ask the
-  operator for the address, `export RAK_BUILD_HOST=ntableman@<address>`, and confirm it in
-  one command:
-  `ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'` →
-  `Heliotrope-Ridge`. Scripts resolve `BUILD_HOST`, then `RAK_BUILD_HOST`, then the first
-  line of the untracked `~/.rak-build-host`, and **fail by name if none is set** — there is
-  no default. **A failed SSH means the laptop is elsewhere. Ask; do not investigate, and do
-  not report it as a dead host.** See [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
-- **The payload is a two-repo contract.** The TTN formatter lives in
-  `forest-weather-machines`. A drifted encoder does not lose one field; the decoder throws
-  and discards the entire uplink. `scripts/check_decoder_parity.py` runs on every build.
-- **Status is `🚧 NOT YET DEPLOYED`** and stays that way until [`docs/EVIDENCE.md`](docs/EVIDENCE.md)
-  says otherwise. Stages 0-4 have all now run on hardware (join + uplink 2026-07-31, RK900 reply
-  2026-08-03, battery 12.23 V 2026-08-05, and on 2026-08-12 both sensors in one field-image cycle
-  plus network-side confirmation that the uplinks are landing at TTN and the first delivered
-  downlink). **That does not change the status.** Deployment stays blocked until the H1-H8 gates
-  and the ≥24 h soak / ≥7 d shadow in `docs/EVIDENCE.md` close — not merely on "every subsystem
-  answered once." **19.03 h of real soak exist on `572bcfa`, and a new 24 h run is in flight on the flashed `1c2df3c`** — see the H8 row below
-  before repeating either "zero soak hours" or "the soak passed."
-- **The RAK4631 board definition is vendored** in [`rakwireless/`](rakwireless/) because it
-  does not exist in the PlatformIO registry. Do not edit it, and do not "fix" the build by
-  copying files into `~/.platformio` — see [`rakwireless/README.md`](rakwireless/README.md).
+| Question | File |
+|---|---|
+| What has each release proven on hardware? | [`docs/STATUS.md`](docs/STATUS.md) |
+| What has been measured, on which core, at which SHA? | [`docs/EVIDENCE.md`](docs/EVIDENCE.md) |
+| Wiring, pinouts, harness qualification | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
+| Firmware behavior contract, H1–H8 hardening | [`docs/FIRMWARE_SPEC.md`](docs/FIRMWARE_SPEC.md) |
+| RAK9154 protocol sourcing (and what the sibling repo is and is not authoritative for) | [`docs/research/rak9154-battery-protocol-sources.md`](docs/research/rak9154-battery-protocol-sources.md) |
+| Decisions and their reasoning | [`docs/decisions/`](docs/decisions/) |
+| Soak procedure and criteria | [`docs/SOAK.md`](docs/SOAK.md) |
 
-## Bring-up stages
-
-Each stage adds exactly one new failure domain, so a failure has a short suspect list.
-
-| Stage | Adds | State |
-|---|---|---|
-| 0 | LED + USB serial | run on hardware 2026-07-31 (`8d4a41c`) — firmware boots and prints over USB CDC ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| 1 | RK900 Modbus over RAK5802 @ 9600 | proven at wire level 2026-08-03 (`998dc26`, `busscan`) — full 5-register frame read at **9600** (not 4800): 25.1 °C, 50.4 %RH, 1007.0 hPa, calm; register map confirmed ([ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md), [`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Remaining: same read through the production `stage1` path |
-| 2 | OTAA join + first uplink | done 2026-07-31 — join + accepted uplink, `puma-concolor-001`, session restore across reset ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| 3 | RAK9154 battery telemetry over one-wire | **working on hardware 2026-08-05 (`1a203d3`, re-verified `b6bbf31`)** — pack latches pid `0x01` and reports `12.23 V, +0.00 A, 98%, 23.0 °C` across seven consecutive cycles ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Root cause of the long stall was reply turnaround timing, not framing: answer no sooner than 2 ms after the pack's last byte (`kTurnaroundMs`) and lead every frame with four wake bytes. **Expect ~2 null cycles after boot while the pack samples — this line is load-bearing.** Re-confirmed 2026-08-12 (`b436aa9`): 20 consecutive `battdiag` cycles, 19 live, the one null being cycle 2, latched at `0x01` throughout with no `provId FF` anywhere in the capture. Several sessions read that null cycle as a provisioning failure because `stage3`'s 1800 s cycle means one capture window holds exactly one cycle — **use `battdiag` (~10 s) for any pack question, never `stage3`.** Open: [#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36), [#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) |
-| 4 | Field image: both sensors, one cycle | RK900 and the pack **both read in `rak4631` in the same cycle** 2026-08-12 (`4510763`) — first time observed. Sleep reached. Uplink transmitted (`radio : sent 35 bytes on port 2`) **and delivered**: the network-side record at `f4075c0` shows `dev_addr 260CE734`, session `started_at 2026-07-31`, `last_f_cnt_up` advancing, gateway `3356-gateway-002` at 13–14 dB SNR, and `f_cnt 1792` timestamped the same second as that console line. **First downlink ever delivered on hardware** the same day — a `0x03` status request, queue drained across one uplink. No join observed (session restored, not rejoined) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | Downlink matrix: all eight command cases | **8/8 PASS on hardware 2026-08-13** (inferred `f15a983`, `stage3`, sleep disabled) — valid `0x01` set-interval (1800 s → 900 s, persisted across a reflash), valid `0x03` status, wrong-length `0x01` and `0x03` both rejected as *wrong length* not *unknown opcode* ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63), [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)), unknown opcode `0x7F` ignored, valid command on the wrong FPort ignored by port, two queued commands drained one per cycle, and cycles 18–26 monotonic with no reset. `take_downlink()` observed for the first time, closing [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54) ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | Field image on the board, sleep reached | `env:soak` (byte-identical to `env:rak4631`) flashed 2026-08-13 at **`d568574`, asserted from the banner** — the first board to name its own commit. One cycle: both sensors read, uplink sent, and the cycle closed `sleep   : 900 s`, not `wait    : N s (sleep disabled)`. One cycle is not a soak. Repeated 2026-08-13 at **`65f8615`**, banner-asserted again: both sensors, session `0x260CE734` restored not rejoined, 35 bytes on port 2, `sleep   : 900 s`. **Repeated and extended 2026-08-14 at `1c2df3c`** (`v0.4.3`, the field-bound image), banner-asserted — so **three distinct commits** have now named themselves, and this time it was **six unattended cycles** (3–8) on the 900 s cadence rather than one, both sensors live and `sleep   : 900 s` every cycle. Still not a soak ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)) |
-| — | H8 soak: ≥24 h bench, then ≥7 d field shadow | **STILL OPEN on both halves. Real hours exist; 24 uninterrupted ones do not.** The `rc-v0.4.2` run reached **19.03 h / 76 uplinks / 0 anomalies** on `572bcfa` and was stopped deliberately at 15:30Z to ship the #75 fix — a partial run on one image cannot be topped up by another ([`docs/EVIDENCE.md`](docs/EVIDENCE.md); data preserved at `~/soak-runs/20260813T202735Z_ttn_rc-v0.4.2/`). The soak on `1c2df3c` started 16:09:16Z (pid 28695, label `rc-v0.4.3-1c2df3c`) and **had a deliberate RESET inside its window at 17:50Z** — the operator's single press to make the board print its banner — logged by the soak itself as `resets=1`, `f_cnt=2496`, `anomalies=0`. **So it is not 24 h of uninterrupted runtime either, and must never be read as such.** That
- watcher **completed its full 24 h** (86405 s of 86400 s) at 2026-08-15T16:09:21Z and exited
- normally — an absent process here means finished, not dead. **The node then went silent at
- `f_cnt 2600`, 2026-08-15T17:04:14Z, 55 min after the window closed — because the operator packed
- it into a bag and moved it.** Operator-confirmed, no firmware defect ([#80](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/80),
- closed). Do not re-derive this as a failure: brownout was impossible (11.77 V against a 9.60 V
- inhibit) and the next session write was 24 frames away, so #74/#68 were unreachable. **The ≥24 h bench half is still not
- met** — this runtime was in the field with no console, so seven of the ten bench criteria in
- [`docs/SOAK.md`](docs/SOAK.md) could not be evaluated at all ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-15). Separately, six unattended 900 s cycles (cycles 3–8, ~1 h 15 m) were captured on that image with both sensors live and `sleep : 900 s` every cycle — real, and still not a soak. **The ≥7 d field shadow began 2026-08-14** when the node went to the woods, and day one produced the project's **first >24 h of continuous field runtime**: 27.37 h of TTN-recorded uplinks, `f_cnt` 2391 → 2600, session restored not rejoined, one unexplained field reboot (a +18 counter step after a 5539 s gap on 2026-08-14T22:54Z — now
- [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82); the +18
- is the `kCounterMargin` artifact of one reset, not 18 transmissions). **Then the operator picked
- the node up and packed it**, so the shadow clock stops there and effectively **has not started** —
- day one is not seven, and a shadow does not accrue while the node is in a bag. Everything below this sentence describes the harness, which predates any accumulated hour. The *harness* is built and is real progress — `scripts/soak.sh`, [`docs/SOAK.md`](docs/SOAK.md), and `env:soak`, now **byte-identical** to `env:rak4631` ([ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)), so a soak is evidence about the shipped image. The one 2026-08-12 attempt at `f626698` waited 180 s for `/dev/cu.usbmodem*`, never attached, and gave up. Cause unestablished — **not** the `FEATURE_CONSOLE=0` change, which landed 1 h 44 m later and was itself reverted at `636e421`. Run `scripts/soak.sh selftest 90` before trusting the harness with 24 h. Interval is **900 s**, not the 1800 s the console printed — from network uplink timestamps, independent of the capture |
-
-## Release status
-
-Per-release detail — what each version establishes on hardware and what it does not — lives in [`docs/STATUS.md`](docs/STATUS.md). Read it before making any claim about what a build has proven.
-
-## Open blockers
-
-- **Sleep current is unmeasured and cannot be measured from the pack.** Its telemetry LSB is
-  10 mA; [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md) turns on ~1 mA. Do not quote a sleep
-  current from pack telemetry — it is a resolution floor, not a measurement
-  ([`docs/EVIDENCE.md`](docs/EVIDENCE.md) 2026-08-12).
-- **Downlink handling is now fully exercised** — [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)
-  is **closed**. On 2026-08-13 `scripts/downlink_matrix.sh` drove eight cases against the board and
-  all eight passed, including both malformed-length rejections and an unknown opcode; every case
-  matched a line printed from inside `Radio::take_downlink()`, so that function is finally observed
-  on hardware. It ran on a `stage3` image with sleep disabled — the downlink path is shared with
-  the field image, the power path is not ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
-- Surviving audits are in [`docs/reviews/`](docs/reviews/) — read them before re-deriving:
-  [spec-versus-code drift](docs/reviews/2026-08-12_spec_drift.md),
-  [RAK reference benchmark](docs/reviews/2026-08-12_rak_reference_benchmark.md),
-  [deferred cruft pass](docs/reviews/2026-08-12_cruft_plan.md) ([#52](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/52)).
-  The two 2026-08-12 adversarial reviews, the 2026-07-30 downlink review, the console/sleep
-  question and the retracted 2026-08-30 one-wire review were **deleted** — their accepted
-  findings are issues, their reasoning is in ADRs, and the retracted one was wrong. The
-  tracker and `docs/decisions/` are the durable record; a review file is not.
-- **`scripts/preflight.sh` no longer prints `PREFLIGHT OK` over an unresolved payload field.**
-  A `BLOCKED` entry in `payload/schema.yaml` ends the run with `=== PREFLIGHT BLOCKED ===`.
-  Exit stays 0 so routine CI is not red for a deliberately open conflict; `--strict` exits 2
-  for the release checklist. **No field is BLOCKED as of 2026-08-13** — `batt_current` was the
-  last one and ADR-0002 closed it, so the run reaches `PREFLIGHT OK` again. If it says
-  `BLOCKED`, something new opened; read the named field rather than assuming it is the old one. Two scans (secrets, null policy)
-  were also *never executing* — `xargs` aborts with `sysconf(_SC_ARG_MAX) failed` here and empty
-  output was read as clean. They use `git grep` now, and the null-policy heuristic is too broad
-  on first real execution — six counter resets flagged as fabricated zeros, `radio.h:98` among
-  them, all benign ([#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72)).
-  The ADR-0006 sibling-SHA warning ([#57](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/57))
-  was a checker false positive — the SHA was on the citation's continuation line — and is closed.
-- Open decisions live in the GitHub tracker; architectural ones become ADRs in
-  [`docs/decisions/`](docs/decisions/). The old `plans/` files were deleted — the BMS bus
-  decision is closed by [ADR-0004](docs/decisions/ADR-0004-bms-one-wire-path.md) and the
-  framework decision by [ADR-0003](docs/decisions/ADR-0003-firmware-framework.md).
+The sibling `forest-weather-machines/rak-4-5-wire` is ESP32-C6 firmware, not RAK4631 — scope
+its authority per the research doc, and pin any sibling citation to a commit SHA. The RAK4631
+board definition is vendored in [`rakwireless/`](rakwireless/) — do not edit it or copy it into
+`~/.platformio` ([`rakwireless/README.md`](rakwireless/README.md)). The TTN formatter lives in
+`forest-weather-machines`; a drifted encoder discards the whole uplink (rule 60). Sleep current
+is unmeasured — pack telemetry's 10 mA LSB is a resolution floor, never quote it as a
+measurement ([`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md)).
 
 ## The deployment goal, in one line
 
-Unattended in the woods **indefinitely**, on a solar-recharged RAK9154. Nobody is going to
-walk out and power-cycle it. Two consequences that outrank feature work:
-
-- **Prefer deleting a failure mode over handling one.** ADR-0004 chose two separate sensor
-  buses over one shared bus for exactly this reason.
-- **Never let the pack reach a state it cannot recover from by itself.** Stop transmitting
-  early and keep sleeping. A lost day of data is free; a hike is not.
-  See [`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md).
+Unattended in the woods **indefinitely**, on a solar-recharged RAK9154 — nobody hikes out to
+power-cycle it. So: prefer deleting a failure mode over handling one (ADR-0004), and never let
+the pack reach a state it cannot recover from by itself — stop transmitting early and keep
+sleeping ([`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md)). A lost day of data is free; a hike
+is not.

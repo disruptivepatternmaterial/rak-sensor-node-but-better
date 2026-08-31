@@ -5,88 +5,49 @@ alwaysApply: true
 
 # Change workflow — the loop every change runs
 
-No step is optional and the order matters. Skipping "review against spec" to get to
-"flash" is how a node ends up in the woods with firmware nobody can explain.
-
-## The loop
+No step is optional and the order matters.
 
 ```
-1. ISSUE      Capture the idea/bug as a GitHub issue before writing code
+1. ISSUE      Propose to the operator, get approval, then file — rule 02
 2. RESEARCH   Gather citations (datasheet + spec + prior art) — rule 20
-3. IMPLEMENT  Smallest reviewable change, on a branch
-4. REVIEW     Reconcile against docs/ specs and best practice — see gates below
+3. IMPLEMENT  Smallest reviewable change, on a branch (e.g. wp2/rk900-modbus)
+4. REVIEW     scripts/preflight.sh — the same gates CI runs
 5. BUILD      Compile on Heliotrope Ridge — rule 10
-6. FLASH      USB flash on the build host, capture serial evidence
+6. FLASH      USB flash on the build host — destructive, needs explicit operator confirmation
 7. EVIDENCE   Record measured results in docs/EVIDENCE.md — no claim without it
-8. DOCS       Update specs/README/CHANGELOG in the same change
-9. VERSION    Bump per docs/RELEASE.md
-10. PUSH      Commit, push, PR with the citation checklist filled in
+8. DOCS       Update specs/README/CHANGELOG in the same change, never "later"
+9. VERSION    Bump per docs/RELEASE.md, add a CHANGELOG.md entry
+10. PUSH      Commit, push, PR with the template's citation checklist filled in
 ```
 
-## Step 1 — Issue first
+Never push a firmware behavior change directly to `main`. Architectural choices become ADRs in
+`docs/decisions/`.
 
-Every change starts as an issue: bug, idea, or firmware change (templates in
-`.github/ISSUE_TEMPLATE/`). It states the problem, the affected spec section, and the
-acceptance check. Reference it in the branch (`wp2/rk900-modbus`) and the commit.
-Open decisions belong in `plans/P0_HARDENED_NODE.md`; architectural choices become ADRs
-in `docs/decisions/`.
+## Review gates (release-blocking, all in `scripts/preflight.sh` or review)
 
-## Step 4 — Review gates (release-blocking)
+- **Spec parity** — behavior matches `docs/FIRMWARE_SPEC.md`; if the code is right and the spec
+  is stale, update the spec in the same PR.
+- **Citations** (`check_citations.py`), **decoder parity** (`check_decoder_parity.py`, rule 60),
+  **LoRaWAN compliance** (rule 40), **power** (rule 50), **hardening** H1–H8
+  (`FIRMWARE_SPEC.md` §7), **no secrets**, **nulls stay null**.
+- **Safety holds** — any change that adds or widens a state where the node withholds an action
+  adds its row to `FIRMWARE_SPEC.md` §7.1 and answers: does lifting this hold depend on an
+  action the hold itself suppresses? If yes, the hold needs a bound (three defects had exactly
+  this shape: #61, the keepalive counter-headroom defect, #74/#68).
 
-Run `scripts/preflight.sh`. It is the same gate CI runs. A change is not reviewable until
-all of these pass:
-
-| Gate | Check | Enforced by |
-|---|---|---|
-| **Spec parity** | Behavior matches `docs/FIRMWARE_SPEC.md`. If the code is right and the spec is stale, **update the spec in the same PR** — never let them drift. | review |
-| **Citations** | Rule 20 minimums met on changed lines | `scripts/check_citations.py` |
-| **Decoder parity** | Payload matches the live TTN formatter — rule 60 | `scripts/check_decoder_parity.py` |
-| **LoRaWAN compliance** | Airtime, Class A, downlink handling — rule 40 | review + `scripts/check_citations.py` |
-| **Power** | Sleep path intact, no regression in budget — rule 50 | review + bench |
-| **Hardening** | H1–H8 in `FIRMWARE_SPEC.md` §7 still hold | review |
-| **Safety holds** | Any change that adds or widens a state where the node withholds an action adds its row to `FIRMWARE_SPEC.md` §7.1 and answers the dependency question: **does lifting this hold depend on an action the hold itself suppresses?** If yes, the hold needs a bound. Three defects have had exactly this shape — #61, the keepalive counter-headroom defect, and #74/#68 | review |
-| **No secrets** | No keys, EUIs, or AppKeys in tracked files | `scripts/preflight.sh` |
-| **Nulls** | Missing sensor reads stay null; no fabricated zeros | review |
-
-## Steps 5–7 — Build, flash, evidence
-
-Build and flash only on the build host (rule 10), via `scripts/build.sh` and
-`scripts/flash.sh`. Both print the host and commit SHA. Report both.
-
-**Flashing is destructive and requires explicit user confirmation** when the target may
-be carrying known-good field firmware. Ask; do not assume.
-
-`docs/EVIDENCE.md` is the ledger. An entry records date, commit SHA, host, what was
-measured, and the raw observation. Until an entry exists, the correct status is
-`🚧 NOT YET DEPLOYED` — `AGENTS.md` forbids aspirational "deployed" claims, and
-`FIRMWARE_SPEC.md` H8 requires ≥24 h bench and ≥7 d field shadow before hike-in trust.
-
-## Steps 8–10 — Docs, version, push
-
-Docs ship **with** the code, never "later." If behavior, wiring, payload, or setup
-changed, the matching file in `docs/` changes in the same commit. `README.md` status must
-reflect reality.
-
-Version per `docs/RELEASE.md` (SemVer; the firmware version is emitted in the boot serial
-banner — carrying it in the uplink needs a paired TTN formatter change and is still open
-in `payload/schema.yaml`). Add a `CHANGELOG.md` entry. Then commit, push, and open a PR with
-`.github/PULL_REQUEST_TEMPLATE.md` filled in — including the citation list. Never push
-directly to `main` for a firmware behavior change.
+A `BLOCKED` entry in `payload/schema.yaml` ends preflight with `=== PREFLIGHT BLOCKED ===`
+(exit 0; `--strict` exits 2). None is BLOCKED as of 2026-08-13 — if one appears, read the named
+field rather than assuming it is the old `batt_current` conflict (closed by ADR-0002).
 
 ## Commit messages
 
-Conventional Commits, imperative, scoped to the work package:
+Conventional Commits, imperative, scoped to the work package, carrying the citations:
 
 ```
 feat(wp2): poll RK900-09 holding registers over RAK5802
 
-Reads 0x0000-0x0004 at 4800 8N1, slave 0x01, FC 0x03, 1000 ms timeout,
-2 retries, then marks the sensor failed and continues the cycle.
-Missing reads encode as null — never zero.
-
-CITE(datasheet): RK900-09 register map [CIT-RK900] — docs/FIRMWARE_SPEC.md §2.1
-CITE(spec): MODBUS Application Protocol V1.1b3 §6.3, FC 0x03 [CIT-MODBUS-APP]
-CITE(prior-art): ModbusMaster timeout handling [CIT-MODBUSMASTER]
+CITE(datasheet): RK900-09 register map [CIT-RK900]
+CITE(spec): MODBUS Application Protocol V1.1b3 §6.3 [CIT-MODBUS-APP]
 
 Refs #12
 ```

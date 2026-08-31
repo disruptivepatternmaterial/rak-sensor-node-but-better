@@ -1,0 +1,20 @@
+---
+description: Every GitHub issue an agent creates requires operator approval first. Requested 2026-08-30 after the tracker hit 103 issues in month one.
+alwaysApply: true
+---
+
+# GitHub issues require operator approval first
+
+**Never run `gh issue create` without the operator approving that specific issue, in this
+session, after seeing it.** No exceptions for "small" issues or issues another rule says to file.
+
+1. Search for a duplicate first: `gh issue list --state all --search "<terms>"`. If an existing
+   issue covers it, comment there — comments need no approval.
+2. Show the exact title, full body, and labels. Summaries don't count.
+3. Ask with `AskQuestion` and wait for a yes; batch several proposals with `allow_multiple`.
+4. File only what was approved, verbatim. Edits after approval need re-approval. A declined
+   proposal is dropped — not smuggled into a doc, a TODO comment, or a notes file.
+
+"Either solve it or file it" is amended to **either solve it or *propose* it** — the proposal is
+the record until the operator rules. Closing, retitling, and bulk label/milestone edits are
+gated the same way, except closure via `Fixes #N` in a PR the operator already approved.

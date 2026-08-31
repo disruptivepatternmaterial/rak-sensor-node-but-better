@@ -1,76 +1,40 @@
 ---
-description: Response style — answer first, length set by the question, no preamble, no dangling caveats
+description: Response style — answer first, length set by the question, consequences not activity, never restate the operator's own hardware.
 alwaysApply: true
 ---
 
 # Answer first
 
-The first sentence is the answer. If the user read only that sentence and closed the chat, they should have what they asked for.
-
-Before sending, read your first sentence alone. If it describes what you did, what you are about to do, or how something works, delete it and start again with the conclusion.
-
-- Yes/no questions start with "Yes" or "No."
-- "Which one" starts with the one.
-- "Why" starts with the cause, not an apology.
-- If you built something, the answer is what it concludes or what to do with it — not that it exists.
-
-Never open with "Great question," "Let me," "I'll," "Here's what I found," or a restatement of the question.
-
-Order after the first sentence: the answer, then why, then supporting detail, then code.
+The first sentence is the answer. Yes/no questions start with "Yes" or "No"; "which one" starts
+with the one; "why" starts with the cause. Never open with "Let me", "I'll", or a restatement of
+the question. Order: answer, why, detail, code.
 
 # Length is set by the question
 
-There is no word cap. Include everything that changes what the user does next, and nothing that does not.
+A factual question gets a sentence or two; a list gets the list with no prose; completed work
+gets the outcome first, then what changed and what was verified. Cut process narration,
+recaps, cheerleading, and speculative follow-ups. Shorten by saying fewer things, not by
+compressing sentences into fragments.
 
-| The user asked for | Give them |
-|---|---|
-| A yes/no or factual question | A sentence or two |
-| A list, or "give me N things" | The whole list, with no prose around it |
-| An explanation, or "walk me through it" | As much room as correctness takes |
-| Work you just completed | Outcome first, then what changed and what you verified |
-| A document or artifact | Full length in the file; a short summary in chat |
+# Consequences, not activity
 
-Cut ruthlessly: restating the question, recapping the conversation, narrating your process before showing the result, cheerleading, apologies, self-criticism, multiple framings of the same point, and speculative follow-ups. One targeted follow-up offer at most.
-
-Write complete sentences with the technical terms spelled out. Readability beats brevity — if the user has to reread the answer or ask again, nothing was saved. Shorten by choosing fewer things to say, not by compressing sentences into fragments or arrow chains.
-
-Use a table when the answer has several parallel parts. Use prose for everything else. File paths, code, and tables do not count against length.
+The operator said it plainly: *"never ever never going to read all that"*. Every reply answers,
+in order: what changed, what it means for the hardware in the woods, what the operator has to
+do — say "nothing" when that's true. Do not reproduce what is already recorded: commits,
+ADRs, and the changelog hold the reasoning; cite a file path instead of quoting its content.
 
 # No dangling caveats
 
-Never end with "One thing…", "One caveat…", "Worth noting…", "Heads up though…", or "Just so you know…". Do not relocate the same content under a "Notes" heading.
+Never end with "One thing…", "Worth noting…", or a "Notes" section. Test: if I say nothing,
+what breaks? Nothing → delete it. Something → say what breaks, plainly, in the body. Unknown →
+find out before sending. A real blocker or a question only the operator can answer is always
+allowed — as its own message, with the options.
 
-Apply this test: **if I say nothing, what breaks for the user?**
+# Never explain the operator's own hardware back to them
 
-- Nothing breaks → delete it.
-- Something breaks → say what breaks, plainly, in the body of the reply, not tacked on at the end.
-- I don't know what breaks → find out before sending.
-
-An unresolved detail you could have researched yourself is not a caveat. It is unfinished work — go finish it (`30-change-workflow.mdc`).
-
-Raising a real blocker is not a caveat and is always allowed. So is asking a question that only the user can answer. Ask it as its own message, with the options, not as an aside.
-
-# Write about consequences, not activity
-
-The operator said it plainly: _"never ever never going to read all that"_ and _"you need to be much more succinct and tell me why I care."_ A correct answer nobody reads is a wrong answer.
-
-This does not set a line count — length still follows what was asked, per the table above. It sets what the words are *about*. The operator cares whether the node survives the winter, not how the work was done. Every reply answers, in this order: what changed, what it means for the hardware in the woods, and what the operator has to do. Say "nothing" when that's true.
-
-| Don't write | Write |
-|---|---|
-| "Rewrote POWER_BUDGET.md around no-harvest survival, adding heater load and cutoff reasoning" | "Battery's fine — it has solar. Won't die on power." |
-| "ADR-0004 closes open decision #1, dedicating the RAK5802 to the RK900 at fixed 4800" | "Wire the battery to one-wire, RK900 to RS485. Decided." |
-| "The buck's no-load quiescent is a 24/7 parallel load that can exceed system average draw" | "Pick a buck with µA idle draw, not mA — or it drains the pack by itself." |
-
-## Don't reproduce what is already recorded
-
-- **No summarizing the work.** The commit and the changelog do that. Nobody needs both.
-- **No re-explaining a decision after making it.** The ADR holds the reasoning.
-- **Don't narrate corrections.** Fix it, state the new fact, move on. "I had this wrong" is one clause, not a paragraph.
-- **Cite a file path instead of quoting it.** A link is one line; the content is fifty.
-- **No paragraph explaining why a bug was subtle.** That belongs in the changelog entry, which is already written.
-- Reference work already recorded rather than reproducing it. "Two bugs fixed, both in the changelog" beats quoting either one.
-
-Writing a long file is fine — the *reply about it* still leads with the consequence.
-
-The pull toward length is strongest right after interesting work, because the temptation is to report the whole investigation. Resist it: the outcome is the interesting part, and the investigation is already in the commits, `docs/EVIDENCE.md`, and the issue tracker.
+They built these nodes and have stated the wiring repeatedly; it is settled in
+`docs/HARDWARE.md` — cite the file, do not recite the table. Before any sentence about the
+hardware, ask: does the operator already know this? If yes, delete it — not shorten, delete.
+Same for the trivially obvious: an image built with the A1 flag uses the A1 pin; saying so as a
+finding insults the reader. One exception: a **new** hazard discovered this session — say it
+once, then write it into `docs/HARDWARE.md` so it never needs saying again.

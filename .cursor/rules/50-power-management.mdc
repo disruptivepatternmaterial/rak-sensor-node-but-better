@@ -5,87 +5,44 @@ globs: ["src/**", "lib/**", "include/**", "platformio.ini", "docs/POWER_BUDGET.m
 
 # Power management — the node has to still be alive in March
 
-Success is "hike in, months unattended" (`plans/P0_HARDENED_NODE.md`). The node is on a
-battery pack with no solar in the ordered BOM (`HARDWARE.md` — Unify 910406, **no
-solar**). Average current, not peak current, decides whether the node survives the winter.
+**Sleep current dominates the budget**: the node is awake seconds per cycle and asleep the rest,
+so one stray milliamp in sleep outweighs everything the radio does. Optimize sleep first.
+Contract: H2 deep sleep between cycles, H3 brownout discipline, H5 interval and keys survive
+power loss (`FIRMWARE_SPEC.md` §7).
 
-**Sleep current dominates the budget.** At a 3600 s interval the node is awake for a few
-seconds and asleep for essentially the whole hour. A single stray milliamp in sleep
-outweighs everything the radio does. Optimize sleep first, always.
+## The RAK4631 sleep traps — documented failure modes
 
-## Non-negotiables
-
-| ID | Requirement | Source |
-|---|---|---|
-| H2 | Deep sleep between cycles; radio sleeps in Class A | `FIRMWARE_SPEC.md` §7 |
-| H3 | Brownout: no flash thrash; skip TX if voltage critically low | §7 |
-| H5 | Interval and keys survive power loss | §7 |
-| — | `Serial.end()` before sleep | see trap below |
-
-## The RAK4631 sleep traps — these are the documented failure modes
-
-1. **A node that cannot join never sleeps.** Per the WisBlock-API author: _"If you
-   initialize LoRaWAN, but cannot connect to a LoRaWAN server, the MCU will never sleep,
-   because it is retrying to join"_ [CIT-RAK-SLEEP]. This is the worst failure mode this
-   project has, because it couples directly to the deployment scenario: the gateway goes
-   down, the node cannot join, it stops sleeping, and it flattens the battery in days
-   instead of months — then stays dark even after the gateway returns. **Join backoff (H4)
-   is therefore a power requirement, not just an airtime courtesy.** Joining must be
-   bounded, and the node must sleep between join attempts.
-2. **Sleeping the MCU does not sleep the radio.** `sd_power_mode_set(NRF_POWER_MODE_LOWPWR)`
-   puts the nRF52 to sleep but leaves the SX1262 running; `Radio.sleep()` is required as
-   well [CIT-RAK-SLEEP]. A reporter measured 6 mA with the radio left awake.
-3. **Entering sleep does not disable peripherals — you must do it yourself.** The nRF52
-   leaves UART, SPI, TWI, and USBD enabled across sleep unless explicitly shut down
-   [CIT-NRF-POWER]. Measured consequence: **1.2 mA / 890 µA falling to 10 µA** once UART,
-   SPI, and USBD were disabled [CIT-NRF-PERIPH-SLEEP]. This is why `Serial.end()` and
-   `Serial1.end()` before sleep are mandatory (`FIRMWARE_SPEC.md` §5 step 7,
-   `LIBRARIES.md` item 23) — the difference is two orders of magnitude, and it does not
-   show up in a short bench test.
-4. **The RS-485 transceiver must be disabled between polls.** The RAK5802 driver draws
-   continuously if left enabled [CIT-RAK5802]. Enable it in step 2 of the wake cycle,
-   disable before sleep.
-5. **A USB-attached debug session masks all of it.** Sleep-current measurements taken over
-   USB are meaningless. Measure on battery — the documented approach is a Nordic PPK2 in
-   source-meter mode on the base board's battery connector [CIT-RAK-SLEEP] — and say so in
-   `docs/EVIDENCE.md`.
-6. **Deep sleep must be System OFF-class, not a busy `delay()`.** A `delay()` loop keeps
-   the core clocked [CIT-NRF-POWER]. Retained state that must survive sleep is documented
-   in `docs/POWER_BUDGET.md`.
+1. **A node that cannot join never sleeps** [CIT-RAK-SLEEP] — the gateway goes down, the node
+   retries forever, flattens the battery in days, and stays dark after the gateway returns.
+   Join backoff (H4) is a power requirement, not just airtime courtesy.
+2. **Sleeping the MCU does not sleep the radio** — `Radio.sleep()` is required too; 6 mA
+   measured with it left awake [CIT-RAK-SLEEP].
+3. **Peripherals stay enabled across sleep unless shut down** [CIT-NRF-POWER] — measured
+   1.2 mA falling to 10 µA once UART/SPI/USBD were disabled [CIT-NRF-PERIPH-SLEEP]. Hence
+   `Serial.end()` and `Serial1.end()` before sleep are mandatory (§5 step 7).
+4. **The RAK5802 RS-485 transceiver draws continuously if left enabled** [CIT-RAK5802] —
+   enable on wake, disable before sleep.
+5. **USB masks everything** — sleep current is measured on battery (PPK2 in source-meter mode
+   [CIT-RAK-SLEEP]), and the `docs/EVIDENCE.md` entry says how it was measured.
+6. **Deep sleep is System OFF-class, not `delay()`** [CIT-NRF-POWER].
 
 ## Wake cycle discipline
 
-Follow `FIRMWARE_SPEC.md` §5 exactly: pet WDT → enable RS-485 → poll RK900 → poll BMS →
-build and TX → handle RX1/RX2 → persist → shut peripherals down → sleep.
-
-Every path out of the cycle — including every error and timeout path — must reach the
-sleep step. **An early `return` that skips peripheral shutdown is a battery leak**, and it
-will not show up in a short bench test. A hung Modbus read must hit the watchdog (H1) and
-reset rather than spin: a reset costs one cycle, a spin costs the deployment.
-
-Bounded work only. Modbus transactions cap at 1000 ms with 2 retries (§2.1); a missing
-sensor marks failed and the cycle continues (H6, H7). No unbounded waits, anywhere.
+Follow §5 exactly: pet WDT → enable RS-485 → poll RK900 → poll BMS → build and TX → RX1/RX2 →
+persist → shut peripherals down → sleep. **Every path out of the cycle, including every error
+path, must reach the sleep step** — an early return that skips shutdown is a battery leak that
+no short bench test shows. Bounded work only: Modbus caps at 1000 ms with 2 retries (§2.1); a
+hung read hits the watchdog and resets (H1) rather than spins.
 
 ## Brownout
 
-Below the critical threshold: **do not transmit and do not write flash.** TX is the
-largest current draw and a brownout mid-flash-write corrupts the stored interval and keys
-(H3, H5). Log the state, sleep, and re-evaluate next wake. Repeated flash writes during a
-sagging battery are the classic way to lose a node permanently.
-
-The pack reports voltage, current, and SoC over the BMS link (§2.2), so the threshold is
-measurable. The **battery current sign convention is decided** — positive = charging,
-negative = discharging (ADR-0002, 2026-08-13), matching the pack's own telemetry. Charge and
-discharge logic may now read the sign, but none exists today and adding any is a change with
-its own gates: the convention has not yet been confirmed against a real charge current, only
-against a one-LSB discharge reading.
+Below the critical threshold: no TX, no flash writes (H3, H5) — log, sleep, re-evaluate next
+wake. Battery current sign is decided: positive = charging, negative = discharging (ADR-0002),
+confirmed only against a one-LSB discharge reading so far; adding charge/discharge logic is a
+gated change of its own.
 
 ## Changing anything power-related
 
-Any change to sleep, peripheral enable/disable, timing, or TX behavior must:
-
-1. Cite the manufacturer figure for the claim (`datasheet`, rule 20).
-2. Update `docs/POWER_BUDGET.md` with the recalculated average current and projected
-   runtime.
-3. Record a **measured** sleep current in `docs/EVIDENCE.md` before the change is called
-   done. A calculated budget is a hypothesis; only a measurement closes it.
+Cite the manufacturer figure (rule 20), update `docs/POWER_BUDGET.md` with the recalculated
+average current, and record a **measured** sleep current in `docs/EVIDENCE.md` before calling
+it done. A calculated budget is a hypothesis; only a measurement closes it.

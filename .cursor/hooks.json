@@ -1,6 +1,21 @@
 {
   "version": 1,
   "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "python3 .cursor/hooks/flash_gate.py",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "python3 .cursor/hooks/hook_edit_gate.py",
+        "matcher": "Write|StrReplace|Delete",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
     "postToolUse": [
       {
         "command": "python3 .cursor/hooks/liveness.py",

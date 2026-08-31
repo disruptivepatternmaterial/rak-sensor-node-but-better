@@ -5,121 +5,37 @@ alwaysApply: true
 
 # Environments — author here, build and flash there
 
-This project spans **two machines**. Getting this wrong wastes a session, so assume
-nothing and check.
-
 | | Workstation (this workspace) | Heliotrope Ridge (build host) |
 |---|---|---|
-| Role | Author code, docs, specs, git, `gh` | Compile, flash, serial capture, soak |
-| Path | `~/Documents/Brandt/rak-sensor-node-but-better` | `~/Documents/GitHub/lorawan/rak-sensor-node-but-better` |
-| Reach | local | `ssh "$RAK_BUILD_HOST"` — **you must set this, see below** |
-| PlatformIO | **absent** | `/opt/homebrew/bin/pio` |
-| `gh` CLI | present | `/opt/homebrew/bin/gh`, `GITHUB_TOKEN` in `~/.zprofile` |
-| USB / DFU | **no device** — cannot flash | **the only machine with the RAK4631 on USB** |
-| Writes outside the repo | **blocked** (agent sandbox: `$HOME` is read-only) | unrestricted |
+| Role | Author code, docs, git, `gh` | Compile, flash, serial capture, soak |
+| PlatformIO / device on USB | **absent** — `$HOME` is read-only, never install toolchains here | `/opt/homebrew/bin/pio`, the only machine with the RAK4631 |
+| Repo path | here | `~/Documents/GitHub/lorawan/rak-sensor-node-but-better` |
 
-## The rule
+**The build host is the operator's laptop and moves between networks.** A failed SSH means the
+laptop is elsewhere — ask for the address; do not investigate a "dead host". No address is in
+the repo (it is public): scripts resolve `BUILD_HOST`, then `RAK_BUILD_HOST`, then the first
+line of the untracked `~/.rak-build-host`, and fail by name if none is set. Verify with
+`ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'` →
+`Heliotrope-Ridge`. Never paste the address into anything tracked; `scripts/preflight.sh`
+fails on IPv4 literals.
 
-**Author locally. Compile and flash on Heliotrope Ridge. Always.**
+**The SSH gotcha:** non-interactive SSH skips `~/.zprofile`, so `pio` looks uninstalled. Always
+`zsh -l -c "..."`, or better, use `scripts/remote.sh`, which handles the login shell, the `cd`,
+and the sentinels.
 
-Do not try to install PlatformIO, toolchains, or nRF utilities on the workstation. The
-agent sandbox denies writes to `$HOME`, so `~/.platformio` cannot be created — and even
-if it could, the hardware is not on this machine's USB. Anything that touches the
-physical device is a build-host operation, full stop.
+**Git is the only transport.** Never `scp`/`rsync`/paste between machines. Before any remote
+build: commit and push locally, `pull --ff-only` on the build host, confirm its HEAD equals the
+SHA you intend to build, and report that SHA. `scripts/remote.sh sync` does this and refuses a
+dirty remote tree. If the build host has local commits, surface it; never rebase or discard the
+operator's work.
 
-If a tool is genuinely missing on **both** machines, install it on the **build host** and
-record it in `docs/ENVIRONMENTS.md`. Never install project toolchains on the workstation.
+**Two GitHub identities, both normal.** The workstation's HTTPS credential helper and `gh` are
+`disruptivepatternmaterial` and **can push** (re-verified 2026-08-28; confirm with
+`git push --dry-run origin HEAD:refs/heads/main`). The SSH keys are the work account and 403 —
+do not "fix" the remote URL. Commits you did not write appear on `origin/main` because the
+operator pushes from their IDE, sometimes capturing an agent's in-progress tree: fetch, look,
+fix forward, never rewrite pushed history. `scripts/push.sh` remains as a relay via the build
+host and guards against pushing during a soak.
 
-## The build host is a laptop — set the address, do not investigate it
-
-**The build host is the operator's laptop, and it is not always on the same network.** That
-is the whole story. An SSH failure is a fact about where the laptop is, not evidence of a
-broken host, a dead machine, or an infrastructure problem. **Ask for the address. Do not
-open an investigation.**
-
-No address is recorded in this repository, because the repository is public.
-
-```bash
-export RAK_BUILD_HOST=ntableman@<address>       # ask the operator for <address>
-ssh -o ConnectTimeout=8 -o BatchMode=yes "$RAK_BUILD_HOST" 'zsh -l -c "hostname"'
-# → Heliotrope-Ridge
-```
-
-Every script resolves the host as `BUILD_HOST`, then `RAK_BUILD_HOST`, then the first line
-of `~/.rak-build-host` — an untracked file, which is the way to make it persist across
-shells without putting the address in the repo. **There is no default.** With none of the
-three set, the scripts fail immediately naming `RAK_BUILD_HOST`, rather than connecting to a
-guess and reporting the result as a dead host. Never paste the address into a commit, an
-issue, a doc, or a comment; `scripts/preflight.sh` fails on any IPv4 literal in a tracked
-file.
-
-## The SSH gotcha that will bite you
-
-**Non-interactive SSH does not source `~/.zprofile`, so `/opt/homebrew/bin` is not on
-`PATH`.** A bare `ssh host 'pio run'` reports `pio: command not found` and looks exactly
-like "PlatformIO is not installed." It is installed. Your shell is just wrong.
-
-Always force a login shell:
-
-```bash
-ssh "$RAK_BUILD_HOST" 'zsh -l -c "cd ~/Documents/GitHub/lorawan/rak-sensor-node-but-better && pio run"'
-```
-
-Use `scripts/remote.sh` instead of hand-rolling this — it handles the login shell, the
-`cd`, and the sentinel lines. Diagnose a "missing" tool with `zsh -l -c "command -v <tool>"`
-before concluding anything.
-
-## Git is the only transport between machines
-
-The user sometimes works directly on the build host, or on a laptop. **Never assume the
-build host mirrors this workspace.** Uncommitted local edits do not exist over there.
-
-Before any remote build:
-
-1. Commit and push locally.
-2. `git -C <remote path> pull --ff-only` on the build host.
-3. Confirm the build host HEAD equals the SHA you intend to build, and **report that SHA**.
-
-`scripts/remote.sh sync` does this and refuses to proceed on a dirty remote tree.
-
-Never `scp`, `rsync`, or paste files between machines — that creates an untracked
-divergence nobody can reproduce later. If the build host has local commits, stop and
-surface it; do not rebase or discard the user's work on the other machine.
-
-## Two GitHub identities — this is normal, not an anomaly
-
-The user has a work account and a personal account. This is settled; do not re-derive it
-every session, and **do not treat commits you did not write as suspicious.** It is the
-user's repository and they push to it directly.
-
-| Where | Authenticates as | Can push to `disruptivepatternmaterial`? |
-|---|---|---|
-| Workstation `gh` + HTTPS credential helper | `disruptivepatternmaterial` | **Yes** — re-verified 2026-08-28 |
-| Workstation SSH keys (`ssh -T git@github.com`) | `ntableman_sfemu` (work) | No — HTTP 403 |
-| The user's IDE (its own GitHub sign-in, not shared with the git CLI) | personal | Yes |
-| Heliotrope Ridge build host | `disruptivepatternmaterial` | Yes |
-
-**This rule used to say the workstation could not push at all. That is stale.** The 403 is
-real but belongs to the **SSH** keys; `origin` is an HTTPS remote and uses the credential
-helper, which is signed in as `disruptivepatternmaterial`. Verify before relying on it —
-`git push --dry-run origin HEAD:refs/heads/main` authenticates fully and transfers nothing —
-then push. Do not "fix" anything by editing the remote URL or the git config.
-
-`scripts/push.sh` still works and is worth using when the credential helper is uncooperative
-or a soak is running: it pushes the branch to a non-checked-out ref on the build host,
-fast-forwards the build host's `main`, and pushes to GitHub over SSH. It is no longer the
-only way, so an unreachable build host does not strand a commit.
-
-Two consequences worth internalizing:
-
-- **Unfamiliar commits on `origin/main` are expected.** The user commits from their IDE,
-  sometimes mid-session and sometimes capturing an agent's in-progress working tree.
-  Fetch, look, and continue. Do not narrate it as a mystery.
-- **The user's IDE can commit your unfinished work.** A failing gate can therefore reach
-  CI before you have fixed it. Fix forward; do not rewrite the pushed history.
-
-## Reporting
-
-Every build, flash, or soak result must state **which host** it ran on and **which commit
-SHA** was built. A result without a host and a SHA is not evidence
-(`docs/EVIDENCE.md`).
+**Every build, flash, or soak result names its host and commit SHA** — otherwise it is not
+evidence (`docs/EVIDENCE.md`). Full detail: `docs/ENVIRONMENTS.md`.
