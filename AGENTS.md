@@ -47,7 +47,7 @@ The consequences are absolute:
 | Rule | Covers |
 |---|---|
 | [00-agent-liveness](.cursor/rules/00-agent-liveness.mdc) | Progress every 2–4 min; stale at 5; bounded calls and retries |
-| [01-response-style](.cursor/rules/01-response-style.mdc) | Answer first; consequences not activity; never restate the operator's hardware |
+| [01-response-style](.cursor/rules/01-response-style.mdc) | Consequences not activity; never restate the operator's hardware (generic style rules are global) |
 | [02-issue-approval](.cursor/rules/02-issue-approval.mdc) | Operator approves every issue before it is filed |
 | [03-bench-claims](.cursor/rules/03-bench-claims.mdc) | Observation vs hypothesis; two-guess limit; evidence names the core; closed topics |
 | [05-never-instruct](.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc) | No connection to an unmeasured voltage, ever |
