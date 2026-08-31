@@ -215,9 +215,9 @@ class Config {
 
     // Whether the brownout gate was engaged when this node last wrote its settings.
     //
-    // Persisted because the gate previously lived only in RAM, which made it fail open:
-    // every reset returned the node to transmit-allowed, and a pack that had stopped
-    // answering because it was low left no evidence to correct that. See power::Brownout.
+    // Persisted because a gate living only in RAM fails open: every reset returns the node to
+    // transmit-allowed, and a pack that stopped answering because it was low leaves no evidence
+    // to correct that. See power::Brownout.
     bool brownout_engaged() const { return m_brownout_engaged; }
 
     // Records a change in the gate. No write when the value is unchanged — flash cycles are

@@ -88,57 +88,23 @@
 #define FEATURE_BUS_SCAN 0
 #endif
 
-// ===========================================================================================
-// DELETED 2026-08-30 — FEATURE_ONEWIRE_SCAN, OWSCAN_CENSUS_ONLY, OWSCAN_PIN, and the whole of
-// src/diagnostics/owscan.{h,cpp}. DO NOT RECREATE ANY OF IT. Not a passive variant, not a
-// "safe" variant, not behind a flag.
+// FEATURE_ONEWIRE_SCAN, OWSCAN_CENSUS_ONLY, OWSCAN_PIN and src/diagnostics/owscan.{h,cpp} were
+// DELETED 2026-08-30. DO NOT RECREATE ANY OF IT — not a passive variant, not behind a flag. A
+// diagnostic that drives an unqualified pad at 14x the production rate (192 bytes of 0x55 per
+// cycle, against ~14 bytes per 900 s) is wrong on its own terms, whether or not it is what
+// destroyed the seven pads — which is NOT established. Qualify a pad with a meter against a
+// known-good pin on the same core; read an unknown line with the logic analyzer, never a pad.
 //
-// WHY THE DELETION STANDS ON ITS OWN: a diagnostic that drives an UNQUALIFIED pad at 14x the
-// production rate is wrong whether or not it is the culprit. Its phase 0 drove 64 bytes of 0x55
-// at three baud rates every cycle — 192 bytes, cycling in seconds — where the production battery
-// read drives ~14 bytes per 900 s, and 0x55 toggles every bit. That is sufficient justification
-// and it does not depend on anything below.
+// Full reasoning, and the line between what was measured and what is inferred:
+// AGENTS.md § "NEVER DRIVE THE ONE-WIRE PAD FROM A DIAGNOSTIC".
+// Procedure: docs/HARDWARE.md § "Qualifying the pack harness".
 //
-// CAUSE IS NOT ESTABLISHED. Seven pads are dead across two cores, every one the pad carrying the
-// pack's data line (#102). The correlation is solid. The mechanism is a CANDIDATE.
-//
-// Measured 2026-08-30, and these are facts: the pack actively drives its end of the wire at
-// +3.3118 V idle and +0.0867 V low, 9,520 edges in 57 s. SDA/P0.13 reads 5.6 kOhm to ground
-// against 240 kOhm on the never-connected SCL control pin, same core, same meter, powered down.
-// So contention is physically available, and that pad is genuinely damaged.
-//
-// INFERRED, NOT MEASURED: that two live drivers in opposition put ~3.3 mA through the pad, and
-// that this is what killed it. The 3.3 mA is Ohm's law across the 1 kOhm series resistor, not an
-// observation — nobody has watched the node's end of that wire while it transmits. The arithmetic
-// does correct a real error: earlier sessions compared that current to the nRF52840's 15 mA
-// ABSOLUTE MAXIMUM and cleared contention, when the pin's STANDARD DRIVE continuous rating is
-// 1-2 mA [CIT-NRF-GPIO-TOTAL]. Wrong limit. That makes chronic degradation plausible. It does not
-// make it true.
-//
-// THE MEASUREMENT THAT WOULD SETTLE IT, still undone: an analyzer channel on each side of the
-// 1 kOhm series resistor while the node transmits. Difference over 1 kOhm is the contention
-// current, directly. Under 1 mA kills the hypothesis; ~3 mA supports it. Blocked on a flashable
-// core (#95).
-//
-// Two further reasons it is not coming back:
-//
-//   1. THE OPERATOR NEVER RAN IT. Agents flashed it over SSH, repeatedly, across sessions. A
-//      warning comment would have been read by exactly the sessions that already ignored one.
-//      Deleting the code is the only control that does not depend on the next agent's care.
-//   2. IT WAS WORSE THAN THE ALTERNATIVE ANYWAY. Two multimeter readings settled in one minute
-//      what this diagnostic got wrong across multiple sessions and several discarded cores. If
-//      a pad needs qualifying, meter it against a known-good pin on the same core — see
-//      docs/HARDWARE.md § "Qualifying the pack harness".
-//
-// If you believe you need to observe that line, use the logic analyzer. It survives -25 V to
-// +25 V and presents 2 MOhm [CIT-SALEAE-LOGICPRO8], against a pad that survives 3.6 V powered
-// and 0.3 V unpowered. It reads the answer without spending a core, and on 2026-08-30 it decoded
-// the pack's entire announcement frame at 9600 8N1 with no MCU connected at all.
-//
-// CITE(bench): docs/EVIDENCE.md 2026-08-30 — the measured drive levels, the 9,520 edges, the
-//   5.6 kOhm / 240 kOhm pad comparison, and the decoded frame.
-// CITE(datasheet): [CIT-NRF-GPIO-TOTAL] nRF52840 standard drive sink/source 1/2/4 mA.
-// ===========================================================================================
+// CITE(bench): docs/EVIDENCE.md 2026-08-30 — pack drive levels, 9,520 edges in 57 s, and the
+//   5.6 kOhm / 240 kOhm damaged-versus-healthy pad comparison on one core.
+// CITE(datasheet): [CIT-NRF-GPIO-TOTAL] nRF52840 standard drive sink/source 1/2/4 mA — the
+//   continuous rating, distinct from the 15 mA damage limit an earlier session cleared against.
+// CITE(datasheet): [CIT-SALEAE-LOGICPRO8] Logic Pro 8 tolerates -25 V to +25 V at 2 MOhm,
+//   against a pad rated 3.6 V powered and 0.3 V unpowered — why the analyzer is the instrument.
 
 // Deliberately no FEATURE_BATTERY_MODBUS. A raw Modbus read at slave 0x6E on the pack's
 // one-wire line drew 0 bytes on every cycle — the Generic Probe IO adapter does not bridge a
@@ -185,13 +151,12 @@
 // The second recovery pad, WB_I2C1_SDA/P0.13. Takes precedence over FEATURE_BATTERY_PIN_A1 so a
 // board cannot be built for two pins at once.
 //
-// Added because node 002's core lost A1 the same way earlier cores lost IO1: on 2026-08-30 both
+// Exists because node 002's core lost A1 the same way earlier cores lost IO1: on 2026-08-30 both
 // IO1 and A1 sampled 100 % low against the internal pull-up — across two separate harnesses and
-// again with the harness entirely removed — while SDA read idle HIGH, 0 of 1,848,823 samples low
-// (env:owscan_sda, issue #96). Why two pads on one core failed is unexplained and still open, so
-// this is a route around a measured fault, not a claim about the cause. Never select a pad without
-// running the census on it first: A1 was chosen by decision rather than measurement, and that is
-// part of how this got expensive.
+// again with the harness entirely removed — while SDA read idle HIGH (issue #96). Why two pads on
+// one core failed is unexplained and still open, so this is a route around a measured fault, not a
+// claim about the cause. Never select a pad before metering it: A1 was chosen by decision rather
+// than measurement, and that is part of how this got expensive.
 #ifndef FEATURE_BATTERY_PIN_SDA
 #define FEATURE_BATTERY_PIN_SDA 0
 #endif
@@ -199,29 +164,19 @@
 // The THIRD and LAST recovery pad on node 002's core: WB_I2C1_SCL/P0.14. Takes precedence over
 // both flags above so a board cannot be built for two pins at once.
 //
-// SDA/P0.13 failed on 2026-08-30 like A1 and IO1 before it, and the operator's meter separated
-// damage from suspicion for the first time: with the core installed and everything powered down,
-// SDA read 5.6 kohm to GND while SCL — never connected to the pack — read 240 kohm. 43x apart on
-// the same core, same meter, so SDA is genuinely damaged and SCL is genuinely healthy. The
-// firmware's earlier 0.121 V on that powered pin implies ~495 ohm at 3.3 V, an 11x drop from the
-// meter's reading at its lower test voltage: a non-linear, diode-like junction, i.e. a punched
-// through ESD clamp on the GROUND side rather than a resistive short.
-//
-// Ground side matters. It means current entered the pad while the pad was pulling LOW, which is
-// the direction where our NMOS sinks the pack's active HIGH — and on the same day the pack was
-// measured driving its end (+3.3118 V idle, +0.0867 V low, 9,520 edges in 57 s).
-//
 // **SCL IS THE LAST USABLE PAD ON THIS CORE.** IO1, A1 and SDA are gone; TX1/RX1 belong to the
 // RS-485 module, IO2 gates the 3V3_S rail, and IN1 is not a core GPIO in the variant. So do not
 // select this pin until the transmit path that consumed the other three is fixed — moving the
 // wire without fixing the drive spends the last pad and the core with it (issue #99, #102).
 //
+// The meter reading that makes SDA damaged and SCL healthy (5.6 kohm against 240 kohm, same core,
+// powered down), and the punched-through-ESD-clamp reasoning it supports, are in docs/EVIDENCE.md
+// and AGENTS.md. Do not re-derive them here.
+//
 // Reachable as a spring terminal on the RAK5802 (`SCL SDA 3V3 AIN`), so unlike A1 this needs no
 // solder joint. Same switched-rail caveat as SDA: that terminal sits on a module whose supply
 // WB_IO2 gates, so SwitchedRailHold in battery.cpp must cover this pin too.
 //
-// CITE(datasheet): [CIT-NRF-GPIO-TOTAL] nRF52840 standard drive sink/source 1/2/4 mA — the
-//   continuous rating the contention current exceeds, distinct from the 15 mA damage limit.
 // CITE(bench): docs/EVIDENCE.md 2026-08-30 — the 5.6 kohm / 240 kohm pad comparison and the
 //   measured pack drive levels behind the paragraph above.
 #ifndef FEATURE_BATTERY_PIN_SCL

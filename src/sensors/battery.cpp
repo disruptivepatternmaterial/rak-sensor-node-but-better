@@ -28,9 +28,9 @@ namespace {
 // The RAK Sensor Hub one-wire link is NOT a bare TLV stream. Every frame is a RUI3
 // transport frame — { wakeup, delimiter, 16-bit length, type, flag, payload } — carrying a
 // SensorHub API frame — { dest, source, sequence, hub-type, payload-length, payload-type,
-// payload } — terminated by a one-byte checksum. Omitting the length/type/flag transport
-// header (as the previous revision did) makes the pack reject the frame in
-// verify_rui3type()/verify_checksum() and never reply — the 0-byte symptom.
+// payload } — terminated by a one-byte checksum. Omit the length/type/flag transport header and
+// the pack rejects the frame in verify_rui3type()/verify_checksum() and never replies — which
+// presents as the 0-byte symptom, not as a framing error.
 //
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] beegee-tokyo/RAK-OneWireSerial
 //   src/onewire_master_protocol.h — RUI3_Api_t{wakeup,start,length,type,flag,payload} and
@@ -68,8 +68,9 @@ constexpr uint8_t kWakeByte = 0xFF; // RUI3_Api_t.wakeup
 // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the transport under
 //   that event is `case SNHUBAPI_EVT_QSEND: mySerial.write(msg, len);`, one write of the
 //   whole buffer with nothing prepended.
-// The value itself now lives in battery.h as kBatteryWakeCount, because the one-wire scan
-// diagnostic has to send the identical run and a drifted copy there costs a whole bench session.
+// The value itself lives in battery.h as kBatteryWakeCount, so any future reader of this link
+// sends the identical run — a drifted copy costs a whole bench session, because a pack that is
+// working answers a short run with silence.
 //
 // RESTORED to 4, from 1. The reasoning that cut it to 1 was sound about the reference's struct
 // and wrong about which revision worked: `RUI3_Api_t.wakeup` is indeed a single byte, but the
@@ -187,16 +188,12 @@ constexpr uint32_t kParamIntvMax     = 86400;
 // How long to wait for the pack to acknowledge a parameter write, and how many times to
 // repeat it.
 //
-// The previous revision fired PARAMSET once and drained for about 5 ms, on the reasoning
-// that the reference library leaves `protocol_list[SNHUB_TYPE_PARAMSET]` with both `.req`
-// and `.rsp` NULL and therefore expects no response at all. That reasoning is now known to
-// be incomplete: RAK's own tooling treats a probe-configuration write as a request that must
-// be *acknowledged*, budgeting 3000 ms for the acknowledgement and retrying up to 3 times.
-// A 5 ms drain cannot observe a 3000 ms acknowledgement, so the firmware has never been in a
-// position to know whether the pack answered — the write was not merely unacknowledged, it
-// was unobservable.
-//
-// Matching RAK's budget is what makes the next capture diagnostic instead of ambiguous.
+// Sized to RAK's own budget, not to the reference library's. The reference leaves
+// `protocol_list[SNHUB_TYPE_PARAMSET]` with both `.req` and `.rsp` NULL, which reads as "expects
+// no response" and invites a drain of a few milliseconds — but RAK's tooling treats a
+// probe-configuration write as a request that must be *acknowledged*, allowing 3000 ms and three
+// attempts. A short drain cannot observe a 3000 ms acknowledgement, which makes the write not
+// merely unacknowledged but unobservable, and any capture taken against it ambiguous.
 //
 // CITE(datasheet): [CIT-WISTOOLBOX-AT] at-specification-list-details.json @ byte 389344 —
 //   the `ATC+SNSR_CONF` command's config block is
@@ -753,22 +750,21 @@ void Battery::send_boot()
 // The reference treats BOOT as a reboot verb and nothing else: api_init() sends one at
 // startup, and the only other sender is api_set_provision(), which the API table exports as
 // `.reboot`. Nothing in that path latches a probe — the latch is written by the master's reply
-// to an announcement (pid = slot index + 1). This driver used to send BOOT at the top of every
-// provisioning window, so every attempt to re-latch a pack sitting at PID_UNKNOW began by
-// restarting the pack it was trying to latch, and the id never stuck. That is the best
-// code-level explanation available for issue #62.
+// to an announcement (pid = slot index + 1). So sending BOOT to open a provisioning window
+// restarts the very pack it is trying to latch, and the id never sticks: the best code-level
+// explanation available for issue #62.
 //
 // Kept, rather than deleted: a pack that has gone silent altogether has no other nudge
 // available, and one reboot is what the reference's own startup does. Never sent while the pack
 // is answering — a working pack is not rebooted.
 //
-// The allowance was previously one BOOT per *power cycle*, which was wrong in both directions
-// and both were observed. Too eager: it fired on the first cycle whose direct probe went
-// unanswered, and on 65f8615 one transient miss out of twenty cycles did exactly that on a pack
-// that returned a live reading in the same cycle (issue #75). Too scarce: on the field image a
-// power cycle lasts months, so that single miss also consumed the only nudge available for a
-// genuine failure weeks later (issue #71). Three gates now stand between a missed probe and a
-// reboot request, and all three must agree:
+// Scoped per failure episode rather than per *power cycle*, a scope that was wrong in both
+// directions and observed failing both ways. Too eager: it fired on the first cycle whose direct
+// probe went unanswered, and on 65f8615 one transient miss out of twenty cycles did that on a
+// pack that returned a live reading in the same cycle (issue #75). Too scarce: on the field image
+// a power cycle lasts months, so that single miss also consumed the only nudge available for a
+// genuine failure weeks later (issue #71). Three gates stand between a missed probe and a reboot
+// request, and all three must agree:
 //
 //   1. sustained silence — kSilentCyclesBeforeBoot consecutive cycles with no reading of any
 //      kind, so one miss, or a miss rescued by the same cycle's push listen, does not qualify;
@@ -919,13 +915,12 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
         // Mutate and transmit FIRST. Nothing — not one log line — goes between recognising the
         // announcement and putting the answer on the wire.
         //
-        // This ordering is the fix. The previous revision decoded and printed the six sensor
-        // descriptors here, seven LOGF lines, and only then transmitted. LOG goes to USB CDC,
-        // and a CDC write blocks until the host drains the endpoint FIFO — milliseconds per
-        // line when a host is attached, and unbounded when one is attached but not reading. So
-        // the reply that this driver correctly composed was leaving tens of milliseconds after
-        // the announcement it answers, by which time the pack had given up on being provisioned
-        // and moved on to re-announcing. Byte for byte the frame was right; it was simply late.
+        // The ordering is the whole point. LOG goes to USB CDC, and a CDC write blocks until the
+        // host drains the endpoint FIFO — milliseconds per line with a host attached, unbounded
+        // with a host attached that is not reading. Log the six sensor descriptors here instead
+        // and a byte-perfect reply leaves tens of milliseconds late, by which time the pack has
+        // given up and moved on to re-announcing. The frame is right; it is simply late, which is
+        // the hardest version of this bug to see.
         //
         // The reference has no such gap and, tellingly, its author commented out the two
         // LOG_INFO calls on exactly this path. The descriptors are still read and still logged
@@ -1053,13 +1048,11 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 
 // Stay in the provisioning phase, answering every announcement, the way a real master does.
 //
-// The previous revision answered the first announcement and then moved on to polling within
-// milliseconds. That is the last structural difference between this driver and a master the
-// pack is known to accept, and it is now the only surviving explanation for the pack never
-// latching the id: everything else has been eliminated. The response bytes match the
-// reference exactly, VER3 is the type the reference acts on, BOOT is the only frame a master
-// originates, and the parameter writes were ours alone. What we have never done is keep
-// answering.
+// Answering the first announcement and moving on to polling within milliseconds is the last
+// structural difference between this driver and a master the pack is known to accept, and so the
+// only surviving explanation for a pack that never latches the id — everything else has been
+// eliminated. The response bytes match the reference exactly, VER3 is the type the reference acts
+// on, and BOOT is the only frame a master originates.
 //
 // The reference's steady state is a loop, not a transaction. Meshtastic reschedules the
 // one-wire handler every 50 ms for as long as the board is powered and drains on every tick,
@@ -1072,12 +1065,11 @@ void Battery::dump(const char *what, const uint8_t *buf, size_t len)
 // were.
 //
 // Structure:
-//   * No BOOT, at all. It used to be sent at the top of every window, which meant this
-//     driver rebooted the pack on every attempt to re-latch it — see boot_if_warranted()
-//     and issue #62. BOOT is the reference's reboot verb, not its re-latch verb. The pack
-//     announces itself unprompted anyway, so this window has nothing to prompt for.
-//   * Then drain-and-answer until the deadline, with the same early-exit drain and the same
-//     mutate-and-transmit response as before. Nothing about the frame changes.
+//   * No BOOT, at all. It is the reference's reboot verb, not its re-latch verb, so opening a
+//     window with one reboots the pack the window is trying to latch — see boot_if_warranted()
+//     and issue #62. The pack announces itself unprompted anyway; there is nothing to prompt for.
+//   * Drain-and-answer until the deadline, using the early-exit drain and the mutate-and-transmit
+//     response. Nothing about the frame differs from the solicited path.
 //   * Break the moment the pack proves it latched (see below), because at that point the
 //     window has served its purpose and every further second is pure battery cost.
 //
@@ -1260,13 +1252,13 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
     const BatteryResult r = battery_decode_frame(buf, len, out, notes, match);
 
     // Everything below this point is diagnostics. The codec runs on the build host and has no
-    // Arduino, so the lines that used to be LOGF calls inside the record walker are printed
-    // here from what it recorded. None of it changes the verdict.
+    // Arduino, so the record walker records what it saw and the LOGF calls happen here instead.
+    // None of it changes the verdict.
     if (r == BatteryResult::Truncated && !notes.truncated_record) {
-        // The single most misleading line in this driver's history was the one that did not
-        // exist here. State both numbers: the length the frame declared and the length that
-        // arrived. Everything the next reader needs to look at the transport is in it. Both
-        // are measured from the delimiter, so they are directly comparable.
+        // State both numbers: the length the frame declared and the length that arrived. A
+        // truncation reported without them is the most misleading line this driver can print,
+        // because it looks like a framing fault and reads as nothing to act on. Both are
+        // measured from the delimiter, so they are directly comparable.
         LOGF("   battery : truncated frame — declared %u bytes from the delimiter, %u arrived\n",
              (unsigned)notes.declared, (unsigned)notes.arrived);
     }
@@ -1431,7 +1423,7 @@ BatteryReading Battery::read()
     // CITE(datasheet): [CIT-RAK19007] "IO2 controls the power switch of 3V3_S" — the rail this
     //   raises, and the reason the module is unpowered by the time Battery::read() runs.
     // CITE(bench): docs/EVIDENCE.md 2026-08-30 — the production cycle runs Battery::read() with
-    //   3V3_S already dropped by RK900::power_off(), confirmed by owscan's rail A/B phase.
+    //   3V3_S already dropped by RK900::power_off().
     // Both RAK5802 spring terminals that can carry this link — `SDA` and `SCL` — sit on the same
     // switched rail, so the hold covers both. SCL became the live candidate on 2026-08-30 when SDA
     // measured 5.6 kohm to ground against 240 kohm on SCL (docs/EVIDENCE.md); leaving it out here
@@ -1452,18 +1444,17 @@ BatteryReading Battery::read()
 
     // Phase 1: complete the provisioning handshake.
     //
-    // The previous revision had the direction of this exchange backwards. It sent BOOT and
-    // waited to be answered, then threw the reply away and addressed the probe as 0x01
-    // regardless. But BOOT is not a question — the pack is the initiator here. It announces
-    // itself to the master with a PROVISION request carrying provId = 0xFF, and the master
-    // completes the handshake by answering that announcement with the id it is assigning.
-    // Nothing had ever answered, so the pack stayed unprovisioned, kept re-announcing, and
-    // reported placeholder zeros.
+    // The direction of this exchange is easy to get backwards, and getting it backwards is what
+    // leaves a pack reporting placeholder zeros forever. BOOT is not a question: the pack is the
+    // initiator. It announces itself to the master with a PROVISION request carrying
+    // provId = 0xFF, and the master completes the handshake by answering that announcement with
+    // the id it is assigning. A master that sends BOOT and waits to be answered never answers,
+    // so the pack stays unprovisioned and keeps re-announcing.
     //
-    // Nothing is transmitted to open this phase. The BOOT that used to lead it is now a
-    // once-per-failure-episode nudge sent by the caller (boot_if_warranted()), and only after
-    // sustained silence, because BOOT is the reference's reboot verb and sending it on every
-    // attempt restarted the pack being latched — issue #62.
+    // Nothing is transmitted to open this phase. BOOT is the caller's once-per-failure-episode
+    // nudge (boot_if_warranted()), sent only after sustained silence, because it is the
+    // reference's reboot verb — sending it on every attempt restarts the pack being latched,
+    // which is issue #62.
     //
     // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c — the master
     //   has no provision *poll*: protocol_list[SNHUB_TYPE_PROVISION] defines only `.req`
@@ -1546,16 +1537,15 @@ BatteryReading Battery::read()
                 // frames flagged RSP, carrying this cycle's sequence number, sent back from
                 // the destination we addressed.
                 //
-                // The previous revision required `Ok || m_pack_latched` here, and that was
-                // wrong in the one case that happens on every boot. m_pack_latched starts
-                // false after every MCU reset, and the pack needs a couple of cycles to
-                // sample before it fills the record, so the routine post-boot Unsampled reply
-                // from 0x01 fell through to the !answered_direct branch below and called the
-                // BOOT path — rebooting a pack that had just answered correctly, and spending
-                // the episode's BOOT before any genuine failure could ask for it. Issues #62
-                // and #71. That branch is now gated on sustained silence as well
-                // (boot_if_warranted()), so this fix and that gate are belt and braces on the
-                // same mistake rather than duplicates of it.
+                // Requiring `Ok || m_pack_latched` here instead is wrong in the one case that
+                // happens on every boot: m_pack_latched starts false after every MCU reset, and
+                // the pack needs a couple of cycles to sample before it fills the record, so the
+                // routine post-boot Unsampled reply from 0x01 falls through to the
+                // !answered_direct branch below and calls the BOOT path — rebooting a pack that
+                // just answered correctly, and spending the episode's BOOT before any genuine
+                // failure can ask for it. Issues #62 and #71. That branch is independently gated
+                // on sustained silence (boot_if_warranted()), so the two are belt and braces on
+                // the same mistake rather than duplicates of it.
                 //
                 // Nothing is lost by trusting it. The announcement window this skips exists
                 // to re-latch a pack that has dropped back to 0xFF, and a pack that has
@@ -1637,12 +1627,11 @@ BatteryReading Battery::read()
     // draws total silence, which is indistinguishable from an unplugged cable.
     //
     // Which address "answered" is decided by whether a SENDAT frame came back, NOT by whether
-    // bytes came back, and that distinction is a fix rather than a nicety. The pack announces
-    // itself spontaneously and repeatedly, so a request sent to an address nothing is
-    // listening on still routinely returns a non-empty buffer — it just contains the
-    // announcement. The previous revision took any non-zero byte count as proof and would
-    // latch m_pid onto the dead address for the rest of the node's life, turning a recoverable
-    // mis-addressing into a permanent one.
+    // bytes came back. The pack announces itself spontaneously and repeatedly, so a request sent
+    // to an address nothing is listening on still routinely returns a non-empty buffer — it just
+    // contains the announcement. Take a non-zero byte count as proof and m_pid latches onto the
+    // dead address for the rest of the node's life, turning recoverable mis-addressing into
+    // permanent mis-addressing.
     //
     // CITE(bench): docs/EVIDENCE.md — dest sweep on 3d3425d: 0x01/0x02/0x03 -> 0 bytes,
     //   0xFF -> a full 28-byte SENDAT response with a valid checksum, immediately followed in
@@ -1807,8 +1796,8 @@ BatteryReading Battery::read()
                            (m_stalled_cycles >= kStalledCyclesBeforeProbeOnly);
         if (spent && m_next_full_cycle == 0) {
             m_next_full_cycle = m_cycles + kFullLadderRetryCycles;
-            // All three counts, because which one tripped is the whole diagnosis and the
-            // single number the old line printed could not say.
+            // All three counts, because which one tripped is the whole diagnosis and a single
+            // combined number cannot say.
             LOGF("   battery : %u empty record(s), %u silent, %u stalled in total — dropping "
                  "to the direct probe alone, full retry at cycle %lu\n",
                  (unsigned)m_unsampled_cycles, (unsigned)m_silent_cycles,
@@ -1817,8 +1806,7 @@ BatteryReading Battery::read()
     }
 
     // First real measurement of this boot is worth one line on the console; the same line on
-    // every wake for months is not. The flag exists to make it once. It does not gate any
-    // configuration work — there is none left to gate.
+    // every wake for months is not. The flag exists to make it once, and gates nothing else.
     if (m_last == BatteryResult::Ok && !m_ever_sampled) {
         m_ever_sampled = true;
         LOGLN(F("   battery : sampling confirmed — pack is reporting live values"));

@@ -112,13 +112,12 @@ bool mib_get(Mib_t type, MibRequestConfirm_t &req)
 
 // Written to a temporary path and renamed into place, never over the live file.
 //
-// This used to remove kPath and then open it, which destroyed the stored session *before* the
-// write could fail. A full filesystem or a worn page therefore left the node with no session
-// file at all while s_saved_counter_ceiling still described one -- so the ceiling refused
-// uplinks to protect a file that no longer existed, and the comment in write_session()
-// promising that "the brownout gate and a failed write leave the ceiling exactly where the
-// stored file leaves it" was false on precisely the path that matters. Found by adversarial
-// review of the escape ladder, which had been built on top of that promise.
+// Removing kPath and reopening it would destroy the stored session *before* the write can fail.
+// A full filesystem or a worn page then leaves the node with no session file at all while
+// s_saved_counter_ceiling still describes one, so the ceiling refuses uplinks to protect a file
+// that does not exist. The rename is what holds write_session()'s guarantee that a failed write
+// leaves the ceiling exactly where the stored file leaves it — the escape ladder is built on
+// that guarantee, so this is load-bearing, not defensive tidiness.
 //
 // CITE(prior-art): [CIT-LITTLEFS-DESIGN] littlefs rename is atomic and replaces an existing
 //   destination, so kPath is always either the previous session or the new one

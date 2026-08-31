@@ -447,8 +447,8 @@ bool Radio::send(const Payload &p)
             // region's default channel mask — all 72 US915 channels — discarding the sub-band 2
             // selection begin() made. Without this line the node would come out of its rejoin
             // escape transmitting on frequencies no TTN gateway is tuned to, grinding against
-            // the backoff cap at the exact moment it has already given up three times. The
-            // comment here used to hedge on whether the mask survived; it does not.
+            // the backoff cap at the exact moment it has already given up three times. The mask
+            // does not survive the reset — do not hedge on that.
             //
             // CITE(spec): [CIT-LORA-RP002] US915 defines 72 channels; the eight the network
             //   uses are a subset the application must select, not a MAC default.
@@ -563,6 +563,21 @@ uint32_t Radio::backoff_seconds() const
         return 0;
     }
 
+    // The `seconds < kBackoffMaxSeconds` term is an OVERFLOW BOUND, not a duplicate of the clamp
+    // below it. Do not "simplify" it away — a review already proposed exactly that.
+    //
+    // m_failures is reset only by a successful send or join, so an unreachable gateway makes it
+    // climb without limit: the rejoin escape sets m_joined = false and forgets the session, but
+    // leaves the counter alone. At the 3600 s cap that is 24 failures in a day. Without the
+    // in-loop term, `seconds *= 2` runs m_failures - 1 times, and 900 << 23 exceeds UINT32_MAX —
+    // so the backoff wraps to a small number and a Class A node starts hammering the network at
+    // the exact moment it has been failing for a day. The trailing clamp cannot catch that; it
+    // sees the already-wrapped value.
+    //
+    // CITE(policy): [CIT-TTN-FUP] — 30 s of uplink airtime per node per 24 h. A wrapped backoff
+    //   breaches this, which is why the bound is load-bearing rather than defensive.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — the node must degrade by backing off, never by
+    //   transmitting more often as conditions get worse.
     uint32_t seconds = kBackoffFirstSeconds;
     for (uint32_t i = 1; i < m_failures && seconds < kBackoffMaxSeconds; i++) {
         seconds *= 2;

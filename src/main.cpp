@@ -32,10 +32,7 @@
 // of lines of code that never runs on a deployed node, and reading the cycle meant scrolling
 // past all of it.
 //
-// Its one-wire counterpart, diagnostics/owscan.h, was DELETED 2026-08-30: it drove an unqualified
-// pad at 14x the production rate, which is wrong on its own terms. It is also the leading
-// candidate for the seven destroyed pads, though that is NOT established. Do not add it back.
-// src/build_features.h separates the measurements from the inference.
+// There is no one-wire counterpart and must never be one — see build_features.h.
 #include "diagnostics/busscan.h"
 
 namespace {
@@ -49,24 +46,12 @@ namespace {
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] SoftwareHalfSerial accepts an Arduino GPIO number and
 //   derives its nRF port register and interrupt at runtime; it is not tied to WB_IO1.
 //
-// WB_IO1/P0.17 is the documented wiring and stays the default. Bench isolation on 2026-08-29
-// found IO1 held at ~9.6 mV powered and ~3.86 ohm to ground unpowered on the three cores
-// available then, while an empty baseboard was open and A1 measured ~45 kohm; issue #96 records
-// the raw sequence. That is a property of those damaged cores, not of the design, so A1 is a
-// per-core recovery path selected at build time rather than the wiring every node inherits.
-// IO2 is not an alternative either way — it controls the RAK5802's 3V3_S rail.
-//
-// FEATURE_BATTERY_PIN_SDA is the second recovery pad, WB_I2C1_SDA/P0.13. It carried a working
-// pack read, then failed the way A1 and IO1 did. On a FRESH core it is fine and is where the
-// harness already lands — the 5.6 kohm reading below is a property of one damaged core.
-//
-// FEATURE_BATTERY_PIN_SCL is the third and last pad, WB_I2C1_SCL/P0.14, held in reserve. On
-// 2026-08-30 the operator's meter separated damage from suspicion for the first time: SDA read
-// 5.6 kohm to ground against 240 kohm on SCL, same core, same meter, powered down. 43x apart, so
-// SDA was genuinely damaged and SCL is genuinely healthy. build_features.h carries the reasoning
-// and the reason nothing should move to SCL until the transmit path is fixed.
-//
-// OWSCAN_PIN is gone along with the diagnostic that used it (deleted 2026-08-30).
+// WB_IO1/P0.17 is the documented wiring and stays the default. The three recovery pads below it
+// are per-core routes around measured damage, not wiring any node inherits, which is why they are
+// build flags rather than an edited constant. IO2 is not an alternative either way — it controls
+// the RAK5802's 3V3_S rail. Each flag's evidence, its precedence, and the standing instruction not
+// to move to SCL until the transmit path is fixed are in build_features.h; issue #96 has the raw
+// bench sequence. Selection order is SCL, then SDA, then A1, then the default — one pin always.
 #if FEATURE_BATTERY_PIN_SCL
 constexpr uint8_t kBatteryPin = WB_I2C1_SCL;
 #elif FEATURE_BATTERY_PIN_SDA
@@ -87,8 +72,8 @@ constexpr uint32_t kWatchdogSeconds = 120;
 // waiting forever would make a perfectly healthy board look dead.
 constexpr uint32_t kConsoleWaitMs = 3000;
 
-// kAwakeWaitCapSeconds moved to src/config.h. With sleep compiled out the cap *is* the
-// reporting cadence, so it has to sit where the fair-use guard can see it — see issue #44.
+// kAwakeWaitCapSeconds lives in src/config.h, next to the fair-use guard that has to see it —
+// with sleep compiled out the cap *is* the reporting cadence. See issue #44.
 
 Config           config;
 Radio            radio;
@@ -329,11 +314,7 @@ void loop()
     return;
 #endif
 
-    // There is deliberately no one-wire scan branch here. src/diagnostics/owscan.{h,cpp} and
-    // FEATURE_ONEWIRE_SCAN were deleted 2026-08-30 for driving an unqualified pad at 14x the
-    // production rate. Whether that is what destroyed the seven pads is NOT established — see
-    // src/build_features.h, which keeps the measurements and the inference apart. Qualify a pad
-    // with a meter or the logic analyzer, never by driving it from firmware.
+    // No one-wire scan branch belongs here, or anywhere. See build_features.h.
 
     WeatherReading weather;
     BatteryReading pack;
@@ -379,10 +360,9 @@ void loop()
         empty_cycles = 0;
     } else {
         // Counted here, unconditionally, so a brownout hold (below) still advances the
-        // quiet-cycle count. It previously lived in the heartbeat branch's condition, where
-        // short-circuit evaluation skipped the increment whenever the brownout branch was
-        // taken instead — a silent-and-low-power node under-reported how long it had been
-        // silent in the first log line after recovery. Refs #24.
+        // quiet-cycle count. Folded into the heartbeat branch's condition instead, short-circuit
+        // evaluation skips the increment whenever the brownout branch is taken, and a
+        // silent-and-low-power node under-reports how long it was silent. Refs #24.
         ++empty_cycles;
     }
 

@@ -2,14 +2,19 @@
  * RK900-09 weather station — wind speed, direction, air temperature, humidity, pressure.
  *
  * Owns the RS-485 port for the duration of a read, and hands it back afterwards. Nothing else
- * on the node touches Serial1: ADR-0004 gave the RAK5802 to this sensor exclusively, at a fixed
- * 4800 baud, so there is no bus arbitration and no baud switching to get wrong.
+ * on the node touches Serial1: ADR-0004 gave the RAK5802 to this sensor exclusively at a fixed
+ * line rate, so there is no bus arbitration and no baud switching to get wrong.
+ *
+ * That rate is **9600**, not the datasheet's 4800. This physical unit replies at 9600 and returns
+ * zero bytes at 4800 across four consecutive sweeps, so the firmware follows the measurement —
+ * see ADR-0006 and `kBaud` in rk900.cpp. The 4800 in the citation below is what the datasheet
+ * says, and it is cited as such; it is not what this node transmits.
  *
  * It no longer owns WB_IO2 exclusively. When the pack's one-wire data line is routed through the
  * RAK5802's SDA terminal, Battery::read() raises the same rail for the duration of its
  * transaction and drops it again — see SwitchedRailHold in sensors/battery.cpp. The two never
  * overlap, because main.cpp completes the weather read before starting the battery read, but the
- * pin is shared and this header used to claim otherwise.
+ * pin is shared and must not be treated as this driver's alone.
  *
  * CITE(datasheet): [CIT-RK900] RK900-09 register map — 4800 8N1, Modbus slave 0x01,
  *   holding registers 0x0000-0x0004, and the per-register scaling applied by the encoder.

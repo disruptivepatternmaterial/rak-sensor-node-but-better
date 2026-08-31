@@ -30,14 +30,12 @@
 
 // How many 0xFF wake bytes lead every frame sent on the one-wire link.
 //
-// It stays exposed here even though its only other consumer, src/diagnostics/owscan.cpp, was
-// deleted 2026-08-30 for destroying seven GPIO pads. The reason is the value itself: the pack has
-// only ever replied to frames led by four wake bytes, so any future reader that sends one gets
-// "no reply" from a working pack and goes hunting a fault that does not exist. That already
-// happened once. This is a physical-layer property of this pack, not a protocol field, and it is
-// worth keeping visible so nobody re-derives it by driving the wire.
-//
-// Do NOT take this as licence to write a new scanner. See src/build_features.h.
+// Exposed here rather than hidden in the .cpp because of what the value does: the pack has only
+// ever replied to frames led by four wake bytes, so a reader that sends one gets "no reply" from a
+// working pack and goes hunting a fault that does not exist. That already happened once. It is a
+// physical-layer property of this pack, not a protocol field, and it is worth keeping visible so
+// nobody re-derives it by driving the wire — which is not licence to write a scanner that does.
+// See build_features.h.
 //
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t carries
 //   a single `U8 wakeup`, so four is a deliberate deviation from the reference struct.
@@ -75,16 +73,16 @@ enum class BatteryResult : uint8_t {
     //
     // Distinct from BadFrame because nothing is wrong with the frame — it is somebody else's,
     // or the pack's own spontaneous push arriving inside a window where a solicited reply was
-    // expected. Previously such a frame was accepted outright, which let a spontaneous report
-    // falsely validate the address the driver had just queried. See issue #36.
+    // expected. Accepting such a frame lets a spontaneous report falsely validate the address
+    // the driver just queried, which is issue #36.
     Unmatched,
 
     // A complete, checksum-valid PROVISION announcement arrived where a SENDAT reply was
     // expected, and no SENDAT frame arrived at all.
     //
-    // This is the pack's actual observed behaviour and it deserves its own name. It means the
-    // pack is alive, framing correctly, and talking — but it is announcing itself rather than
-    // answering the question we asked. Previously indistinguishable from a corrupt frame.
+    // This is the pack's actual observed behaviour and it deserves its own name, because a
+    // corrupt frame calls for a different move: the pack is alive, framing correctly, and
+    // talking — it is announcing itself rather than answering the question we asked.
     ProvisionOnly,
 };
 
@@ -100,13 +98,9 @@ class Brownout;
 
 class Battery {
   public:
-    // `pin` is the data line. In the default build that is the single half-duplex wire, with
-    // the pack's TXD and RXD bridged onto it. Under FEATURE_ONEWIRE_SPLIT it becomes the TX
-    // line only — our output to the pack's RXD (socket pin 5) — and the pack's TXD (socket
-    // pin 3) is read on a second pin fixed in battery.cpp, because that pin is a property of
-    // the base board's solder pads rather than of the wiring harness. See
-    // src/build_features.h for why both topologies exist and which physical change each one
-    // expects.
+    // `pin` is the data line: the single half-duplex wire, with the pack's TXD and RXD bridged
+    // onto it. There is only one topology — the two-pin split was removed rather than left
+    // switched off, and battery.cpp records why.
     //
     // Held as configuration rather than a compile time constant so the wiring can move
     // without touching the protocol code.
@@ -158,13 +152,11 @@ class Battery {
     // Hex-dump under a label, for the paths where the decoded verdict is not enough evidence.
     void dump(const char *what, const uint8_t *buf, size_t len);
 
-    // BOOT once, then keep answering every announcement until a wall-clock deadline — the
     // Keep answering every announcement until a wall-clock deadline — the reference master's
-    // steady state, approximated. Sends nothing to start the window: the pack announces itself
-    // unprompted, and the BOOT that used to open the window rebooted it instead (issue #62).
-    // Exits early the moment the pack proves it latched the assigned id, and returns true only
-    // in that case. "We answered an announcement" is not provisioning and no longer reads as
-    // it.
+    // steady state, approximated. Sends nothing to open the window: the pack announces itself
+    // unprompted, and a BOOT here reboots it instead (issue #62). Exits early the moment the
+    // pack proves it latched the assigned id, and returns true only in that case — answering an
+    // announcement is not provisioning and must not be read as it.
     bool acquire_pid(uint8_t *buf, size_t cap);
 
     // One "send SENDAT to `dest`, collect whatever comes back" round trip.
@@ -214,24 +206,24 @@ class Battery {
 
     // Set once an announcement has been seen carrying a provId other than 0xFF — i.e. the pack
     // has confirmed, in its own words, that it accepted the id this master assigned. Distinct
-    // from "we answered an announcement", which every previous revision could claim while the
-    // pack went on reporting 0xFF forever. Nothing depends on it yet beyond ending the
-    // provisioning window early and choosing the data-poll address; it exists so the one fact
-    // that has cost the most bench time is held explicitly instead of re-derived from hex.
+    // from "we answered an announcement", which can be true while the pack goes on reporting
+    // 0xFF forever. Nothing depends on it beyond ending the provisioning window early and
+    // choosing the data-poll address; it exists so the one fact that has cost the most bench
+    // time is held explicitly instead of re-derived from hex.
     //
-    // Cleared again whenever an answered announcement still carries provId 0xFF. It used to be
-    // write-once, so one good latch made every later failure print as a success for the rest
-    // of the deployment — issue #62.
+    // Must be cleared again whenever an answered announcement still carries provId 0xFF. Left
+    // write-once, one good latch makes every later failure print as a success for the rest of
+    // the deployment — issue #62.
     bool m_pack_latched = false;
 
     // Whether the current failure episode has already spent its one BOOT.
     //
     // Cleared by a genuine reading, because an answering pack ends the episode: a later failure
-    // is a new one and deserves its own nudge. It used to be per *power cycle*, which on the
-    // field image is months — so the first transient probe miss spent the deployment's only
-    // BOOT on a pack that was never in trouble (issue #75), and a pack that went mute later had
-    // no nudge left (issue #71). m_next_boot_cycle is the bound that keeps "per episode" from
-    // becoming "often". See boot_if_warranted().
+    // is a new one and deserves its own nudge. Scoped per episode and not per *power cycle*,
+    // which on the field image is months — that scope spent the deployment's only BOOT on the
+    // first transient probe miss (issue #75) and left a pack that went mute later with no nudge
+    // (issue #71). m_next_boot_cycle is the bound that keeps "per episode" from becoming
+    // "often". See boot_if_warranted().
     bool m_boot_spent = false;
 
     // Earliest cycle at which another BOOT may be sent, whatever the episode bookkeeping says.
@@ -245,13 +237,7 @@ class Battery {
 
     // Set once the pack has produced a genuine measurement, and used for exactly one thing:
     // announcing that fact to the console a single time instead of on every wake for months.
-    //
-    // It used to mean more. An earlier revision ran a PARAMGET/PARAMSET enable pass on the
-    // theory that the pack's sensors had to be armed before they would sample, and this flag
-    // suppressed that pass once sampling was confirmed. The pass was deleted in 98486f0 /
-    // e0df6af once reply turnaround turned out to be the real blocker, and kParamPassEnabled
-    // no longer exists. Nothing gates on this beyond the log line — do not read it as evidence
-    // that a configuration path still exists somewhere.
+    // Nothing else gates on it — it is not evidence that a pack configuration path exists.
     bool m_ever_sampled = false;
 
     BatteryResult m_last = BatteryResult::NoReply;

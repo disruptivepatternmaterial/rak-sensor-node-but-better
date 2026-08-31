@@ -180,9 +180,9 @@ bool Config::save()
     s.boots            = m_boots;
     s.brownout_engaged = m_brownout_engaged ? 1 : 0;
 
-    // Staged and renamed, never written over the live record. The old shape removed kPath and
-    // then opened it, so a write that failed for any reason destroyed the stored config first --
-    // and this record is worse to lose than the session one. It carries m_brownout_engaged,
+    // Staged and renamed, never written over the live record. Removing kPath and then opening it
+    // lets a write that fails for any reason destroy the stored config first -- and this record is
+    // worse to lose than the session one. It carries m_brownout_engaged,
     // which is how a brownout hold survives a reset; losing it means the node comes back with no
     // memory of having decided to stop transmitting, on a pack that may still be flat. That is
     // the fail-open hole #38 closed, reopened by a failed write. It also carries the interval, so

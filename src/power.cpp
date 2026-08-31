@@ -282,11 +282,9 @@ void sleep_seconds(uint32_t seconds)
         // reconcile them. Leaving the CDC interface in place and cycling only the attach
         // state keeps the descriptor and the host's view of it identical.
         //
-        // The peripheral itself therefore stays enabled while asleep, where the old code
-        // intended to shut it down. Both the old and the new residual draw are unmeasured —
-        // the old write left the pull-up, the USBD interrupt, and HFCLK all running, so it
-        // was never the documented teardown either. Measurement is issue #47; a console that
-        // works is worth more than an unverified microamp claim in the meantime.
+        // The peripheral therefore stays enabled while asleep, and its residual draw is
+        // unmeasured — issue #47. A console that works is worth more than an unverified
+        // microamp claim in the meantime.
         TinyUSBDevice.detach();
     }
 #endif
@@ -305,15 +303,12 @@ void sleep_seconds(uint32_t seconds)
     // keeps the tick arithmetic small at any configured interval and gives the loop a place to
     // re-check its own progress.
     //
-    // Sixty seconds a slice rather than one: same bounded structure, 1/60th of the scheduler
-    // wakeups per cycle — 30 per 1800 s interval instead of 1800, each of which previously woke
-    // the CPU only to find nothing to do. Nothing gives this semaphore yet, so today it behaves
-    // as a coarser bounded wait; the value now is the reduced wakeup count, and the shape is
-    // what lets a sensor interrupt wake the node later without reopening the watchdog question.
-    //
-    // Honest about magnitude: this is unmeasured, and it is the smaller of the two sleep-path
-    // changes in this commit. Whether it matters at all depends on the core's tickless-idle
-    // behavior, which is unverified — see issue #47 and the benchmark's §8.
+    // Sixty seconds a slice rather than one costs 1/60th of the scheduler wakeups per cycle —
+    // 30 per 1800 s interval instead of 1800, each of which would wake the CPU only to find
+    // nothing to do. Nothing gives this semaphore yet, so today it behaves as a coarser bounded
+    // wait; the shape is what lets a sensor interrupt wake the node later without reopening the
+    // watchdog question. Whether the saving matters at all is unmeasured and depends on the
+    // core's tickless-idle behavior — issue #47 and the benchmark's §8.
     //
     // This reaches the chip's lighter sleep state, not its deepest one — the deepest state
     // restarts the chip on wake, which would mean rejoining the network or reconstructing
@@ -403,8 +398,8 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
             //   - The hold was set by a measured low voltage, and the pack has since stopped
             //     answering. The hold is now resting on a reading we can no longer confirm.
             //
-            // The comment this replaces was right that a hold backed by a *current* low
-            // reading earns no keepalive. It stops being current once the pack goes silent.
+            // A hold backed by a *current* low reading earns no keepalive. The distinction that
+            // matters here is that such a reading stops being current once the pack goes silent.
             if (!m_without_evidence) {
                 // The hold is already in progress, so these unreadable cycles advance its
                 // reachability clock without permitting a transmission yet. Restarting the
@@ -445,7 +440,7 @@ void Brownout::update(bool voltage_valid, uint16_t centivolts)
             // flash_write_allowed() exists to say. The cost of not writing is that a reset
             // clears this particular hold, and the node then re-engages within
             // kInvalidReadsBeforeInhibit cycles for the same reason it did the first time.
-            // Bounded and self-correcting, which the old fail-open behavior was not.
+            // Bounded and self-correcting, where failing open is neither.
             set_engaged(true, false);
             m_without_evidence = true;
             m_keepalive.start(true);

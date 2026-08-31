@@ -123,8 +123,8 @@ constexpr uint8_t kInvalidReadsBeforeInhibit = 4;
 // keeps the downlink path reachable.
 //
 // A cycle measured at or below kTxInhibitCentivolts never transmits — the evidence says
-// spending energy is the wrong move, and #38 exists because that used to be ignored. But that
-// cycle does not erase the elapsed hold time. If a later reading is inside the hysteresis band,
+// spending energy is the wrong move, and ignoring that is issue #38. But that cycle
+// does not erase the elapsed hold time. If a later reading is inside the hysteresis band,
 // the keepalive can become due there; otherwise a pack alternating across the inhibit floor
 // resets the clock forever and makes the Class A node permanently mute.
 //
@@ -255,7 +255,7 @@ class Brownout {
     // Armed for the two holds that no action of the node's own can lift: one resting on no
     // reading at all, and one resting on a reading between the inhibit and resume thresholds.
     // Never armed for a reading at or below kTxInhibitCentivolts — that pack is genuinely too
-    // low to spend energy, and #38 exists because a keepalive there used to be sent anyway.
+    // low to spend energy, and sending a keepalive there anyway is issue #38.
     bool keepalive_due() const { return m_keepalive.due(m_engaged); }
 
     // Called after a keepalive uplink actually reaches the air, so the count restarts. Split

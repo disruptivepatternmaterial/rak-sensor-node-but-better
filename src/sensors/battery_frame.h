@@ -204,10 +204,9 @@ bool frame_matches_query(const SnHubFrame &f, const BatteryQueryMatch &match);
 // Record decoding.
 // ---------------------------------------------------------------------------------------
 
-// Everything the decoder observed that the caller may want to print. The codec cannot log —
-// it has no Arduino — so the diagnostics that used to be LOGF calls inside the walker come
-// back as fields and battery.cpp prints them. Nothing here changes the verdict; it only
-// explains it.
+// Everything the decoder observed that the caller may want to print. The codec cannot log — it
+// has no Arduino — so it returns its diagnostics as fields and battery.cpp prints them. Nothing
+// here changes the verdict; it only explains it.
 struct BatteryFrameNotes {
     // Frame-scan level, copied from the ScanNotes of the scan that failed to find a SENDAT.
     bool   truncated_frame = false;

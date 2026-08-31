@@ -8,6 +8,55 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **Comment cruft pass across the firmware sources — no code changed, and that is verified rather
+  than asserted.** Every changed `.c`/`.h` file was comment-stripped and compared against `HEAD`;
+  the token stream is byte-identical in all eleven, so the image cannot move. Three kinds of rot
+  went out: the `owscan` deletion tombstone, which was recited at full length in four places
+  (`src/build_features.h` 51 lines, `src/main.cpp` in three spots, `platformio.ini` ~98 lines) when
+  [`AGENTS.md`](AGENTS.md) already holds the canonical copy and auto-loads; roughly twenty
+  change-narration comments that described what the code *used to* do rather than what it does now,
+  rewritten to state the current invariant while keeping every issue reference; and stale
+  references to deleted machinery. Three of these were actively misleading, not merely verbose:
+  `src/sensors/battery.h` carried a **dangling half-sentence** left by an incomplete edit
+  (`"BOOT once, then keep answering…"`) directly contradicting the line below it, which says the
+  window deliberately transmits nothing — the exact confusion behind
+  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62);
+  `platformio.ini` **contradicted itself**, pointing readers at `env:owcensus` as the replacement
+  for the deleted scans ~60 lines before explaining that `env:owcensus` was deleted too; and
+  [`README.md`](README.md) still **advertised `owscan` as a runnable diagnostic environment**, so
+  the one user-facing list of environments named a target that no longer exists and must never
+  exist. All 449 `CITE` markers still resolve and `scripts/preflight.sh` is green. The remaining
+  bloat is structural, not textual — `src/sensors/battery.cpp` is 1,901 lines at 64% comment and
+  needs splitting, filed as [#103](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/103);
+  six behaviour-preserving code dedups that need a build-host compile are
+  [#104](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/104).
+
+### Fixed
+
+- **`src/sensors/rk900.h` told the reader the RS-485 port runs at 4800 baud. It runs at 9600.**
+  `kBaud = 9600` in `rk900.cpp`, settled by measurement in
+  [ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md) — this physical unit replies
+  at 9600 and returns **zero bytes at 4800** across four consecutive sweeps. The header asserted
+  the datasheet's 4800 as though it were the firmware's setting, on the one constant that decides
+  whether the sensor answers at all, which is the spec-parity failure
+  [`.cursor/rules/30-change-workflow.mdc`](.cursor/rules/30-change-workflow.mdc) exists to catch.
+  The `[CIT-RK900]` citation still says 4800 because the datasheet does; the prose no longer
+  claims the node transmits it. Also removed a stale description of `FEATURE_ONEWIRE_SPLIT` in
+  `src/sensors/battery.h` that documented a two-pin topology as a live build option — the flag has
+  no definition anywhere, only a tombstone in `battery.cpp`.
+
+- **Recorded why the join backoff's in-loop bound cannot be removed.** A review proposed deleting
+  the `seconds < kBackoffMaxSeconds` term in `Radio::backoff_seconds()` as redundant with the
+  trailing clamp. It is not: `m_failures` is zeroed only by a successful send or join, and the
+  rejoin escape leaves it alone, so an unreachable gateway makes it climb monotonically — 24
+  failures within a day at the 3600 s cap. Without the in-loop bound, `900 << 23` overflows
+  `uint32_t` and the backoff **wraps to a small value**, so the node would transmit *more* often
+  the longer it had been failing, breaching [CIT-TTN-FUP] and `FIRMWARE_SPEC.md` §7 H1. The
+  trailing clamp cannot catch it — it only sees the wrapped value. No code changed; the invariant
+  is now written down at the line so it does not get "simplified" later.
+
 ### Removed
 
 - **The one-wire scan diagnostic is deleted for driving an unqualified pad at 14× the production

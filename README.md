@@ -67,8 +67,9 @@ Diagnostics, not bring-up stages — each answers one question fast:
 | Environment | Answers |
 |---|---|
 | `battdiag` | Anything about the RAK9154 pack. **~10 s per cycle — use this, never `stage3`**, whose full-interval sleep puts exactly one cycle in a capture window and has repeatedly been misread as a dead pack |
-| `owscan` | One-wire line behaviour below the protocol |
 | `busscan` | RS-485 sweep across baud rates and slave addresses — the tool that established the RK900's real baud and register map for [ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md) |
+
+There is deliberately **no one-wire scan environment**. Every variant was deleted 2026-08-30 after seven GPIO pads were destroyed across two cores; qualify a pad with a meter and read the wire with a logic analyzer, never by driving it from firmware ([`AGENTS.md`](AGENTS.md), [`docs/HARDWARE.md`](docs/HARDWARE.md)).
 
 ## Working discipline
 
