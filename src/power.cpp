@@ -196,6 +196,13 @@ uint32_t reset_reason_bits()
 // directly: the core's early clear makes every reset look like this case.
 const char *reset_reason_text()
 {
+    // Capture here, not only in watchdog_begin(): a build without the watchdog calls
+    // this accessor first, and main.cpp passes text and bits in one LOGF, where argument
+    // evaluation order is unspecified. Without this, such a build printed "power-on or
+    // brownout" over an uncaptured zero (#108 finding 3).
+    // CITE(datasheet): [CIT-NRF-POWER] nRF52840 POWER — RESETREAS is sticky until cleared,
+    //   so capturing on first read from any accessor is loss-free. — docs/CITATIONS.md
+    capture_reset_reason();
     const uint32_t r = s_reset_reason;
     if (r == 0) {
         return "power-on or brownout (RESETREAS clear)";

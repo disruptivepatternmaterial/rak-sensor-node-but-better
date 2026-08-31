@@ -99,6 +99,10 @@ class Soak:
         self.cycle_had_battery = False
         self.cycles_without_battery = 0
         self.heartbeats = 0
+        # None until the run fails a validity requirement. A soak that never observed the
+        # node must not exit 0 -- on 2026-08-12 a run that never attached was recorded as
+        # a started soak and three documents inherited the claim (#107, AGENTS.md).
+        self.invalid_reason: str | None = None
 
         signal.signal(signal.SIGTERM, self._signal)
         signal.signal(signal.SIGINT, self._signal)
@@ -163,10 +167,7 @@ class Soak:
         m = RE_CYCLE.search(line)
         if m:
             n = int(m.group(1))
-            if self.last_cycle is not None and not self.cycle_had_battery:
-                self.cycles_without_battery += 1
-                self.anomaly("no-battery", f"cycle {self.last_cycle} produced no pack voltage")
-            self.cycle_had_battery = False
+            self._close_out_cycle()
             self.last_cycle = n
             self.cycles.append(n)
 
@@ -195,6 +196,15 @@ class Soak:
         m = RE_QUIET.search(line)
         if m:
             self.event("quiet", f"{m.group(1)} quiet cycle(s)")
+
+    def _close_out_cycle(self) -> None:
+        """Account for the cycle in progress. Called on the next cycle marker AND at end
+        of run -- previously the final cycle was never checked for a missing battery
+        sample, so a pack that died on the last cycle went uncounted (#107)."""
+        if self.last_cycle is not None and not self.cycle_had_battery:
+            self.cycles_without_battery += 1
+            self.anomaly("no-battery", f"cycle {self.last_cycle} produced no pack voltage")
+        self.cycle_had_battery = False
 
     # ------------------------------------------------------------------ TTN
     def poll_ttn(self) -> None:
@@ -269,6 +279,23 @@ class Soak:
                            f"port={'attached' if port else 'absent (asleep?)'}")
                 next_beat = now + a.heartbeat
 
+            # Validity deadlines (#107). A soak that never saw the node must end as a
+            # failure, not run out the clock and look like a pass -- that exact shape
+            # produced a false "24 h soak started" evidence entry on 2026-08-12
+            # (AGENTS.md, "Record outcomes, never launches"). 0 disables a deadline for
+            # a console-less field configuration.
+            if a.first_attach_deadline > 0 and self.reattaches == 0 \
+                    and now - self.started > a.first_attach_deadline:
+                self.invalid_reason = (f"no port attach within {a.first_attach_deadline}s "
+                                       f"(glob {a.port_glob})")
+                self.anomaly("never-attached", self.invalid_reason)
+                break
+            if a.first_cycle_deadline > 0 and not self.cycles \
+                    and now - self.started > a.first_cycle_deadline:
+                self.invalid_reason = f"no cycle observed within {a.first_cycle_deadline}s"
+                self.anomaly("no-first-cycle", self.invalid_reason)
+                break
+
             # TTN polling waits for a window where the port is gone whenever it can. The
             # node is asleep then, so nothing is lost while the CLI takes its seconds --
             # unless the poll is badly overdue, at which point an on-time sample matters
@@ -339,9 +366,15 @@ class Soak:
         if not a.no_ttn:
             self.poll_ttn()
 
+        # The final cycle is still open here; account for it before the summary (#107).
+        self._close_out_cycle()
+        if self.invalid_reason is None and not self.cycles:
+            self.invalid_reason = "zero cycles observed -- the run measured nothing"
+            self.anomaly("zero-observations", self.invalid_reason)
+
         self.event("stop", f"soak ended after {int(time.time() - self.started)}s")
         self.write_summary()
-        return 0
+        return 0 if self.invalid_reason is None else 1
 
     # ------------------------------------------------------------------ summary
     def write_summary(self) -> None:
@@ -354,6 +387,11 @@ class Soak:
             "elapsed_s": elapsed,
             "requested_s": self.args.seconds,
             "completed_full_duration": elapsed >= self.args.seconds - 5,
+            # False when the run never observed the node or breached a validity deadline.
+            # Duration alone is not a pass -- a reader of this file must not be able to
+            # mistake a run that measured nothing for one that measured 24 h (#107).
+            "valid_run": self.invalid_reason is None,
+            "invalid_reason": self.invalid_reason,
             "label": self.args.label,
             "commit": self.args.commit,
             "banner_commit": getattr(self, "banner_commit", None),
@@ -393,6 +431,7 @@ class Soak:
         md = [
             f"### Soak — {summary['started_utc']} → {summary['ended_utc']}",
             "",
+            f"- **Valid run: {'yes' if summary['valid_run'] else 'NO — ' + str(self.invalid_reason)}**",
             f"- Host: `{self.args.host}` · commit `{self.args.commit}` · label `{self.args.label}`",
             f"- Board banner commit: `{getattr(self, 'banner_commit', None) or 'NOT OBSERVED'}`",
             f"- Duration: {elapsed} s of {self.args.seconds} s requested "
@@ -439,6 +478,15 @@ def main() -> int:
     p.add_argument("--port-glob", default="/dev/cu.usbmodem*")
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--heartbeat", type=int, default=300)
+    # A healthy node mid-sleep keeps the port absent for up to one full uplink interval --
+    # 900 s at the field cadence (persisted config; see src/config.h and docs/EVIDENCE.md
+    # 2026-08-13) -- so the attach deadline is one interval plus margin, and the first
+    # [cycle] marker can be almost two intervals out when the soak starts just after a
+    # cycle began. 0 disables a deadline (console-less field runs).
+    p.add_argument("--first-attach-deadline", type=int, default=1200,
+                   help="fail the run if no port ever attaches within N s (0 = off)")
+    p.add_argument("--first-cycle-deadline", type=int, default=2100,
+                   help="fail the run if no cycle is observed within N s (0 = off)")
     p.add_argument("--ttn-app", default="my-app-tobi")
     p.add_argument("--ttn-device", default="puma-concolor-001")
     p.add_argument("--ttn-interval", type=int, default=900)

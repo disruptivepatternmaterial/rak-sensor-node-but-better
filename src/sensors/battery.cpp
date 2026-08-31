@@ -1487,7 +1487,24 @@ BatteryReading Battery::read()
     // but another round trip on the path that runs every hour for years.
     const uint8_t candidates[2] = {m_pid, (m_pid == kBroadcastId) ? kProbeId : kBroadcastId};
 
+    // kProbeId was already asked once this cycle, in phase 0. Re-asking it here buys a
+    // second 500 ms of silence from a pack that did not answer it seconds ago — on the
+    // probe-only path that made a failed pack cost three probes where the comments promise
+    // one (#108 finding 2). The one exception: phase 1 just latched the pid, so the pack's
+    // state has changed since phase 0 and the retry is genuinely fresh.
+    //
+    // CITE(bench): docs/EVIDENCE.md — dest sweep on 3d3425d: an unprovisioned pack returns
+    //   0 bytes to 0x01 every time it is asked, so the repeat query cannot succeed where
+    //   phase 0 failed.
+    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
+    //   the reference sends one SENDAT per cycle to one address; it never retries the same
+    //   address within a cycle.
+    const bool freshly_latched = provisioned && !answered_direct;
+
     for (uint8_t c = 0; c < 2 && !answered_direct; c++) {
+        if (candidates[c] == kProbeId && !freshly_latched) {
+            continue;
+        }
         const size_t got = query(candidates[c], rx, sizeof(rx));
         if (got == 0) {
             continue;

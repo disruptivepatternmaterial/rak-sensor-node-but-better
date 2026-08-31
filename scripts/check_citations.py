@@ -59,6 +59,23 @@ MAGIC_RE = re.compile(
     r"|902|915|923|928)\b"                   # US915 frequencies
 )
 
+# The magic-number check fires on lines that BIND a value, not lines that mention one.
+# Comment prose discussing a constant is not introducing it -- the citation belongs on
+# the declaration, which is scanned separately. Seven false warnings on one comment-only
+# PR is how an advisory check trains people to skim past the warning that matters (#106).
+COMMENT_ONLY_RE = re.compile(r"^\s*(//|\*|/\*)")
+# `=`, call/initialiser brackets, `return`, `case`, and `#define` are the contexts where a
+# numeral in C/C++ actually takes effect. `#` is NOT a comment in the CODE_EXT set.
+BIND_RE = re.compile(r"=|\(|\{|\breturn\b|\bcase\b|#\s*define\b")
+
+
+def magic_in_code(line: str) -> bool:
+    """True when an added line introduces a magic value in code, not in prose (#106)."""
+    if COMMENT_ONLY_RE.match(line):
+        return False
+    code = line.split("//", 1)[0]   # a trailing comment is prose too
+    return bool(MAGIC_RE.search(code)) and bool(BIND_RE.search(code))
+
 GREEN, RED, YELLOW, BLUE, DIM, RESET = (
     ("\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\033[0m")
     if sys.stdout.isatty() else ("", "", "", "", "", "")
@@ -223,18 +240,46 @@ def main() -> int:
             if Path(p).suffix.lower() in CODE_EXT and not is_vendored(p)
         ]
         if code_changed:
-            diff = git("diff", "-U0", f"{args.diff}...HEAD", "--", *code_changed)
-            added = [
-                ln[1:] for ln in diff.splitlines()
-                if ln.startswith("+") and not ln.startswith("+++")
-            ]
+            # -U2, not -U0: the adjacency rule says a citation may sit on an adjacent
+            # line, and that line is often UNCHANGED -- with no context the checker
+            # failed correctly-cited constants. The window also must not cross file or
+            # hunk boundaries, which the old flattened added-lines list did in both
+            # directions: a citation ending one file could clear a constant opening the
+            # next (#108 finding 5, same family as #106).
+            diff = git("diff", "-U2", f"{args.diff}...HEAD", "--", *code_changed)
             cats: set[str] = set()
             n_cites = 0
-            for ln in added:
-                m = CITE_RE.search(ln)
-                if m:
-                    n_cites += 1
-                    cats.add(m.group(1))
+            cur_file = ""
+            hunk: list[tuple[str, str]] = []   # (prefix, text); '+' added, ' ' context
+
+            def scan_hunk() -> None:
+                for i, (prefix, text) in enumerate(hunk):
+                    if prefix != "+" or not magic_in_code(text):
+                        continue
+                    window = [t for _, t in hunk[max(0, i - 2): i + 1]]
+                    if not any(CITE_RE.search(w) for w in window):
+                        warnings.append(
+                            f"{cur_file}: un-sourced constant on an added line: "
+                            f"{text.strip()[:90]}"
+                        )
+
+            for ln in diff.splitlines():
+                if ln.startswith("+++ "):
+                    scan_hunk()
+                    hunk = []
+                    cur_file = ln[6:] if ln.startswith("+++ b/") else ln[4:]
+                elif ln.startswith("@@"):
+                    scan_hunk()
+                    hunk = []
+                elif ln.startswith("+"):
+                    hunk.append(("+", ln[1:]))
+                    m = CITE_RE.search(ln[1:])
+                    if m:
+                        n_cites += 1
+                        cats.add(m.group(1))
+                elif ln.startswith(" "):
+                    hunk.append((" ", ln[1:]))
+            scan_hunk()
 
             if n_cites < MIN_CITATIONS or len(cats) < MIN_CATEGORIES:
                 failures.append(
@@ -249,15 +294,6 @@ def main() -> int:
                     "works; it does not establish correctness. Pair it with a datasheet "
                     "or spec citation."
                 )
-
-            # magic numbers on added lines need a citation within 2 lines
-            for i, ln in enumerate(added):
-                if MAGIC_RE.search(ln) and not CITE_RE.search(ln):
-                    window = added[max(0, i - 2): i + 1]
-                    if not any(CITE_RE.search(w) for w in window):
-                        warnings.append(
-                            f"un-sourced constant on an added line: {ln.strip()[:90]}"
-                        )
         else:
             print(f"{DIM}   no firmware sources changed vs {args.diff}{RESET}")
 
