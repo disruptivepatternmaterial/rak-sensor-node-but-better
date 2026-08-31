@@ -54,6 +54,38 @@ safely accept charge when cold. In a woods winter it may draw more than everythi
 combined, exactly when harvest is worst. Its draw is unknown to us and is **not** under
 firmware control. Measure it before trusting any winter projection.
 
+## The station, not the node — the pack feeds three loads
+
+**Added 2026-08-30 ([#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113)).**
+The deployed pack does not power just this node. One RAK9154 feeds **this node, the RK900
+(continuously), and a muon-wx air station** (Particle M-SoM with an SEN55 PM sensor and a
+cellular radio — `particle-devices/muon-weather`), and four such combined stations are
+planned. Every runtime conclusion in this document must be read at station level.
+
+**Measured, whole station** ([`EVIDENCE.md`](EVIDENCE.md) 2026-08-30, f_cnt 3644–3660):
+overnight draw **−0.05 A** on pack telemetry (5 LSB — a reading, not a floor), pack falling
+**~1 %/h** (89 → 85 % over ~4 h). Against 56.16 Wh that is roughly **4 days of zero-harvest
+reserve for the whole station**, hitting the 9.60 V TX-inhibit floor sooner.
+
+This **corrects the reach of point 1 above**: "the node's own draw is not the binding
+constraint" remains true of the node (~1 mA class), but the *six months of pure reserve*
+arithmetic applies to the node alone and **not to the station**, which measures at ~50×
+that. The binding constraint is the station's combined draw under snow cover.
+
+**Attribution is the open work** — which of the four loads (node sleep, RK900 continuous,
+buck idle, muon duty cycle) owns the 50 mA is unmeasured. The muon self-instruments: it
+carries an INA228 and publishes measured `current_mA` each cycle, and its duty cycle is
+spec'd (60 min PROD cadence, STOP sleep, 30 s SEN55 warm-up per wake). Per-load
+measurements stay tracked in
+[#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8),
+[#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47),
+[#9](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/9);
+the station roll-up is [#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113).
+
+**Cross-protection gap:** this node inhibits TX from measured pack voltage at 9.60 V; the
+muon's low-battery policy keys off its own PMIC and does not know the pack exists, so it
+keeps buying cellular handshakes from the reserve this node is protecting. Open in #113.
+
 ### The sleep-vs-wake asymmetry still holds
 
 At a 3600 s interval, a 5-second wake at 30 mA costs about 0.042 mAh per cycle. One stray
