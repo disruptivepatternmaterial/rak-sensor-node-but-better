@@ -23,6 +23,10 @@ soak-runs/
 *.elf
 *.map
 
+# Generated documentation — rebuilt from Markdown
+docs/*.pdf
+docs/img/
+
 # Tooling
 __pycache__/
 *.pyc

@@ -4,6 +4,25 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-08-31 — recovered record: coreless base-board `BAT` isolation was measured open
+
+**Measurement date:** 2026-08-30. **Source:** operator meter readings preserved in
+[#99's bench comment](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99#issuecomment-5471457001).
+**Core:** removed. **Base board:** identity not captured. **Meter:** model and raw display capture
+not recorded. This entry recovers the numeric/verbal result; it does not improve those missing
+metadata.
+
+| Measurement | Reading |
+|---|---|
+| Base-board `BAT` to `IO1` | open / overload |
+| Base-board `BAT` to `A1` | open / overload |
+| Base-board `BAT` to `SDA` | open / overload |
+
+**Verdict:** no DC continuity was observed from `BAT` to the three candidate one-wire pads in that
+powered-down, coreless measurement. This rejects a static resistive bridge on that unidentified
+base board under the measured condition. It does not test powered transients, another base board,
+the pack-side line, or contention between active drivers.
+
 ## 2026-08-30 (seventh) — the count is NINE pads, and all nine died under unauthorized agent-flashed firmware
 
 **Source:** operator, directly, 2026-08-30. Supersedes the "seven pads across two cores" figure

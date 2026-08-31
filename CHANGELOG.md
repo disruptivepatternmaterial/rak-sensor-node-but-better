@@ -10,6 +10,20 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ### Fixed
 
+- **The hardware guide contained two contradictory assembly sequences and one electrically false
+  no-Core test.** The earlier sequence required two independent grounds while the later sequence
+  specified one; both still led to a bare GPIO despite the STOP notice. The pack qualification
+  also claimed a coreless RAK19007 supplied 3.3 V on `VDD`, contradicting its cited datasheet and
+  the actual capture, which used a 3.3 V / 50 mA bench supply with the base board absent.
+  `docs/BUILD.md` is now the single numbered assembly procedure and stops before any Core or GPIO
+  connection. `HARDWARE.md` records the five-gate hold, removes the duplicate build procedure, and
+  labels every remaining circuit drawing historical.
+- **Powered-off isolation now has a datasheet-backed candidate instead of an unspecified
+  “buffer.”** TI's `SN74CBTLV1G125` is documented as a candidate because it is bidirectional and
+  specifies at most 10 µA `Ioff` with `VCC = 0 V` and either data terminal up to 3.6 V. It remains
+  unapproved until the enable circuit, contention limit, no-Core isolation capture, powered
+  two-sided capture, and sleep-current accounting are complete; the guide does not present a
+  selected part as measured hardware.
 - **A failed brownout-hold write silently reported success forever, and the hold was lost on the
   next reset.** `Config::set_brownout_engaged()` assigned `m_brownout_engaged` *before* calling
   `save()` and did not roll it back on failure — unlike `set_interval()` ten lines above, which

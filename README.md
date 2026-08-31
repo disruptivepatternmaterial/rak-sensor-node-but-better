@@ -8,14 +8,17 @@ WisBlock replacement for the RAK2560 Sensor Hub path: **RAK19007 + RAK4631 US915
 
 **Six clean cycles are not a soak, and every subsystem answering is not a deployment.** None of the H1–H8 gates has closed. **H8 is started on both halves and met on neither:** the longest bench soak is **19.03 h on `572bcfa`** (76 uplinks, 0 anomalies), **stopped deliberately** short of 24 h to ship the `#75` battery fix, and the run on the shipping `1c2df3c` had a **deliberate RESET inside its window**, so neither is an uninterrupted 24 h — and a partial run on one image cannot be topped up by another. The >24 h field runtime on 2026-08-15 does **not** close the bench half: it ran in the field with no console, so seven of the ten bench criteria in [`docs/SOAK.md`](docs/SOAK.md) could not be evaluated at all. Sleep current has still never been metered; the pack's own telemetry cannot answer it (10 mA LSB against a ~1 mA question). The battery-current sign convention is decided ([ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md), 2026-08-13 — positive = charging) but has never been confirmed against a real charge current. The brownout, rejoin and keepalive paths remain **believed correct, unobserved** — one clean afternoon does not reach them.
 
-Bring-up mechanics: [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Assembly procedure: [`docs/BUILD.md`](docs/BUILD.md). Bring-up mechanics:
+[`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md). Deployment procedure:
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 | Doc | Path |
 |---|---|
 | Firmware contract | [`docs/FIRMWARE_SPEC.md`](docs/FIRMWARE_SPEC.md) |
+| Numbered hardware assembly | [`docs/BUILD.md`](docs/BUILD.md) |
 | First flash / bring-up | [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md) |
 | Deployment procedure | [`docs/DEPLOY.md`](docs/DEPLOY.md) |
-| Hardware / wiring | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
+| Hardware research / wiring rationale | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
 | Libraries & examples | [`docs/LIBRARIES.md`](docs/LIBRARIES.md) |
 | Decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |
 | Environments | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) |

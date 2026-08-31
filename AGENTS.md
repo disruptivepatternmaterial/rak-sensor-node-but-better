@@ -79,7 +79,8 @@ and [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 |---|---|
 | What has each release proven on hardware? | [`docs/STATUS.md`](docs/STATUS.md) |
 | What has been measured, on which core, at which SHA? | [`docs/EVIDENCE.md`](docs/EVIDENCE.md) |
-| Wiring, pinouts, harness qualification | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
+| What exact assembly step comes next? | [`docs/BUILD.md`](docs/BUILD.md) — the only build sequence |
+| Wiring research, pinouts, electrical rationale | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
 | Firmware behavior contract, H1–H8 hardening | [`docs/FIRMWARE_SPEC.md`](docs/FIRMWARE_SPEC.md) |
 | RAK9154 protocol sourcing (and what the sibling repo is and is not authoritative for) | [`docs/research/rak9154-battery-protocol-sources.md`](docs/research/rak9154-battery-protocol-sources.md) |
 | Decisions and their reasoning | [`docs/decisions/`](docs/decisions/) |
