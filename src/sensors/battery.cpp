@@ -10,20 +10,13 @@
 
 namespace {
 
-// There is deliberately no raw-Modbus path on this line.
+// There is deliberately no raw-Modbus path on this line: the one-wire peer speaks SensorHub
+// northbound and Modbus southbound to the BMS, and does not bridge a Modbus frame arriving from
+// the north.
 //
-// One was tried: slave 0x6E, FC 0x03, 21 registers from 0x6000 — the same numbers the deployed
-// sibling node reads this pack with over its own RS-485 harness. Request `6E 03 60 00 00 15 93
-// 5A`, sent ahead of the SensorHub handshake on every cycle. It drew **0 bytes, every cycle,
-// across every revision it was compiled into.** The one-wire peer is a Generic Probe IO adapter
-// that speaks SensorHub northbound and Modbus southbound to the BMS; it does not bridge a
-// Modbus frame arriving from the north. That is a settled negative result, recorded in
-// CHANGELOG.md and docs/EVIDENCE.md, and the SensorHub path below now returns real
-// measurements — so re-adding it would cost an 8-byte request and a 1 s wait per wake to
-// re-derive an answer we already have.
-//
-// CITE(bench): docs/EVIDENCE.md 2026-08-05 — the raw-Modbus probe returned 0 bytes on every
-//   cycle it ran, while the SensorHub path on the same wire returned 12.23 V.
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — the raw-Modbus probe (slave 0x6E, FC 0x03, 21
+//   registers from 0x6000) returned 0 bytes on every cycle it ran, while the SensorHub path on
+//   the same wire returned 12.23 V.
 
 // The RAK Sensor Hub one-wire link is NOT a bare TLV stream. Every frame is a RUI3
 // transport frame — { wakeup, delimiter, 16-bit length, type, flag, payload } — carrying a
@@ -46,49 +39,16 @@ constexpr uint8_t kWakeByte = 0xFF; // RUI3_Api_t.wakeup
 // kDelimiter and the rest of the protocol field constants now live in battery_frame.h, so the
 // codec and the transport cannot drift apart on them.
 
-// Exactly one wake byte, because that is what the reference master emits and because on the
-// provisioning path every extra byte is latency the pack is waiting through.
-//
-// `RUI3_Api_t.wakeup` is a single `U8` at the head of the struct, and the reference hands the
-// whole struct to the transport in one call — so the frame on the wire is one 0xFF, one 0x7E,
-// then the header. The previous four were a guess that the line needed settling; at 9600 they
-// cost 4 x 1.04 ms = ~4.2 ms of dead air ahead of every frame, and ~3.1 ms of that is pure
-// delay added between the pack finishing its announcement and hearing our answer. The pack
-// tolerates four (the bench SENDAT sweep drew a full reply with them), so this is not the
-// whole fault — but it is 3 ms off the critical path for free, and it removes a divergence
-// from the one implementation known to be accepted by this pack.
-//
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t is
-//   ATT_PACKED { U8 wakeup; U8 start; RUI3API_LEN_T length; type; flag; U8 payload[]; }: one
-//   wakeup byte, not a run of them.
-// CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c api_process()
-//   rebuilds the frame as `dataBuff[0] = WAKEUPBYTE` followed by everything from the
-//   delimiter on, and snhub_provision_req_program() hands that exact buffer to
-//   SNHUBAPI_EVT_QSEND at `pktLen = len` — so the response leaves with a single 0xFF.
-// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp — the transport under
-//   that event is `case SNHUBAPI_EVT_QSEND: mySerial.write(msg, len);`, one write of the
-//   whole buffer with nothing prepended.
-// The value itself lives in battery.h as kBatteryWakeCount, so any future reader of this link
-// sends the identical run — a drifted copy costs a whole bench session, because a pack that is
-// working answers a short run with silence.
-//
-// RESTORED to 4, from 1. The reasoning that cut it to 1 was sound about the reference's struct
-// and wrong about which revision worked: `RUI3_Api_t.wakeup` is indeed a single byte, but the
-// only revision that has ever drawn a full SENDAT reply from this pack is the one that sent
-// four. Three milliseconds of dead air ahead of the frame was removed as "free" latency on
-// untested reasoning, and it was not free — a wake byte on an open-drain line is plausibly doing
-// exactly what its name says, holding the line long enough for the pack's receiver to lock.
-//
-// Kept as a named constant rather than folded into send_frame() so the next sweep can move it
-// without touching the frame logic.
+// Four wake bytes, which is a deliberate deviation from the reference and is held by the bench,
+// not by the header. Do not cut it to one on the strength of the struct definition: that was
+// tried, and the only revisions that have ever drawn a full SENDAT reply from this pack sent
+// four. A short run costs a bench session, because a working pack answers it with silence.
 //
 // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.h — RUI3_Api_t is
 //   ATT_PACKED { U8 wakeup; U8 start; RUI3API_LEN_T length; type; flag; U8 payload[]; }: the
-//   struct carries one wakeup byte. Sending four is a deliberate deviation from it, justified by
-//   the bench rather than by the header.
+//   struct carries one wakeup byte, so four is ours, not the reference's.
 // CITE(bench): docs/EVIDENCE.md — the SENDAT dest sweep that returned a full 28-byte
-//   checksum-valid reply ran with four wake bytes; every revision since has sent one and none
-//   has drawn a SENDAT reply.
+//   checksum-valid reply ran with four wake bytes.
 constexpr uint8_t kWakeCount = kBatteryWakeCount;
 
 // Guard gap before the first byte of a response, in milliseconds. See
@@ -253,70 +213,37 @@ SoftwareHalfSerial &bus(uint8_t pin)
     return instance;
 }
 
-// Where bytes are read from, and where they are written to.
-//
-// One instance, one pin. An earlier revision could split the link across two pins
-// (FEATURE_ONEWIRE_SPLIT) on the theory that bridging the pack's TXD and RXD onto one wire
-// caused TX contention that corrupted the long provisioning frame. The bench settled it the
-// other way: the pack talks perfectly well on the bridged harness -- it answers SENDAT with
-// checksum-valid frames, latches the id this firmware assigns it, and reports live values.
-// What used to block provisioning was reply turnaround timing, not topology (kTurnaroundMs).
-// The split path was therefore removed rather than left switched off, because a second
-// wiring mode that no evidence supports is a thing every future reader has to rule out.
+// One instance, one pin. A two-pin split path was tried and removed: the blocker was reply
+// turnaround timing (kTurnaroundMs), not topology.
 //
 // CITE(bench): docs/EVIDENCE.md 2026-08-05 -- on the bridged single-wire harness the pack
 //   latched pid 0x01 and returned 12.23 V across seven consecutive cycles, so contention on
 //   the shared line prevents neither provisioning nor sampling.
 // CITE(datasheet): [CIT-RAK2560] RAK2560 Hub Datasheet, "Pin Definition" -- a genuine master
-//   drives pin 5 (one-wire UART) only and leaves pin 3 reserved, which is what a single
-//   shared line reproduces.
+//   drives pin 5 (one-wire UART) only and leaves pin 3 reserved.
 SoftwareHalfSerial &link_for(uint8_t pin) { return bus(pin); }
 
-// How long a receive waits for the first byte, and how long a gap ends a frame.
-//
-// Both are bench-derived rather than published: no document states this pack's reply latency,
-// and PARAMGET drew no reply on this link, so there is nothing to read it out of. What bounds
-// them is on our side. The first-byte wait is the price a cycle pays per unanswered query, so
-// it is set by the wake budget, not by patience — half a second, against a 900 s interval and
-// the 120 s watchdog window, is affordable per query and could not hide a hang. The inter-byte
-// gap is roughly 4.4 character times at 9600 8N1 (1.146 ms per byte), the same shape as the
-// 3.5-character silence Modbus uses to delimit an RTU frame, with margin for the pack pausing
-// mid-record.
+// Both bench-derived: no document states this pack's reply latency. The first-byte wait is the
+// price per unanswered query, so it is set by the wake budget. The inter-byte gap is ~4.4
+// character times at 9600 8N1, the same shape as Modbus's 3.5-character frame silence.
 //
 // CITE(spec): docs/FIRMWARE_SPEC.md §7 H1 — the 120 s watchdog is the outer bound every wait
-//   in this driver has to sit inside; §2.1 sets the same discipline for the other bus.
+//   in this driver has to sit inside.
 // CITE(spec): [CIT-MODBUS-SERIAL] the 3.5-character inter-frame silence is the standard way a
-//   byte-oriented serial link decides a frame has ended; this is that idea at 9600 8N1 with
-//   margin, on a bus with no length field the parser can trust before checksumming.
-// CITE(policy): docs/POWER_BUDGET.md — awake time is the budget item with no upside, so an
-//   unanswered query has to cost a bounded, small fraction of the cycle.
-// CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 RAK9154Sensor.cpp onewireHandle() uses a
-//   per-byte `delay(2)` grace to delimit the same frames; the gap here is that idea expressed
-//   as a timeout, widened because this driver reads once per wake instead of every 50 ms.
+//   byte-oriented serial link decides a frame has ended, on a bus with no length field the
+//   parser can trust before checksumming.
+// CITE(policy): docs/POWER_BUDGET.md — awake time is the budget item with no upside.
 constexpr uint32_t kFirstByteTimeoutUs = 500000; // probe wake can be slow
 constexpr uint32_t kInterByteTimeoutUs = 5000;   // gap that ends a frame
 
-// How long to wait for the pack to push a reading of its own accord.
+// How long to wait for the pack to push a reading of its own accord. Generous because the pack's
+// sampling cadence is not readable from anything the firmware can interrogate, and off the
+// critical path: a latched pack answers the poll and never enters this listen. 20 s against an
+// hourly interval is ~0.6% duty, and well inside the 120 s watchdog window.
 //
-// The poll only ever returns a record template, so the measurement has to come from the
-// unsolicited report — and that arrives on the pack's own sampling cadence, not on ours. The
-// previous 500 ms wait was therefore a bet that the two coincided, which the bench lost every
-// cycle. This is deliberately generous because the pack's sampling cadence is not readable from
-// anything the firmware has been able to interrogate: PARAMGET drew no reply on this link. It is
-// also no longer on the critical path — a latched pack answers the poll with live values and
-// never enters this listen (see the `m_last != Ok` guard on the caller).
-//
-// It costs awake time, which on a node meant to last months is not free — 20 s per cycle
-// against an hourly interval is roughly 0.6% duty. Acceptable to prove the mechanism, and it
-// should be narrowed to just over the pack's real cadence once that is known. Tracked with the
-// rest of the battery bring-up in issue #5.
-//
-// Well inside the 120 s watchdog window in src/main.cpp, so a long listen cannot look like a
-// hang.
 // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-//   onewireHandle() reschedules itself every 50 ms forever and drains on every tick, i.e. the
-//   reference is *always* listening. A wake-transact-sleep driver has to buy an approximation
-//   of that with a window wide enough to contain one push.
+//   onewireHandle() reschedules every 50 ms forever, i.e. the reference is *always* listening.
+//   A wake-transact-sleep driver buys an approximation with a window wide enough for one push.
 // CITE(bench): docs/EVIDENCE.md — stage3 on 246add8: the poll returned a checksum-valid
 //   all-zero template every cycle and the 500 ms push listen that followed it caught nothing.
 #if FEATURE_BATTERY_FAST
@@ -328,27 +255,14 @@ constexpr uint32_t kPushListenUs = 2000000; // 2 s
 constexpr uint32_t kPushListenUs = 20000000; // 20 s
 #endif
 
-// How many consecutive cycles with no reading before the driver stops paying for the expensive
-// half of the ladder, and how long it then waits before trying the full ladder again.
+// Consecutive cycles with no reading before the driver stops paying for the expensive half of
+// the ladder. A silent pack otherwise costs ~28 s of wake every cycle forever. Three rather than
+// one because a single silent cycle is routine after a boot, while the pack samples.
 //
-// The happy path is cheap: the pack answers the direct probe in well under a second. The
-// announcement window (5 s) and the push listen (20 s) only run when that fails — so a pack
-// that has stopped talking costs roughly 28 s of wake time every cycle, forever, with nothing
-// to show for it. That is the wrong way round. The cost should be paid while the failure is new
-// and there is a plausible chance of recovery, not for months after the pack has gone quiet.
-//
-// Three cycles is deliberately more than one: a single silent cycle is routine after a boot,
-// where the pack needs a couple of cycles to sample before it answers anything, and dropping to
-// probe-only on the first miss would slow first acquisition. Twenty-four cycles at the field
-// interval is roughly a day, so a pack that recovers — a cell that warmed up, a connector that
-// re-seated — is found within a day rather than never.
-//
-// CITE(policy): docs/POWER_BUDGET.md — the node runs unattended indefinitely on a
-//   solar-recharged pack, so wake time spent with nothing to show for it is the budget item
-//   that has no upside. Never let the pack reach a state it cannot recover from by itself.
-// CITE(bench): docs/EVIDENCE.md 2026-08-05 — on 1a203d3, cycle 1 ran the full ladder and
-//   cycles 2-7 were answered by the direct probe alone in well under a second. The expensive
-//   phases have only ever been useful on the first cycle after a cold pack.
+// CITE(policy): docs/POWER_BUDGET.md — wake time with nothing to show for it is the budget item
+//   with no upside. Never let the pack reach a state it cannot recover from by itself.
+// CITE(bench): docs/EVIDENCE.md 2026-08-05 — on 1a203d3, cycle 1 ran the full ladder and cycles
+//   2-7 were answered by the direct probe alone in well under a second.
 constexpr uint16_t kSilentCyclesBeforeProbeOnly = 3;
 
 // The same bound for a pack that is answering with placeholders instead of not answering at
