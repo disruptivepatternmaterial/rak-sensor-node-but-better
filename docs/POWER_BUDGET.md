@@ -12,6 +12,7 @@ unmeasured" without checking this list is wrong and wastes the operator's time. 
 | Station overnight draw (node + RK900 + muon + buck, from the pack) | **−0.05 A, 89 → 85 % SoC over 4 h** | field telemetry 2026-08-30, `puma-concolor-001` |
 | Pack charging sign | **+0.01 A in daylight** — confirms positive = charging | same field window |
 | Pack telemetry resolution | **10 mA/LSB** — cannot resolve sleep-scale questions | 2026-08-12, `4510763` |
+| RK900-09 draw | **0.4 W** (~33 mA at 12 V), continuously powered — not duty-cycled | operator bench measurement, recorded 2026-08-30; exact date/instrument unrecorded |
 
 The **one** open number is the sleep-state current at the ~1 mA-and-below scale, where both
 instruments used so far bottom out ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)).

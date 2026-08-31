@@ -54,6 +54,32 @@ their own dead pads is the measurement.
 CITE(policy): [`.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc`](../.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc)
 — the rule this count is the justification for.
 
+## 2026-08-30 (seventh) — RK900-09 draw: 0.4 W, operator measurement, closing the station attribution
+
+**Source: the operator, in session, 2026-08-30.** The RK900-09 weather head draws **0.4 W**
+(~33 mA at the pack's ~12 V). Measured on the bench by the operator; the exact date,
+instrument, and measurement point were not recorded at the time — this entry exists so the
+figure stops living only in the operator's head. It had been measured "several times" and
+asked for again by agents at least three times, because no session ever wrote it down.
+
+Against the measured station total from the field window below (−0.05 A at ~12 V ≈ 0.6 W),
+the attribution falls out by subtraction:
+
+| Load | Share |
+|---|---|
+| RK900-09, continuously powered from `P+` (never duty-cycled — see `HARDWARE.md`) | **0.4 W ≈ two-thirds** |
+| Everything else: buck quiescent + this node's average + muon-001's duty-cycled average | ~0.2 W |
+
+**Consequence:** interval widening on the node or the muon can only ever touch the ~0.2 W
+remainder. The single biggest power lever the station has is duty-cycling the RK900's 12 V
+feed, which is a hardware change (load switch) plus firmware sequencing — operator's call,
+tracked under [#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113).
+
+CITE(bench): operator-stated measurement, recorded here 2026-08-30. Instrument and setup
+unrecorded; treat the third significant figure as unknown.
+CITE(bench): 2026-08-30 field telemetry window below (f_cnt 3644–3660) — the −0.05 A /
+89 → 85 % station total this figure is attributed against.
+
 ## 2026-08-30 (sixth) — node 002's silent core takes the field image over SWD and RUNS it
 
 **Host:** Heliotrope Ridge. **Probe:** CMSIS-DAP-MuseLab, serial
