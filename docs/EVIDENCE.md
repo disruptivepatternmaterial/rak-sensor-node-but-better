@@ -4746,6 +4746,47 @@ on it. No background processes were left running.
   matter how many cycles it watches. Tracked in
   [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
 
+### 2026-08-30 — field telemetry window settles temp scale, charge sign, and two bench checks
+
+- **Commit:** not banner-asserted in this window. The image is `1c2df3c` (v0.4.3) by continuity —
+  flashed and banner-asserted 2026-08-14, session `dev_addr` unchanged and `f_cnt` monotonic since.
+  No console exists in the field, so this window cannot re-assert it; treat image identity as
+  inferred, not observed.
+- **Host:** data pulled via `ttn-lw-cli applications storage get` on Heliotrope Ridge,
+  2026-08-31Z, from the workstation over SSH.
+- **Measured:** 17 consecutive uplinks from `puma-concolor-001`, `f_cnt` 3644–3660,
+  2026-08-29T00:09Z–04:12Z (17:09–21:12 local, evening into night), decoded by the pinned
+  formatter (`058bd69`).
+- **Observation:**
+  ```
+  00:09Z  batt 12.04 V  +0.01 A  9 °C  89 %   wx_temperature 9.4 °C   (daylight)
+  00:25Z  batt 12.03 V  -0.05 A  9 °C  90 %   wx_temperature 8.6 °C
+  ...every 900 s, f_cnt +1 each...
+  04:12Z  batt 11.88 V  -0.05 A  5 °C  85 %   wx_temperature 6.3 °C
+  ```
+- **What this establishes:**
+  1. **`batt_temperature` scale is correct as deployed** — 9 → 5 °C tracking the co-located
+     RK900's 9.4 → 6.3 °C with plausible lag. A 10× error in either direction would read 0.9 or
+     90 °C. Closes the "inferred from the IPSO type" caveat in `payload/schema.yaml` and
+     [#4](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/4).
+  2. **`batt_current` sign convention confirmed under a real charge** — positive (+0.01 A) in
+     daylight, negative (−0.02 to −0.05 A) after dark, exactly ADR-0002's positive-is-charging.
+     The 2026-08-12 single-LSB reading is superseded by a real day/night transition.
+  3. **USB re-enumeration and watchdog ticks across sleeps are no longer open questions** — this
+     window plus the 19.03 h soak (76 uplinks, port reattached across every sleep) and `f_cnt`
+     3660 of cumulative field cycles with zero watchdog resets answer both halves of
+     [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40).
+  4. **Overnight system draw, coarse:** −0.05 A telemetry (5 LSB, a real reading, not a floor)
+     and 89 → 85 % capacity in ~4 h. This is the whole system through the pack — node, RK900,
+     buck idle — NOT the MCU sleep current, which stays unmeasured
+     ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)
+     stays open). It is the first field-measured input for the winter budget in
+     [`POWER_BUDGET.md`](POWER_BUDGET.md).
+- **Verdict:** PASS for the temp-scale and sign questions; INFORMATIVE for power. No H-gate
+  closes on this entry.
+- **Notes:** TTN community storage retained only this ~4 h slice of the week — pull windows
+  promptly if a specific period matters.
+
 <!-- Template:
 
 ### YYYY-MM-DD — one-line summary

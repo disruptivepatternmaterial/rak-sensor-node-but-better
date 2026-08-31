@@ -235,7 +235,7 @@ An uplink is also withheld when the persisted frame counter cannot be kept ahead
 
 The reserve that makes those withheld writes affordable is finite, and the hold that consumes it need not end. A hold resting on a pack that has stopped answering is lifted only by a valid reading at or above the resume threshold, and the keepalive uplink is the only thing keeping the node reachable in the meantime — so once the reserve is spent, refusing the keepalive too would leave a permanently mute node, and being Class A ([CITE(spec): LoRaWAN L2 1.0.4 §3, Class A — `CIT-LW-LINK`](CITATIONS.md)) a permanently uncommandable one. **A keepalive the brownout gate itself armed is therefore allowed exactly one counter checkpoint write, gate or no gate.** Never an ordinary uplink, and never a hold backed by a measured low voltage, where staying quiet is the correct answer. The write rate is one per `session::kCounterMargin` keepalives — about monthly at the default cadence — and a supply that collapses mid-write cannot produce a plausible-looking wrong record, because the filesystem commits atomically ([CITE(prior-art): littlefs README, "atomic, even in event of power-loss" — `CIT-LITTLEFS-DESIGN`](CITATIONS.md)) and the in-RAM ceiling advances only after the write has returned.
 
-## 6. Payload (draft — freeze before soak)
+## 6. Payload (FROZEN 2026-08-30 — #13, see `payload/schema.yaml` header)
 
 Prefer **RAK Standardized / Cayenne LPP–style** types already decoded by `forest-weather-machines` `rak-wx-station-default.js` so ingest stays unchanged:
 
