@@ -4,8 +4,12 @@
 # formatter in the forest-weather-machines repo. scripts/check_decoder_parity.py
 # compares them on every build and fails if they have drifted.
 #
-# Status: DRAFT. FIRMWARE_SPEC.md §6 requires this be frozen before soak testing.
-# Do not treat unresolved entries as decided.
+# Status: FROZEN 2026-08-30 (#13). Both open hardware questions were answered by field
+# telemetry — docs/EVIDENCE.md 2026-08-30, f_cnt 3644-3660: batt_temperature scale
+# confirmed against the co-located RK900, batt_current sign confirmed across a real
+# day/night charge transition. From here, ANY field change requires a paired formatter
+# change in forest-weather-machines and a re-pin below — the decoder throws on unknown
+# types and discards the whole uplink.
 #
 # Rules: .cursor/rules/60-decoder-parity.mdc · Spec: docs/FIRMWARE_SPEC.md §6
 
@@ -52,7 +56,7 @@ fields:
     unit: m/s
     decoded_key: wx_wind_speed
     source: FIRMWARE_SPEC.md §2.1 reg 0x0000
-    status: proposed
+    status: frozen
 
   - name: wind_direction
     channel: 2
@@ -63,7 +67,7 @@ fields:
     unit: deg
     decoded_key: wx_wind_direction
     source: FIRMWARE_SPEC.md §2.1 reg 0x0001
-    status: proposed
+    status: frozen
     notes: >
       Emit the RAW heading. The decoder applies WIND_DIR_OFFSET, the per-install north
       correction. Applying it in firmware as well double-corrects by that many degrees.
@@ -91,7 +95,7 @@ fields:
     unit: degC
     decoded_key: wx_temperature
     source: FIRMWARE_SPEC.md §2.1 reg 0x0002 (S16)
-    status: proposed
+    status: frozen
 
   - name: humidity
     channel: 4
@@ -102,7 +106,7 @@ fields:
     unit: "%RH"
     decoded_key: wx_humidity
     source: FIRMWARE_SPEC.md §2.1 reg 0x0003
-    status: proposed
+    status: frozen
     notes: >
       TRAP: FIRMWARE_SPEC.md §6 lists "Humidity 104/112" as if interchangeable. They
       are not. Type 112 decodes to name "humidity_prec", giving key humidity_prec_4,
@@ -123,7 +127,7 @@ fields:
     unit: hPa
     decoded_key: wx_barometer
     source: FIRMWARE_SPEC.md §2.1 reg 0x0004
-    status: proposed
+    status: frozen
 
   - name: batt_voltage
     channel: 21
@@ -134,7 +138,7 @@ fields:
     unit: V
     decoded_key: batt_voltage
     source: FIRMWARE_SPEC.md §2.2 reg 0x6000
-    status: proposed
+    status: frozen
 
   - name: batt_current
     channel: 22
@@ -145,7 +149,7 @@ fields:
     unit: A
     decoded_key: batt_current
     source: FIRMWARE_SPEC.md §2.2 reg 0x6001
-    status: proposed
+    status: frozen
     sign_convention: positive-is-charging
     notes: >
       SIGN CONVENTION, decided 2026-08-13 by the operator (docs/decisions/ADR-0002,
@@ -167,9 +171,9 @@ fields:
       That claim lost - it was a field note describing the RAK2560 Hub's re-encoding,
       never a measurement of the pack - and §2.2 is corrected to match.
 
-      NOT yet confirmed on hardware under a real charge current. The one bench
-      reading (2026-08-12, -0.01 A on a discharging pack) is one LSB and is
-      consistent with this convention without proving it.
+      CONFIRMED on hardware 2026-08-30 (docs/EVIDENCE.md, f_cnt 3644-3660): +0.01 A
+      in daylight, -0.02 to -0.05 A after dark, across a real day/night transition.
+      The 2026-08-12 single-LSB bench reading is superseded.
 
   - name: batt_soc
     channel: 23
@@ -180,7 +184,7 @@ fields:
     unit: "%"
     decoded_key: batt_capacity
     source: FIRMWARE_SPEC.md §2.2 reg 0x6002
-    status: proposed
+    status: frozen
 
   - name: batt_temperature
     channel: 24
@@ -191,13 +195,14 @@ fields:
     unit: degC
     decoded_key: batt_temperature
     source: ADR-0002 amendment (one-wire path per ADR-0004)
-    status: proposed
+    status: frozen
     notes: >
       Scale depends on how the pack is read. The Modbus register 0x6009 reports whole
       degrees and would need a x10 before encoding. The one-wire path used today returns
       IPSO type 103 records, which already carry tenths, so the value passes through
-      unscaled. Inferred from the IPSO type, not yet confirmed against hardware: at room
-      temperature a reading near 210 confirms tenths, near 21 means the x10 is needed.
+      unscaled. CONFIRMED against hardware 2026-08-30 (docs/EVIDENCE.md, f_cnt 3644-3660):
+      decoded 9 -> 5 degC overnight tracking the co-located RK900's 9.4 -> 6.3 degC air
+      temperature. A 10x error either way would have read 0.9 or 90. Closes #4.
 
 # Present in the decoder but NOT emitted by this device. Listed so the parity
 # checker does not flag them as missing.
