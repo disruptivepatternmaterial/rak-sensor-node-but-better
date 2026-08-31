@@ -13,6 +13,7 @@ unmeasured" without checking this list is wrong and wastes the operator's time. 
 | Pack charging sign | **+0.01 A in daylight** — confirms positive = charging | same field window |
 | Pack telemetry resolution | **10 mA/LSB** — cannot resolve sleep-scale questions | 2026-08-12, `4510763` |
 | RK900-09 draw | **0.4 W** (~33 mA at 12 V), continuously powered — not duty-cycled | operator bench measurement, recorded 2026-08-30; exact date/instrument unrecorded |
+| RK900 12 V duty-cycle switch | **on order** — Pololu Isolated SSR #5426 ([CIT-POLOLU-5426](CITATIONS.md)) | operator, 2026-08-31; firmware + GPIO selection wait on arrival ([#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113)) |
 
 The **one** open number is the sleep-state current at the ~1 mA-and-below scale, where both
 instruments used so far bottom out ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)).

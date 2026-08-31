@@ -75,10 +75,10 @@ remainder. The single biggest power lever the station has is duty-cycling the RK
 feed, which is a hardware change (load switch) plus firmware sequencing — operator's call,
 tracked under [#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113).
 
-CITE(bench): operator-stated measurement, recorded here 2026-08-30. Instrument and setup
-unrecorded; treat the third significant figure as unknown.
-CITE(bench): 2026-08-30 field telemetry window below (f_cnt 3644–3660) — the −0.05 A /
-89 → 85 % station total this figure is attributed against.
+CITE(bench): docs/EVIDENCE.md this entry — operator-stated 0.4 W, recorded 2026-08-30.
+Instrument and setup unrecorded; treat the third significant figure as unknown.
+CITE(bench): docs/EVIDENCE.md 2026-08-30 field telemetry window (f_cnt 3644–3660) — the
+−0.05 A / 89 → 85 % station total this figure is attributed against.
 
 ## 2026-08-30 (sixth) — node 002's silent core takes the field image over SWD and RUNS it
 

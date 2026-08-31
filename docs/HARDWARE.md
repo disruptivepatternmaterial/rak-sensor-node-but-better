@@ -834,7 +834,7 @@ Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 
 |---|---|
 | RS-485 A | RAK5802 `A/RX` |
 | RS-485 B | RAK5802 `B/TX` |
-| 12 V + | pack `P+` |
+| 12 V + | pack `P+` — **as deployed.** The duty-cycle switch ([CIT-POLOLU-5426](CITATIONS.md), on order 2026-08-31) goes in this run only, high-side, when #113 lands |
 | Negative | pack `P−` |
 
 1. `P+` feeds **two** loads, not one: the buck's VIN+ (→ WisBlock 5 V, entering the board
