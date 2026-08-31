@@ -5,10 +5,16 @@
  * on the node touches Serial1: ADR-0004 gave the RAK5802 to this sensor exclusively at a fixed
  * line rate, so there is no bus arbitration and no baud switching to get wrong.
  *
- * That rate is **9600**, not the datasheet's 4800. This physical unit replies at 9600 and returns
- * zero bytes at 4800 across four consecutive sweeps, so the firmware follows the measurement —
- * see ADR-0006 and `kBaud` in rk900.cpp. The 4800 in the citation below is what the datasheet
- * says, and it is cited as such; it is not what this node transmits.
+ * The line rate is a measured value that contradicts the RAKwireless datasheet, so it is sourced
+ * here beside the claim rather than only in the block below.
+ *
+ * CITE(bench): [CIT-RK900-BAUD-2026-08-03] — this physical unit returned a CRC-valid reply at
+ *   9600 only, and zero bytes at 4800, across four consecutive sweeps.
+ * CITE(datasheet): [CIT-RK900-PROTO] Rika's own protocol document gives the factory default as
+ *   9600 8N1, so the measurement agrees with the manufacturer and it is RAKwireless's 4800 that
+ *   is the outlier. ADR-0006 records the conflict and which source the firmware follows.
+ * The rate is set in exactly one place, `kBaud` in rk900.cpp. The 4800 in [CIT-RK900] below is
+ * what the RAKwireless datasheet says and is cited as such — it is not what this node transmits.
  *
  * It no longer owns WB_IO2 exclusively. When the pack's one-wire data line is routed through the
  * RAK5802's SDA terminal, Battery::read() raises the same rail for the duration of its
