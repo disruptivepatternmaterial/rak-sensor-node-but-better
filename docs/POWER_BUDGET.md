@@ -1,10 +1,27 @@
 # Power budget
 
-🚧 **Worksheet, not a result.** Every figure below is `TBD` until it is either read from a
-manufacturer datasheet (cited) or measured on the bench and recorded in
-[`EVIDENCE.md`](EVIDENCE.md). **Do not fill these in from memory or from a blog post** —
-an invented current figure produces a confident, wrong runtime estimate, and the cost of
-being wrong is a hike.
+## What is measured — read this before calling anything "unmeasured"
+
+This project has taken current measurements repeatedly. An agent that says "the draw is
+unmeasured" without checking this list is wrong and wastes the operator's time. On record:
+
+| Measurement | Value | When / where |
+|---|---|---|
+| Whole board, awake peak over a 900 s cycle | **~40 mA ± 10 mA** (meter likely missed the ~50 ms TX burst) | bench meter 2026-08-13, [`EVIDENCE.md`](EVIDENCE.md) |
+| Whole board, idle between bursts | **< 10 mA** — meter floor, not a value | same session |
+| Station overnight draw (node + RK900 + muon + buck, from the pack) | **−0.05 A, 89 → 85 % SoC over 4 h** | field telemetry 2026-08-30, `puma-concolor-001` |
+| Pack charging sign | **+0.01 A in daylight** — confirms positive = charging | same field window |
+| Pack telemetry resolution | **10 mA/LSB** — cannot resolve sleep-scale questions | 2026-08-12, `4510763` |
+
+The **one** open number is the sleep-state current at the ~1 mA-and-below scale, where both
+instruments used so far bottom out ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)).
+That gap matters for the node-alone reserve claim, **not** for station-level questions — even
+the worst documented sleep defect (~6 mA) is a tenth of the measured overnight station draw.
+
+🚧 **The tables below remain a worksheet.** A figure marked `TBD` is filled only from a cited
+datasheet or a measurement recorded in [`EVIDENCE.md`](EVIDENCE.md) — never from memory or a
+blog post. An invented current figure produces a confident, wrong runtime estimate, and the
+cost of being wrong is a hike.
 
 Rules: [`.cursor/rules/50-power-management.mdc`](../.cursor/rules/50-power-management.mdc)
 
