@@ -139,3 +139,41 @@ deliberate reversal, and `scripts/preflight.sh` runs it on every commit. A check
 fail is worse than no check
 ([#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76) was
 exactly that), and this one gets trusted immediately before a device goes in the woods.
+
+## Asking TTN what the node actually did
+
+The device lives in application **`my-app-tobi`**. The plausible-sounding `middle-fork-area` has
+no end devices at all, so anyone reasoning from the application name looks in the wrong place.
+
+| Purpose | Command |
+|---|---|
+| List applications | `ttn-lw-cli applications list` |
+| List devices | `ttn-lw-cli end-devices list my-app-tobi` |
+| Everything about one device | `ttn-lw-cli end-devices get my-app-tobi puma-concolor-001 --all` |
+| Per-uplink history | `ttn-lw-cli end-devices storage get my-app-tobi puma-concolor-001 --last 32h --type uplink_message --order received_at --limit 400 --stream-output` |
+| Live events | `ttn-lw-cli events subscribe --application-id my-app-tobi` |
+| Queue downlink | `ttn-lw-cli end-devices downlink push my-app-tobi puma-concolor-001 --f-port 10 --frm-payload 03` |
+| Inspect queue | `ttn-lw-cli end-devices downlink list my-app-tobi puma-concolor-001` |
+
+**Prefer the device record over the event stream.** `last_seen_at` and `last_f_cnt_up` are the
+network's own memory; a live subscription is a sample of it. A two-minute window on a 900 s duty
+cycle sees nothing and proves nothing — that mistake was made and corrected on 2026-08-12
+(`docs/EVIDENCE.md`).
+
+Traps that have each cost real time:
+
+- **`end-devices subscribe-events` is not a subcommand.** It prints help text and exits 0, so a
+  redirect captures the help and reads as an empty stream. The events live under
+  `ttn-lw-cli events subscribe`.
+- The downlink flags are **`--f-port`** and **`--frm-payload`**, not `--port` / `--payload`.
+- A successful `downlink push` prints nothing but `INFO`/`WARN`. Confirm with `downlink list`, not
+  with the absence of an error.
+- Event JSON is pretty-printed, so the key is `"name": "..."` **with a space**. Grepping for
+  `"name":"` matches nothing and looks like silence.
+- The config is not at `~/.config/ttn-lw-cli`; it resolves `~/.ttn-lw-cli.yml` and
+  `~/Library/Application Support/.ttn-lw-cli.yml`. The build host **is** authenticated — the file
+  not being where you looked is not the same as not being logged in.
+- Uplink payload formatters on this application are set **per device**, not inherited from the
+  application, because `WIND_DIR_OFFSET` differs per install. A device with no formatter delivers
+  `frm_payload` and no `decoded_payload` while looking perfectly healthy
+  ([#84](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/84)).
