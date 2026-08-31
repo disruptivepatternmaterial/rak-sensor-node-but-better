@@ -210,19 +210,18 @@ void print_banner()
 void setup()
 {
 #if FEATURE_CONSOLE
-    // Gated, because on this core initializing the port is not free even with no host attached:
-    // RAK's low-power document is emphatic that the serial port "MUST NOT be initialized"
-    // because FreeRTOS starts a background task for it that never sleeps and so prevents the
-    // MCU from sleeping. The field environment therefore builds with FEATURE_CONSOLE=0 and
-    // never reaches this line; the soak environment builds with it on and is observable.
+    // Gated, but ON in every image including the field one — see ADR-0008. RAK's low-power
+    // document claims the serial port "MUST NOT be initialized" because FreeRTOS starts a
+    // background task that never sleeps; that mechanism was checked against the Adafruit core's
+    // sources and is **false**, so FEATURE_CONSOLE=0 was tried and reverted the same day. Do not
+    // set it to 0 again without a meter (#47). What is true and still load-bearing is the other
+    // half: Serial.end() before sleep, or current stays in the milliamps.
     //
-    // CITE(prior-art): RAKwireless/WisBlock Low_Power_Example.md:45 — "As we want to achieve
-    //   maximum power savings, the Serial port MUST NOT be initialized." The shipped sketch
-    //   wraps every Serial call, Serial.begin() included, in `#ifndef MAX_SAVE`.
-    //   [CIT-RAK-LOWPOWER] — docs/CITATIONS.md
-    // CITE(prior-art): docs/LIBRARIES.md:55 — the same rule from the RAK forum, recorded in
-    //   this repository before the field image honored it: must Serial.end() before sleep or
-    //   current stays in the milliamps.
+    // CITE(prior-art): RAKwireless/WisBlock Low_Power_Example.md:45 [CIT-RAK-LOWPOWER] — the
+    //   "MUST NOT be initialized" claim, recorded here because it is cited everywhere and is
+    //   refuted in docs/CITATIONS.md rather than because it is correct.
+    // CITE(prior-art): docs/LIBRARIES.md:55 — the surviving rule from the RAK forum: must
+    //   Serial.end() before sleep or current stays in the milliamps.
     Serial.begin(115200);
     const uint32_t start = millis();
     while (!Serial && (millis() - start) < kConsoleWaitMs) {

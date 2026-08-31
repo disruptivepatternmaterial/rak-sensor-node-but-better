@@ -1726,18 +1726,13 @@ BatteryReading Battery::read()
     }
     LOGLN("");
 
-    // The unscaled integers, because the temperature scale is inferred rather than confirmed.
-    // src/payload.cpp hands this value to Cayenne type 103 unscaled and the TTN decoder divides
-    // by 10, which is only right if the pack reports tenths of a degree. A bench "23.0 C" is
-    // consistent with both raw 230 (tenths, correct) and raw 23 (whole degrees, in which case
-    // every temperature we ship is 10x low). Printing the raw integer is what settles it from a
-    // capture instead of from an assumption, and it costs one line per cycle.
+    // The unscaled integers, so a capture can always be checked against what was shipped.
     // CITE(spec): [CIT-CAYENNE-LPP] Cayenne LPP — type 103 temperature is signed 16-bit in
-    //   0.1 degC units, so the decoder's /10 is correct only for a tenths-scaled source.
-    LOGF("   battery : raw v=%d i=%d soc=%d t=%d (t scale UNCONFIRMED — 230 means tenths, 23 "
-         "means whole degrees)\n",
-         (int)out.voltage.value, (int)out.current.value, (int)out.soc.value,
-         (int)out.temperature.value);
+    //   0.1 degC units, which matches the pack's tenths and makes the decoder's /10 correct.
+    // CITE(bench): docs/EVIDENCE.md 2026-08-05 — raw t=220 from a pack reporting 22.0 C
+    //   confirmed tenths; see also battery_frame.cpp where the value is decoded.
+    LOGF("   battery : raw v=%d i=%d soc=%d t=%d (tenths)\n", (int)out.voltage.value,
+         (int)out.current.value, (int)out.soc.value, (int)out.temperature.value);
 
     return out;
 }

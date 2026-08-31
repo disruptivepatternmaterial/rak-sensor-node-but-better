@@ -424,8 +424,10 @@ Ground first, ground last. No exceptions, no shortcuts, and never two power sour
 6. Pack pin 1 → buck input positive, and → RK900 12 V.
 7. RK900 `A` and `B` → RAK5802 `A/RX` and `B/TX`.
 8. Pack data (pins 3+5 joined) → 1 kΩ inline → RAK5802 `SDA` clip. **This wire goes on last.**
-9. Census the pad before trusting it: flash `env:owscan_sda` and confirm idle **HIGH**. A pad that
-   reads LOW here is already gone; do not proceed.
+9. Qualify the pad before trusting it, **with a meter and with the board powered down**: measure
+   its resistance to ground and compare against a known-good pin on the same core. Hundreds of kΩ
+   is healthy; a few kΩ means the pad is already gone. Do not proceed on a damaged pad, and do not
+   use firmware to check — the diagnostic that did this was deleted for destroying pads.
 10. Only now apply power.
 
 **Switching a built node from pack power to bench USB:**
@@ -693,22 +695,33 @@ If you are also fitting the optional parts: R2 from `SDA` to the **`VDD` pad** (
 | pack pin 2 and `GND` clip | near 0 Ω | ground wire not seated in the clip |
 | `BAT` pad and `SDA` clip | open | a bridge on the header row. **Do not power up** |
 
-Then power up and confirm the pad electrically before trusting it:
+Then confirm the pad **with the meter, not with firmware**:
 
 ```bash
-scripts/flash.sh --yes --env owscan_sda   # expect: INPUT_PULLUP idle HIGH, 0 samples LOW
+# Pad resistance to ground, powered down, against a known-good pin on the same core.
+# A healthy pad reads hundreds of kΩ; SDA/P0.13 read 5.6 kΩ against 240 kΩ on the
+# never-connected control pin when it died. 43x apart is the signature.
 scripts/flash.sh --yes --env battdiag_sda # expect: 12.xx V within ~15 cycles
 ```
 
-With R2 fitted, `owscan_sda` should report `idle HIGH` and **0 falling edges** while the pack is
-idle — the same signature as an unconnected clean pad, because R2 now holds the line high properly
-instead of leaving it at 1.7 V.
+**There is no firmware pad census, and there must not be one.** `env:owscan*`,
+`FEATURE_ONEWIRE_SCAN` and `src/diagnostics/owscan.*` were deleted on 2026-08-30 after seven GPIO
+pads were destroyed across two cores — every one of them the pad carrying this data line. A
+firmware census structurally cannot answer this question safely, because reaching a pad means
+driving it, and the census drove it at 14x the production rate with the worst-case bit pattern.
+Two multimeter readings settled in one minute what it got wrong across several sessions and
+several discarded cores.
+
+Use the meter for "is this pad usable", and the Saleae Logic Pro 8 for "what is on this wire" —
+±25 V absolute maximum and a 2 MΩ input, against a pad rated 3.6 V powered and **0.3 V
+unpowered**. See [`../AGENTS.md`](../AGENTS.md) and
+[`../.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc`](../.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc).
 
 #### What each part is for
 
 | Part | Job |
 |---|---|
-| **R1, 1 kΩ** | Caps fault current near 3 mA. The nRF52840's per-pin **absolute maximum** is 15 mA, and absolute maximum is a damage threshold, not an operating point [CIT-NRF-GPIO]. Covers a short, a driver collision, and a stray touch of the 12 V rail |
+| **R1, 1 kΩ** | Bounds fault current to roughly 3 mA by Ohm's law. **This does not make a driver collision safe, and the comparison that said it did was against the wrong limit.** 3 mA was checked against the nRF52840's 15 mA *absolute maximum* and found comfortable; the figure that matters is the standard-drive **continuous** rating of **1–2 mA**, which 3 mA exceeds. A 1 kΩ resistor was inline when `SDA`/P0.13 died, so it is refuted by our own bench (#101). Fit it — it genuinely helps against a stray touch of the 12 V rail — but do not treat it as protection against our own driver [CIT-NRF-GPIO] |
 | **D1, TVS** | Clamps the pad to within a diode drop of `GND` and `3V3`, shunting overvoltage to the rail instead of into the pin. This is the part that makes a 12 V contact survivable rather than fatal |
 | **R2, 2.2 kΩ** | Fixes the idle level. Measured 2026-08-30: the pack presents **15 kΩ** to its own ground, which against the nRF52840's ~13 kΩ internal pull-up leaves the line near **1.7 V** — inside the undefined band between V_IL and V_IH. With R2 the line idles near 2.9 V and reads as a solid HIGH |
 
@@ -744,11 +757,14 @@ first time this project had evidence strong enough to make that claim stick.
 project builds**, and it is proven: node 002 read 12.43 V, -0.01 A, 100 %, 24.0 C over SDA on
 2026-08-30 across nine cycles in two sessions, and the field image's uplink landed at TTN
 (`f_cnt 832`) ([`EVIDENCE.md`](EVIDENCE.md)). Build such a node from `env:rak4631_sda`, with
-`env:battdiag_sda` for fast pack questions and `env:owscan_sda` to qualify the pad.
+`env:battdiag_sda` for fast pack questions.
 
-**Qualify the pad before you solder to it.** `scripts`-side that means `env:owscan_*`: SDA was
-selected only after its census returned idle HIGH, 0 of 1,848,823 samples low. A1 was chosen by
-decision rather than measurement and that is part of what made 2026-08-30 expensive.
+**Qualify the pad before you solder to it — with a meter.** SDA was originally selected on a
+firmware census, and that census is now deleted: it drove the pad it was measuring and is the
+common factor in seven destroyed pads. Qualify a pad by metering its resistance to ground while
+powered down and comparing it against a known-good pin on the same core. A1 was chosen by decision
+rather than measurement, and that is part of what made 2026-08-30 expensive — but the answer to
+that is a meter, not a diagnostic image.
 
 Why the moves happened, and what is still unknown: three cores have shown `IO1` shorted to ground
 (~3.86 ohm, 2026-08-29), and on 2026-08-30 node 002's core also lost `A1` — held 100 % low against
