@@ -4,6 +4,185 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-09-04 — a replacement core takes `env:rak4631_sda`, services a downlink, and sleeps — and for the first time the core has an identity
+
+**Host:** Heliotrope Ridge. **Commit:** `33c0cddeb6997a9427941d5beab831e94132ef14`
+(`env:rak4631_sda`, `FEATURE_BATTERY_PIN_SDA=1`), asserted from the build and DFU inputs and
+**read back from the board's own boot banner after the 18:22 reflash** described below.
+
+**Core identity: `F980EFBFC688562B`** — the USB serial number reported by
+`pio device list --serial` as `USB VID:PID=239A:8029 SER=F980EFBFC688562B LOCATION=3-1.1`,
+`WisCore RAK4631 Board`, on `/dev/cu.usbmodem31101`. Per
+[`03-bench-claims.mdc`](../.cursor/rules/03-bench-claims.mdc) every prior entry in this file
+had to say "core not identified"; this one does not. This core is **not** an RUI3 part — it
+enumerates under Adafruit VID `239A`, not `1915:521F`, so it needed no SWD conversion.
+
+### Build gates, all on the build host
+
+| Gate | Result |
+|---|---|
+| `scripts/preflight.sh` | PASS (2 formatter call-outs, both pre-existing) |
+| `pio test -e native` | **36 of 36** test cases, 4 suites |
+| `scripts/check_golden_vectors.py` | PASS — 21 decoded values across 5 vectors, live decoder |
+| Compile `rak4631_sda` | RAM 10.1 % (25,052 of 248,832 B), Flash 26.0 % (212,036 of 815,104 B) |
+
+### Observation — the flash landed
+
+`adafruit-nrfutil` reported `Activating new firmware` / `Device programmed`,
+`[SUCCESS] Took 20.62 seconds`. The board re-enumerated at **`239A:8029`**, which is the
+application PID and the only ID that means a valid application is present
+[CIT-RAK-BOARDS-TXT], [CIT-ADA-BOOTLOADER].
+
+### Observation — the 18:22 reflash closes image identity and current-image TTN liveness
+
+At 18:22 build-host local time, the preserved ignored credentials were first verified against
+TTN for `puma-concolor-002`; the USB identity matched the core named above. A fresh
+`scripts/flash.sh --env rak4631_sda --yes` run then passed preflight, all 36 native tests, all
+21 live-decoder golden-vector values, compiled `.pio/build/rak4631_sda/firmware.zip`, completed
+DFU in 15.54 seconds, and returned as application PID `239A:8029`.
+
+The exact USB port was then power-cycled while `scripts/capture.py` held the capture. The board
+named the image:
+
+```
+firmware : 0.4.4
+commit   : 33c0cdd
+=== CAPTURE BANNER commit=33c0cdd ===
+```
+
+The banner's DevEUI matched the ignored `puma-concolor-002` credentials. In the same captured
+boot, the node restored session `0x260CABB6` at counter 128, sent its first-cycle proof-of-life
+uplink, and saved a resume ceiling of 160:
+
+```
+session : restored 0x260CABB6, counter 128
+uplink  : proof of life — no sensor data for 1 cycle(s)
+session : saved 0x260CABB6, resume at 160
+radio   : sent 0 bytes on port 2
+```
+
+TTN then reported `last_f_cnt_up: 128` on the same session. This is direct current-image
+evidence: the board named commit `33c0cdd`, the DFU input named `env:rak4631_sda`, and that
+freshly booted image transmitted an uplink TTN accepted.
+
+### Observation — a TTN session exists, but it predates this image
+
+Read with `ttn-lw-cli end-device get my-app-tobi puma-concolor-002 --session --mac-state`:
+
+| Field | Value |
+|---|---|
+| `device_id` | `puma-concolor-002` |
+| `dev_addr` | `260CABB6` |
+| session `started_at` | `2026-09-04T23:47:04.939937547Z` |
+| `last_f_cnt_up` | `32` |
+
+**This session is not attributable to the `rak4631_sda` image, and an earlier draft of this
+entry wrongly said it was.** The timeline forbids it: the `env:rak4631` (IO1) upload described
+below completed at `23:46:29Z`, while the `rak4631_sda` DFU did not finish until approximately
+`23:47:50Z`. The join at `23:47:04Z` therefore falls **between** the two and belongs to the IO1
+image.
+
+What that leaves is more interesting than the wrong claim was: the `rak4631_sda` image booted
+after `23:47:04Z` and the session `started_at` did **not** move, so it did not rejoin — it
+resumed the existing session. That is the session checkpoint/restore path, and it also accounts
+for `last_f_cnt_up` being 32 rather than 1 without needing the counter-reanchoring theory the
+first draft of this entry reached for.
+
+### Observation — asleep, with the last uplink counted
+
+At `23:58:45Z`, roughly 11 minutes after boot: **no `/dev/cu.usbmodem*` on the build host at
+all**, and `last_f_cnt_up` still `32`. USB absence here is the sleep path detaching the device,
+not a fault (`src/power.cpp`, #60), and the static counter says uplink 32 was the most recent.
+Both readings agree the node is in its interval rather than hung.
+
+### Observation — a full Class A cycle, including a serviced downlink
+
+Serial captured from `/dev/cu.usbmodem31101` between `23:49:40Z` and `23:51:20Z`, 100 s
+window, read-only (`cat`, no port configuration, no reset):
+
+```
+   radio   : downlink — set interval 900 s
+   config  : interval now 900 s
+   sleep   : 900 s
+```
+
+So the image joined, transmitted, **opened its RX window and received a downlink, applied the
+interval it carried, and entered its sleep interval.** That is the downlink-settable interval
+path and the sleep path both executing on this core.
+
+### Observation — a bare core goes quiet by design, and the console does not come back
+
+Polled the build host every 3 s from `00:00:21Z` to `00:09:26Z` for `/dev/cu.usbmodem*`, with
+`last_f_cnt_up` sampled alongside at `00:03:01Z`, `00:04:03Z` and `00:07:34Z`. Across that span,
+which contains at least one due wake (sleep began between `23:49:40Z` and `23:51:20Z` at 900 s):
+
+| Reading | Result |
+|---|---|
+| USB device present | **never** — absent at every one of ~180 polls |
+| `last_f_cnt_up` | **32 at all three samples** — no uplink after the one preceding the downlink |
+
+**Neither reading is a fault, and both are easy to misread as one.**
+
+*Why no uplink.* `src/main.cpp:410` suppresses an uplink when the payload is empty and no
+heartbeat or keepalive is due. With no RK900 and no pack wired, every payload is empty, so the
+node transmits only on the heartbeat — `kQuietCyclesPerHeartbeat = 8` (`src/main.cpp:145`),
+which at 900 s is **once every two hours**. A bare core therefore looks dead on TTN for two
+hours at a stretch while cycling correctly.
+
+*A second, slower mechanism exists and is not the one acting here.* `src/power.cpp:441` engages
+a transmit hold after `kInvalidReadsBeforeInhibit = 4` invalid pack reads and then permits only
+a keepalive every `kNoEvidenceKeepaliveCycles = 24` cycles (`src/power.h:103`, `:144`) — six
+hours at 900 s — clearing only on a valid reading (`src/power.cpp:462`). Four cycles had not
+elapsed in this window, so the quiet-cycle path above is the active explanation and this one is
+recorded to keep the two apart. **An earlier draft of this entry credited the silence to this
+hold; the arithmetic does not support that.**
+
+*What the USB polling does and does not prove.* The port never appeared in this polled span.
+The earlier draft concluded from that observation that USB never re-attaches on wake. That
+conclusion was wrong: `src/power.cpp` calls `TinyUSBDevice.attach()` after sleep, and
+[#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) records
+a 19.03-hour run reattaching across 76 cycles. This span establishes only that none of its
+samples observed the port; it does not overturn that measured re-attachment evidence.
+
+### Not established by this entry
+
+- **Which *variant* is executing from the banner alone.** `print_banner()`
+  (`src/main.cpp:167`) prints version, commit, `built`, the `features` bitfield and the
+  interval bounds — it does **not** print `kBatteryPin`. Both `env:rak4631` and
+  `env:rak4631_sda` were built from the same commit and both report `battery=1`, so **no
+  banner read can distinguish them.** That `rak4631_sda` is the resident image is established
+  by the fresh DFU log naming `.pio/build/rak4631_sda/firmware.zip`, while the board separately
+  attests the matching commit. A pin-level device-side discriminator
+  would need either a banner line carrying the pin or an observed pack exchange on P0.13.
+- **What is physically connected.** No RK900 line and no pack line appears in the captured
+  window, and nothing was inspected on the sensor side. This entry makes **no** statement
+  about the RK900, the RAK9154, the harness, or the antenna — not even that they are absent.
+  In particular it is **not** evidence that any pack harness is mated, and it does not lift
+  the pre-Core hold in [`HARDWARE.md`](HARDWARE.md) or
+  [`BUILD.md`](BUILD.md) ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+- **The provenance of the 32 uplinks themselves.** Session resume explains why the counter did
+  not reset to 1, but not which images produced those 32 uplinks or when. `FCntUp` must
+  increment and may not be reused [CIT-LW-LINK], so the count is cumulative across whatever
+  ran on this `dev_addr`; this entry does not apportion them.
+- **Any H1–H8 gate.** None closes here. Status stays `🚧 NOT YET DEPLOYED`.
+
+### Recorded for completeness: the image that was replaced
+
+An `env:rak4631` build of the same commit — the `WB_IO1` variant — was uploaded to this core
+first, completing at `23:46:29Z` with `Device programmed` and `239A:8029`. The operator
+identified `WB_IO1` as the wrong pin for this build, and it was replaced by the
+`env:rak4631_sda` image above roughly one minute later. The local pipeline was interrupted
+mid-run; the in-flight remote upload was **allowed to complete rather than killed**, because a
+torn DFU leaves a board in its bootloader with no valid application and that state has cost
+this project sessions (#27). Both uploads are on the record because both physically happened.
+
+CITE(datasheet): [CIT-RAK-BOARDS-TXT] — `0x8029` is the application PID this board definition
+builds against, which is what makes the post-flash PID check a proof and not a guess.
+CITE(prior-art): [CIT-ADA-BOOTLOADER] — `0x0029` / `0x002A` are the bootloader IDs, i.e. the
+readings that would have meant "no valid application".
+CITE(spec): [CIT-LW-LINK] §4.3.1.5 — `FCntUp` must increment and a value may not be reused,
+which is the constraint behind the open `last_f_cnt_up` question above.
+
 ## 2026-08-31 — recovered record: coreless base-board `BAT` isolation was measured open
 
 **Measurement date:** 2026-08-30. **Source:** operator meter readings preserved in
