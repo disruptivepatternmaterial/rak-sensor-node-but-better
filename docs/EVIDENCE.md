@@ -4,7 +4,7 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
-## 2026-09-04 — a replacement core takes `env:rak4631_sda`, joins TTN, and services a downlink — and for the first time the core has an identity
+## 2026-09-04 — a replacement core takes `env:rak4631_sda`, services a downlink, and sleeps — and for the first time the core has an identity
 
 **Host:** Heliotrope Ridge. **Commit:** `33c0cddeb6997a9427941d5beab831e94132ef14`
 (`env:rak4631_sda`, `FEATURE_BATTERY_PIN_SDA=1`), asserted from the build and DFU inputs and
@@ -34,7 +34,7 @@ enumerates under Adafruit VID `239A`, not `1915:521F`, so it needed no SWD conve
 application PID and the only ID that means a valid application is present
 [CIT-RAK-BOARDS-TXT], [CIT-ADA-BOOTLOADER].
 
-### Observation — TTN accepted a join four seconds after re-enumeration
+### Observation — a TTN session exists, but it predates this image
 
 Read with `ttn-lw-cli end-device get my-app-tobi puma-concolor-002 --session --mac-state`:
 
@@ -45,10 +45,24 @@ Read with `ttn-lw-cli end-device get my-app-tobi puma-concolor-002 --session --m
 | session `started_at` | `2026-09-04T23:47:04.939937547Z` |
 | `last_f_cnt_up` | `32` |
 
-The DFU completed and the board came back on the bus at approximately `23:47:00Z`. The
-Network Server dates this session to `23:47:04Z`. **This is the check that `8029` cannot
-perform:** a previously resident image enumerates as `8029` too, but only the image just
-written could produce a fresh join inside that window.
+**This session is not attributable to the `rak4631_sda` image, and an earlier draft of this
+entry wrongly said it was.** The timeline forbids it: the `env:rak4631` (IO1) upload described
+below completed at `23:46:29Z`, while the `rak4631_sda` DFU did not finish until approximately
+`23:47:50Z`. The join at `23:47:04Z` therefore falls **between** the two and belongs to the IO1
+image.
+
+What that leaves is more interesting than the wrong claim was: the `rak4631_sda` image booted
+after `23:47:04Z` and the session `started_at` did **not** move, so it did not rejoin — it
+resumed the existing session. That is the session checkpoint/restore path, and it also accounts
+for `last_f_cnt_up` being 32 rather than 1 without needing the counter-reanchoring theory the
+first draft of this entry reached for.
+
+### Observation — asleep, with the last uplink counted
+
+At `23:58:45Z`, roughly 11 minutes after boot: **no `/dev/cu.usbmodem*` on the build host at
+all**, and `last_f_cnt_up` still `32`. USB absence here is the sleep path detaching the device,
+not a fault (`src/power.cpp`, #60), and the static counter says uplink 32 was the most recent.
+Both readings agree the node is in its interval rather than hung.
 
 ### Observation — a full Class A cycle, including a serviced downlink
 
@@ -67,20 +81,26 @@ path and the sleep path both executing on this core.
 
 ### Not established by this entry
 
-- **Which image, from the device's own mouth.** The capture began ~160 s after boot, so the
-  boot banner had already scrolled past; `banner_commit = NOT OBSERVED`. The commit above is
-  asserted from the build and DFU inputs plus the join timing, not read off the board.
+- **Which image, from the device's own mouth.** The capture began ~110 s after the SDA image
+  booted, so the boot banner had already scrolled past; `banner_commit = NOT OBSERVED`. The
+  commit above is asserted from the build and DFU inputs, not read off the board.
+- **Which *variant* is executing, by any device-side means.** `print_banner()`
+  (`src/main.cpp:167`) prints version, commit, `built`, the `features` bitfield and the
+  interval bounds — it does **not** print `kBatteryPin`. Both `env:rak4631` and
+  `env:rak4631_sda` were built from the same commit and both report `battery=1`, so **no
+  banner read can distinguish them.** That `rak4631_sda` is the resident image rests entirely
+  on the DFU log naming `.pio/build/rak4631_sda/firmware.zip`. A device-side discriminator
+  would need either a banner line carrying the pin or an observed pack exchange on P0.13.
 - **What is physically connected.** No RK900 line and no pack line appears in the captured
   window, and nothing was inspected on the sensor side. This entry makes **no** statement
   about the RK900, the RAK9154, the harness, or the antenna — not even that they are absent.
   In particular it is **not** evidence that any pack harness is mated, and it does not lift
   the pre-Core hold in [`HARDWARE.md`](HARDWARE.md) or
   [`BUILD.md`](BUILD.md) ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
-- **Why `last_f_cnt_up` is 32 on a session minutes old.** At the 900 s cadence a fresh session
-  would read 1. The firmware deliberately re-anchors its counter because TTN ignores an uplink
-  whose counter is below the highest it has already seen [CIT-LW-LINK], and that is the
-  leading explanation — but it is an inference from the spec and the code's stated intent, not
-  something this capture shows. Open.
+- **The provenance of the 32 uplinks themselves.** Session resume explains why the counter did
+  not reset to 1, but not which images produced those 32 uplinks or when. `FCntUp` must
+  increment and may not be reused [CIT-LW-LINK], so the count is cumulative across whatever
+  ran on this `dev_addr`; this entry does not apportion them.
 - **Any H1–H8 gate.** None closes here. Status stays `🚧 NOT YET DEPLOYED`.
 
 ### Recorded for completeness: the image that was replaced
