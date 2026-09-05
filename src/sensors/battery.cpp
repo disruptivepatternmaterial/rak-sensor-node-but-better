@@ -3,6 +3,7 @@
 #include "../build_features.h"
 #include "../power.h"
 #include "battery_frame.h"
+#include "battery_query_schedule.h"
 #include "crc16.h"
 
 #include <Arduino.h>
@@ -1485,27 +1486,12 @@ BatteryReading Battery::read()
     // Skipped entirely when phase 0 already got an answer from kProbeId: the address is
     // settled and the reply is already in hand, so repeating the exchange would buy nothing
     // but another round trip on the path that runs every hour for years.
-    const uint8_t candidates[2] = {m_pid, (m_pid == kBroadcastId) ? kProbeId : kBroadcastId};
-
-    // kProbeId was already asked once this cycle, in phase 0. Re-asking it here buys a
-    // second 500 ms of silence from a pack that did not answer it seconds ago — on the
-    // probe-only path that made a failed pack cost three probes where the comments promise
-    // one (#108 finding 2). The one exception: phase 1 just latched the pid, so the pack's
-    // state has changed since phase 0 and the retry is genuinely fresh.
-    //
-    // CITE(bench): docs/EVIDENCE.md — dest sweep on 3d3425d: an unprovisioned pack returns
-    //   0 bytes to 0x01 every time it is asked, so the repeat query cannot succeed where
-    //   phase 0 failed.
-    // CITE(prior-art): [CIT-MESHTASTIC-9154] @ 02050a4 variants/rak2560/RAK9154Sensor.cpp —
-    //   the reference sends one SENDAT per cycle to one address; it never retries the same
-    //   address within a cycle.
-    const bool freshly_latched = provisioned && !answered_direct;
+    const BatteryFollowupQueryPlan candidates =
+        battery_followup_query_plan(m_pid, kProbeId, kBroadcastId);
 
     for (uint8_t c = 0; c < 2 && !answered_direct; c++) {
-        if (candidates[c] == kProbeId && !freshly_latched) {
-            continue;
-        }
-        const size_t got = query(candidates[c], rx, sizeof(rx));
+        const uint8_t query_address = (c == 0) ? candidates.first : candidates.second;
+        const size_t  got           = query(query_address, rx, sizeof(rx));
         if (got == 0) {
             continue;
         }
@@ -1521,14 +1507,14 @@ BatteryReading Battery::read()
         // Same matching as phase 0, and for the same reason: this loop is what latches m_pid
         // for the rest of the node's life, so "a SENDAT frame arrived" is nowhere near enough
         // evidence that this candidate address is the live one — issue #36.
-        const BatteryQueryMatch match{BatteryMatchMode::Response, candidates[c], m_seq};
+        const BatteryQueryMatch match{BatteryMatchMode::Response, query_address, m_seq};
         const BatteryResult     r = parse(rx, got, candidate, match);
 
         // Ok and Unsampled both mean a SENDAT frame addressed to us came back from this
         // destination — one with data, one with placeholders. Either way the address is
         // right, and it is worth remembering.
         if (r == BatteryResult::Ok || r == BatteryResult::Unsampled) {
-            m_pid  = candidates[c];
+            m_pid  = query_address;
             m_last = r;
             out    = candidate;
             break;

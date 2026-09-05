@@ -4,6 +4,36 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-09-05 — node 002 resets and reports weather, but the battery remains absent
+
+**TTN query host:** Heliotrope Ridge. **Resident image:** commit `33c0cdd`, version `0.4.4`,
+`env:rak4631_sda`, established on 2026-09-04 by a fresh SDA-environment DFU followed by the
+board's own `commit: 33c0cdd` banner. No new image was flashed for this observation.
+
+At `17:40:55Z`, TTN reported session `last_f_cnt_up: 194`. The operator then manually reset
+node 002. Application Storage received FPort 2 counter 224 at `17:41:18.692405305Z`, decoded as:
+
+```
+wx_barometer: 1006
+wx_humidity: 47.6
+wx_temperature: 24.3
+wx_wind_direction: 0
+wx_wind_speed: 0
+```
+
+No battery voltage, current, state-of-charge, or battery-temperature field was present. The
+reset restored a weather report; it did **not** restore battery telemetry.
+
+The operator's powered-down meter checks then found both SDA and SCL open to ground and
+continuity from joined pack pins 3+5 to the RAK5802 SDA terminal. No resistance values or raw
+meter record were captured, so this records the operator's pass/fail observations and nothing
+more.
+
+**Not established:** why no usable battery frame reached the payload. The code change now tracked
+on [#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108) is a
+candidate regression until a corrected image is explicitly flashed and the pack reading is
+observed. Code review, a build, or this failed payload cannot establish that fix.
+
 ## 2026-08-31 — recovered record: coreless base-board `BAT` isolation was measured open
 
 **Measurement date:** 2026-08-30. **Source:** operator meter readings preserved in

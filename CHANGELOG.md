@@ -8,8 +8,21 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-09-05
+
+`0.4.5` is the node 002 battery-retry correction. **🚧 NOT YET DEPLOYED:** source and host tests
+do not establish that the RAK9154 reports again; that requires an explicitly approved flash and
+a battery-bearing uplink.
+
 ### Fixed
 
+- **The recovery ladder stopped retrying a provisioned RAK9154 after the first direct miss.**
+  `9383f9b` removed the second `0x01` request using evidence from an *unprovisioned* pack, which
+  answers only at `0xFF`; it did not establish the behavior of a provisioned pack after a long
+  sleep. Node 002 then produced weather-only uplinks on `33c0cdd` despite passing its static SDA
+  checks. The bounded follow-up plan again tries both possible addresses once, preserving the
+  delayed `0x01` retry without reopening an unbounded loop. Tracked in
+  [#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108).
 - **The hardware guide contained two contradictory assembly sequences and one electrically false
   no-Core test.** The earlier sequence required two independent grounds while the later sequence
   specified one; both still led to a bare GPIO despite the STOP notice. The pack qualification

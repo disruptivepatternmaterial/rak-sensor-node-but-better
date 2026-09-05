@@ -2,6 +2,15 @@
 
 What each release establishes on hardware, and what it does not. Moved out of `AGENTS.md` so it is read when relevant rather than loaded into every agent turn.
 
+## Where v0.4.5 leaves things
+
+**🚧 NOT YET DEPLOYED.** `v0.4.5` restores the bounded second query to the provisioned battery
+address after the first direct probe misses. It is a code-level correction for node 002's
+weather-only result on `33c0cdd`; no battery recovery is established until this image is
+explicitly flashed and a battery-bearing uplink is observed. The implementation is
+`src/sensors/battery_query_schedule.h`, tracked by
+[#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108).
+
 ## Where v0.4.4 leaves things
 
 **`v0.4.4` is ready to compile and begin device fault-injection testing; it is not yet

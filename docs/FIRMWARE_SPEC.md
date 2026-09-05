@@ -104,6 +104,14 @@ observation, not specified values.
 [CITE(bench): one transient probe miss in 20 live cycles, `65f8615`](EVIDENCE.md)
 [CITE(policy): never let the pack reach a state it cannot recover from by itself](POWER_BUDGET.md)
 
+**🚧 NOT YET DEPLOYED — provisioned-pack retry correction:** after the first `0x01` probe misses,
+the bounded recovery sequence must still try both possible addresses once. With no remembered
+latch that sequence is `0xFF`, then `0x01`; the second `0x01` is not suppressed merely because
+the first one missed before the recovery window. `src/sensors/battery_query_schedule.h` implements
+this correction under [#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108).
+[CITE(bench): the retry-bearing SDA revision `7ad5daa` produced live pack readings](EVIDENCE.md)
+[CITE(spec): H7 requires BMS silence not to become a terminal state](FIRMWARE_SPEC.md#7-hardening-requirements-release-blocking)
+
 **Power:** P+/P− from 4-pin or 5-pin → **12 V→5 V buck** → WisBlock 5 V. Never feed P+ to `BAT`.
 
 **Bus conflict note — HISTORICAL, resolved.** An earlier draft proposed sharing one RAK5802
