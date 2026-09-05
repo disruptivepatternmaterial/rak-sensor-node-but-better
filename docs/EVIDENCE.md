@@ -79,6 +79,39 @@ So the image joined, transmitted, **opened its RX window and received a downlink
 interval it carried, and entered its sleep interval.** That is the downlink-settable interval
 path and the sleep path both executing on this core.
 
+### Observation — a bare core goes quiet by design, and the console does not come back
+
+Polled the build host every 3 s from `00:00:21Z` to `00:09:26Z` for `/dev/cu.usbmodem*`, with
+`last_f_cnt_up` sampled alongside at `00:03:01Z`, `00:04:03Z` and `00:07:34Z`. Across that span,
+which contains at least one due wake (sleep began between `23:49:40Z` and `23:51:20Z` at 900 s):
+
+| Reading | Result |
+|---|---|
+| USB device present | **never** — absent at every one of ~180 polls |
+| `last_f_cnt_up` | **32 at all three samples** — no uplink after the one preceding the downlink |
+
+**Neither reading is a fault, and both are easy to misread as one.**
+
+*Why no uplink.* `src/main.cpp:410` suppresses an uplink when the payload is empty and no
+heartbeat or keepalive is due. With no RK900 and no pack wired, every payload is empty, so the
+node transmits only on the heartbeat — `kQuietCyclesPerHeartbeat = 8` (`src/main.cpp:145`),
+which at 900 s is **once every two hours**. A bare core therefore looks dead on TTN for two
+hours at a stretch while cycling correctly.
+
+*A second, slower mechanism exists and is not the one acting here.* `src/power.cpp:441` engages
+a transmit hold after `kInvalidReadsBeforeInhibit = 4` invalid pack reads and then permits only
+a keepalive every `kNoEvidenceKeepaliveCycles = 24` cycles (`src/power.h:103`, `:144`) — six
+hours at 900 s — clearing only on a valid reading (`src/power.cpp:462`). Four cycles had not
+elapsed in this window, so the quiet-cycle path above is the active explanation and this one is
+recorded to keep the two apart. **An earlier draft of this entry credited the silence to this
+hold; the arithmetic does not support that.**
+
+*Why no console.* The port never returned after the image slept, across the whole polled span.
+So on this image USB does **not** re-attach on wake: the console is available for the 180 s boot
+grace and then gone until a reset (`src/power.cpp`, #60). Watching a running field node over
+serial is therefore not possible without resetting it, which is worth knowing before another
+session spends twenty minutes waiting for a port — this one did.
+
 ### Not established by this entry
 
 - **Which image, from the device's own mouth.** The capture began ~110 s after the SDA image
