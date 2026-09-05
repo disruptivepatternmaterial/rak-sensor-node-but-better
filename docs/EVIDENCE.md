@@ -4,6 +4,104 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-09-05 (later) — MEASURED: re-mating the pack connector drives the data wire to −8.1 V against node ground
+
+**Host:** Heliotrope Ridge (the analyzer is on this machine). **Instrument:** Saleae Logic Pro 8
+`AF11F852CEC20A9`, Logic 2.4.46, driven through its MCP server (`127.0.0.1:10530`); analog
+channels 0 and 1 at 1,562,500 S/s, 64.38 s, 100,597,627 samples. **Node:** `puma-concolor-002`,
+core die ID not captured (its `SDA`/P0.13 pad reads 3.5 Ω to `GND`, below). **No nRF pad was in
+the circuit:** the joined pins 3+5 wire was pulled out of the RAK5802 `SDA` terminal and analyzer
+channel 0 clipped to its bare end; analyzer ground on the RAK5802 `GND` terminal, i.e. **node
+ground**. Channel 1 was placed on the base-board `VDD` pad but read ≈ 0 V for the whole capture
+with the node demonstrably powered, so it was not in contact and is discarded.
+
+Files (volatile — `/tmp` on this machine; operator to copy): `/tmp/sal/20260905_002_events.sal`
+(57 MB), `/tmp/sal/exp1/analog.csv` (2.6 GB, downsample 1), summaries `/tmp/sal/analyze1.txt`,
+`/tmp/sal/persec1.txt`, `/tmp/sal/window1.txt`; scripts `/tmp/sal/{analyze,persec,window}.py`.
+
+### Meter readings earlier in the same session (operator, meter model not recorded)
+
+| Point | Reading | Condition |
+|---|---|---|
+| 002 `SDA` terminal → `GND` | **3.5 Ω** | node unpowered |
+| 002 `SCL` terminal → `GND` | 4.5 kΩ | node unpowered |
+| 003 (never used) `SDA` → `GND` and `SCL` → `GND` | 4.5 kΩ each | unpowered |
+| 002 `SDA` terminal → `GND` | 1.1 mV DC | node powered, pack mated |
+| pins 3+5 wire (out of the clip) → `GND` | **3.32 V** | node powered, pack mated |
+| same, with **1 kΩ** from the wire to `GND` | **0.60 V** | node powered, pack mated |
+
+The 4.5 kΩ is the RAK19007's own I²C pull-ups R12/R13 (4.7 kΩ to `VDD`; RAK19007 slots
+schematic, `/tmp/rakres/s-pullups2.png`) — that is what a healthy pad reads. 3.5 Ω is a destroyed
+pad. The 1 kΩ load pulled the pack's idle HIGH from 3.32 V to 0.60 V, so the pack's HIGH is a
+**~4.5 kΩ pull-up** (1 kΩ × (3.32/0.60 − 1)), not a driven level; the pack can source ≤ 0.7 mA.
+
+### The capture — what the wire did during each handling event
+
+Wire voltage is relative to **node** ground. Pad limits: −0.3 V to VDD + 0.3 V [CIT-NRF-GPIO].
+
+| t (s) | Operator action | Wire min | Wire max | Below −0.3 V |
+|---|---|---|---|---|
+| 0–12.5 | idle; pack announcing every ~1.5–2.5 s | −0.004 | +3.318 | 0 |
+| 12.5 | pack connector unplugged | −0.297 | +3.328 | 0 |
+| 12.5–16.5 | pack absent; wire floating | −0.24 | +0.17 | 0 |
+| **16.54–16.77** | **pack connector re-mated** | **−8.132** | **+4.300** | **182.8 ms** |
+| 20.5 | buck USB-C pulled; node dark, wire decays 0.68 → 0.02 V over 20 s | — | +0.68 | 0 |
+| 41.0 | bench USB in; node powers | +0.017 | +3.443 | 0 |
+| 44.5 | bench USB out | — | +3.318 | 0 |
+| 47.0 | buck USB-C back in | +0.367 | +3.464 | 0 |
+| ~54 | RESET pressed | — | — | 0 (no excursion) |
+
+The re-mate in detail (`window1.txt`): +4.300 V for 61 µs at 16.5396 s; then the wire fell to
+**−8.10 … −8.13 V** and sat there for ~50 ms (16.550–16.600 s); then, with the pack transmitting,
+it toggled between a LOW of **−6.29 V** (median) and a HIGH of **+3.36 V** until 16.770 s — a
+9.6 V swing whose LOW is the pack's driven-low level (+0.087 V on capture 13) displaced by the
+pack's ground sitting ~6.4 V below the node's. Total 182.8 ms below −0.3 V, 168.4 ms below −5 V.
+Sample-to-sample this is a clean DC level, not noise: 78 consecutive 5 ms bins at −8.1 then −6.3 V.
+
+### What this establishes
+
+1. **During a partial mate the pins 3+5 wire sits up to 8.1 V below node ground.** The only
+   circuit that produces that: `P+` (pin 1) and the data pin had made contact and `P−` (pin 2) had
+   not, so the node's supply current returned to the pack through the data wire and the pack's
+   own pull-down/driver, dragging the pack's ground 6–8 V below the node's. This is the
+   ground-loss mechanism already cited as the one whose signature fits [CIT-NRF-GNDLOSS]; it is
+   now measured on this node.
+2. **With a core fitted, that current flows through the pad's ground clamp**, in the direction
+   that destroys the low side and leaves the pin shorted to ground — the signature of all nine
+   dead pads, and the direction back-powering cannot produce [CIT-NRF-GNDLIFT]. No pad was in
+   this circuit, so the current itself was not measured; the open-circuit level was.
+3. **Power-source swaps and RESET do not do this.** Buck out/in and bench USB in/out kept the wire
+   between 0 and +3.46 V; the +3.44/+3.46 V peaks are pin 4 ramping with `VDD` and are inside the
+   powered-pad limit.
+4. **The pack's HIGH is a pull-up, so driver contention is refuted as a pad killer.** Node LOW
+   against pack HIGH sinks ≤ 0.7 mA. Hypothesis dropped; do not re-derive.
+5. **The "two ground conductors" mitigation in `HARDWARE.md` cannot help**, because both land on
+   the same connector pin 2 — whichever pin lands last, lands last.
+
+### What this does NOT establish
+
+- Which mating killed which of the nine pads: none was instrumented. This capture shows the
+  level exists on every mating whose pin 2 lands late; it does not identify the past events.
+- The fault current with a pad connected (limited by the pack driver, the connector contact and
+  the clamp; not measured).
+- Anything about `VDD` during the events (channel 1 was not in contact).
+
+### Consequence
+
+The 5-pin connector must never be mated or unmated while the node is drawing current from `P+`
+through it. Interim procedure and the permanent fix are in [`HARDWARE.md`](HARDWARE.md)
+§ "The ground pin lands last — measured".
+
+CITE(datasheet): [CIT-NRF-GPIO] — the −0.3 V / VDD + 0.3 V pad limits the wire was measured against.
+CITE(prior-art): [CIT-NRF-GNDLOSS] — ground loss makes a data pin the supply return; the mechanism
+  this capture measured.
+CITE(prior-art): [CIT-NRF-GNDLIFT] — a ground-short end state needs a negative level or a lifted
+  ground, not back-powering; this capture supplies the negative level.
+CITE(datasheet): [CIT-SALEAE-LOGICPRO8] — ±25 V input and 2 MΩ load, why this could be measured
+  with no pad in circuit and why −8.1 V is a reading, not a clip (analog range −10 … +10 V).
+CITE(bench): `/tmp/sal/20260905_002_events.sal` on Heliotrope Ridge; `window1.txt` for the 5 ms
+  bin table; `persec1.txt` for the whole-capture map.
+
 ## 2026-09-05 — node 002 resets and reports weather, but the battery remains absent
 
 **TTN query host:** Heliotrope Ridge. **Resident image:** commit `33c0cdd`, version `0.4.4`,

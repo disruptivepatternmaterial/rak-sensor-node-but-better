@@ -159,9 +159,10 @@ buses**, so neither can interfere with or block the other.
 > **12 V negative (`P−`) goes to the buck negative and RK900 negative, plus two independent node
 > returns: the base-board `GND` pad and the RAK5802 `GND` clip.**
 
-The two node-return conductors are a mitigation against one connection becoming intermittent.
-No ground interruption was captured on this node, so this requirement does not establish the
-failure mechanism.
+The two node-return conductors are a mitigation against one connection becoming intermittent
+**after** mating. They do nothing during mating: both are fed from the same connector pin 2, and
+on 2026-09-05 that pin was measured landing ~180 ms after `P+` and the data pin, putting the data
+wire at **−8.1 V** against node ground. See § "The ground pin lands last — measured" below.
 
 Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is exclusive.
 
@@ -176,6 +177,44 @@ Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is e
 Both pads are on the 2.54 mm header along the edge of the RAK19007, silkscreened
 `BAT IO2 IO1 A1 IN1` and `SDA SCL TX1 RX1 GND VDD BOOT0`. Neither signal appears on any screw
 terminal, so both are solder joints.
+
+### The ground pin lands last — measured 2026-09-05
+
+**This is the pin killer, measured on node 002 with the analyzer and no pad in the circuit**
+([`EVIDENCE.md`](EVIDENCE.md) 2026-09-05 (later)). Re-mating the pack's 5-pin connector put the
+joined pins 3+5 wire at **−8.13 V** relative to node ground, then at **−6.3 V** with the pack
+transmitting on top of it, for **183 ms** in total; a 61 µs spike to **+4.30 V** preceded it. The
+pad's limits are −0.3 V and VDD + 0.3 V [CIT-NRF-GPIO].
+
+Why: for those 183 ms, `P+` (pin 1) and the data pin had made contact and `P−` (pin 2) had not.
+The node's entire supply current had to return to the pack, and the only conductor left was the
+data wire — through the pack's pull-down, and, with a core fitted, **through the nRF pad's ground
+clamp diode in the reverse direction** [CIT-NRF-GNDLOSS]. That is the direction that destroys the
+pin's low side and leaves it shorted to ground, which is how all nine dead pads measure and the
+one end state back-powering cannot produce [CIT-NRF-GNDLIFT]. Node 001's connector has been
+mated once; node 002's dozens of times.
+
+Also measured in the same session and **cleared**: pulling and re-inserting the buck's USB-C,
+plugging and unplugging the bench USB cable, and pressing RESET — the wire stayed within
+0 … +3.46 V throughout. Handling the power connectors is not what kills pads; handling the
+**pack** connector is.
+
+> **Rule: the 5-pin connector is never mated or unmated while the node can draw current from
+> `P+` through it.** The pack is always live — it has a battery — so "power everything down" is
+> not available. What is: unplug the buck's USB-C from the node **and** have no bench USB cable in
+> it, then mate or unmate the pack, then restore power. With no node current there is no return
+> current and the data wire cannot be pulled below ground.
+
+The permanent fix removes the dependency on procedure: supply the node's 12 V from the pack's
+**4-pin `Gateway Load` socket** (pins 1 `P+`, 2 `P−` [CIT-RAK9154-RAW]) and leave the 5-pin
+socket carrying only ground, data and `3V3_In`. Then no supply current ever crosses the 5-pin
+connector and a late pin 2 has nothing to divert. This is a wiring change to the deployed build
+and is gated on an approved issue; until it is approved the rule above is the protection.
+
+CITE(bench): [`EVIDENCE.md`](EVIDENCE.md) 2026-09-05 (later) — capture
+`20260905_002_events.sal`, Logic Pro 8 `AF11F852CEC20A9`, Heliotrope Ridge.
+CITE(datasheet): [CIT-RAK9154-RAW] — the 4-pin socket's `P+`/`P−` on pins 1/2 (RAK9154 datasheet,
+"Panel Connector Definition").
 
 ### Qualifying the pack harness — measure the data line before it touches a pad
 
