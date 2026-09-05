@@ -199,17 +199,25 @@ plugging and unplugging the bench USB cable, and pressing RESET — the wire sta
 0 … +3.46 V throughout. Handling the power connectors is not what kills pads; handling the
 **pack** connector is.
 
-> **Rule: the 5-pin connector is never mated or unmated while the node can draw current from
-> `P+` through it.** The pack is always live — it has a battery — so "power everything down" is
-> not available. What is: unplug the buck's USB-C from the node **and** have no bench USB cable in
-> it, then mate or unmate the pack, then restore power. With no node current there is no return
-> current and the data wire cannot be pulled below ground.
+**Repeat trials the same afternoon** ([`EVIDENCE.md`](EVIDENCE.md) runs 6 and 7): ~25 matings,
+two different packs (002's and the never-used 003's), **core removed from the board** — every
+single plug-in went below −0.3 V, most to −7 V. So this is not chance, not one bad pack, and not
+anything the node does: the load pulling node ground toward `P+` during the partial mate is the
+RK900 and/or the buck, which stay wired whether or not the node is powered. **There is no
+handling sequence on the node side that prevents it.** Why node 001 has survived many matings is
+unmeasured and stays that way until its harness is on a bench.
 
-The permanent fix removes the dependency on procedure: supply the node's 12 V from the pack's
-**4-pin `Gateway Load` socket** (pins 1 `P+`, 2 `P−` [CIT-RAK9154-RAW]) and leave the 5-pin
-socket carrying only ground, data and `3V3_In`. Then no supply current ever crosses the 5-pin
-connector and a late pin 2 has nothing to divert. This is a wiring change to the deployed build
-and is gated on an approved issue; until it is approved the rule above is the protection.
+> **Rule: no nRF pad is connected to the pins 3+5 wire unless something blocks reverse current
+> from it, or no supply current crosses the 5-pin connector.** Two ways to satisfy it, neither
+> adopted yet:
+>
+> - a powered-off-protection switch between the `SDA` clip and the wire — issue
+>   [#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101);
+> - the node's 12 V from the pack's 4-pin `Gateway Load` socket (pins 1 `P+`, 2 `P−`
+>   [CIT-RAK9154-RAW]), leaving the 5-pin socket with no supply current to divert. Needs a second
+>   SP11 cable per node; the operator has not chosen it.
+>
+> Until one is fitted, a fresh core on the pins 3+5 wire is expected to lose that pad on a mating.
 
 CITE(bench): [`EVIDENCE.md`](EVIDENCE.md) 2026-09-05 (later) — capture
 `20260905_002_events.sal`, Logic Pro 8 `AF11F852CEC20A9`, Heliotrope Ridge.

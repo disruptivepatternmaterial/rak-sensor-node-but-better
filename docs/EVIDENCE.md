@@ -86,11 +86,36 @@ Sample-to-sample this is a clean DC level, not noise: 78 consecutive 5 ms bins a
   the clamp; not measured).
 - Anything about `VDD` during the events (channel 1 was not in contact).
 
+### Repeat trials — every mating, either pack, no core fitted (same session, ~16:00)
+
+Same analyzer, channel 0 only at 781,250 S/s, same clips (wire out of the `SDA` clip, analyzer
+ground on the RAK5802 `GND` clip). **The RAK4631 core was removed from 002's base board for both
+runs**, so nothing on the node side could source or sink current; the wire read a flat −0.009 V
+whenever a pack was mated because pin 4 had no `VDD` to feed it. The buck cable state at the node's
+USB-C was not recorded. The RK900 remained wired to `P+` and node ground.
+
+| Run | Pack | Cable | Plug-ins | Went below −0.3 V | Reached ≤ −6.9 V | Range | File |
+|---|---|---|---|---|---|---|---|
+| 6 | 002's | 002's | 10 (operator count) | **every plug-in** (11 events ≥ 9 ms) | 10 | −3.3 … −7.4 V, 9–81 ms | `/tmp/sal/20260905_002_tenmatings_b.sal`, `events6.txt` |
+| 7 | **003's** (never used) | 002's | 15 (event count) | **every plug-in** | 5 | −1.2 … −7.4 V, 3–57 ms | `/tmp/sal/20260905_003pack_002cable_tenmatings.sal`, `events7.txt` |
+
+Unplugs produced only 0.7–2.8 ms blips to −0.5 … −0.8 V in both runs. Cycle time was ~1.2 s,
+faster than the 3 s asked for.
+
+What this adds: the negative excursion is **not chance and not this pack** — it happened on every
+one of ~25 matings across two packs — and it happens **with no core on the board**, so no
+node-side power sequencing can prevent it; the load pulling node ground toward `P+` during the
+partial mate is the RK900 and/or the buck, not the nRF. What it does not decide: whether the
+cause is 002's specific plug or the SP11 connector geometry in general (no second cable was
+tested), and why node 001 has survived many matings — no measurement exists for 001's harness.
+
 ### Consequence
 
-The 5-pin connector must never be mated or unmated while the node is drawing current from `P+`
-through it. Interim procedure and the permanent fix are in [`HARDWARE.md`](HARDWARE.md)
-§ "The ground pin lands last — measured".
+Every mating of the 5-pin connector on this bench puts the data line between −1 and −8 V, and no
+handling sequence on the node side prevents it. A pad on that line survives only if something
+between it and the wire blocks that current (#101) or if no supply current crosses the 5-pin
+connector at all (12 V from the 4-pin socket). See [`HARDWARE.md`](HARDWARE.md) § "The ground
+pin lands last — measured".
 
 CITE(datasheet): [CIT-NRF-GPIO] — the −0.3 V / VDD + 0.3 V pad limits the wire was measured against.
 CITE(prior-art): [CIT-NRF-GNDLOSS] — ground loss makes a data pin the supply return; the mechanism
