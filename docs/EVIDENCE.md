@@ -8,8 +8,7 @@ project status stays `🚧 NOT YET DEPLOYED`.
 
 **Host:** Heliotrope Ridge. **Commit:** `33c0cddeb6997a9427941d5beab831e94132ef14`
 (`env:rak4631_sda`, `FEATURE_BATTERY_PIN_SDA=1`), asserted from the build and DFU inputs and
-from `flash.sh`'s post-upload PID check — **not read back from a boot banner** (see "not
-established" below).
+**read back from the board's own boot banner after the 18:22 reflash** described below.
 
 **Core identity: `F980EFBFC688562B`** — the USB serial number reported by
 `pio device list --serial` as `USB VID:PID=239A:8029 SER=F980EFBFC688562B LOCATION=3-1.1`,
@@ -33,6 +32,38 @@ enumerates under Adafruit VID `239A`, not `1915:521F`, so it needed no SWD conve
 `[SUCCESS] Took 20.62 seconds`. The board re-enumerated at **`239A:8029`**, which is the
 application PID and the only ID that means a valid application is present
 [CIT-RAK-BOARDS-TXT], [CIT-ADA-BOOTLOADER].
+
+### Observation — the 18:22 reflash closes image identity and current-image TTN liveness
+
+At 18:22 build-host local time, the preserved ignored credentials were first verified against
+TTN for `puma-concolor-002`; the USB identity matched the core named above. A fresh
+`scripts/flash.sh --env rak4631_sda --yes` run then passed preflight, all 36 native tests, all
+21 live-decoder golden-vector values, compiled `.pio/build/rak4631_sda/firmware.zip`, completed
+DFU in 15.54 seconds, and returned as application PID `239A:8029`.
+
+The exact USB port was then power-cycled while `scripts/capture.py` held the capture. The board
+named the image:
+
+```
+firmware : 0.4.4
+commit   : 33c0cdd
+=== CAPTURE BANNER commit=33c0cdd ===
+```
+
+The banner's DevEUI matched the ignored `puma-concolor-002` credentials. In the same captured
+boot, the node restored session `0x260CABB6` at counter 128, sent its first-cycle proof-of-life
+uplink, and saved a resume ceiling of 160:
+
+```
+session : restored 0x260CABB6, counter 128
+uplink  : proof of life — no sensor data for 1 cycle(s)
+session : saved 0x260CABB6, resume at 160
+radio   : sent 0 bytes on port 2
+```
+
+TTN then reported `last_f_cnt_up: 128` on the same session. This is direct current-image
+evidence: the board named commit `33c0cdd`, the DFU input named `env:rak4631_sda`, and that
+freshly booted image transmitted an uplink TTN accepted.
 
 ### Observation — a TTN session exists, but it predates this image
 
@@ -106,23 +137,22 @@ elapsed in this window, so the quiet-cycle path above is the active explanation 
 recorded to keep the two apart. **An earlier draft of this entry credited the silence to this
 hold; the arithmetic does not support that.**
 
-*Why no console.* The port never returned after the image slept, across the whole polled span.
-So on this image USB does **not** re-attach on wake: the console is available for the 180 s boot
-grace and then gone until a reset (`src/power.cpp`, #60). Watching a running field node over
-serial is therefore not possible without resetting it, which is worth knowing before another
-session spends twenty minutes waiting for a port — this one did.
+*What the USB polling does and does not prove.* The port never appeared in this polled span.
+The earlier draft concluded from that observation that USB never re-attaches on wake. That
+conclusion was wrong: `src/power.cpp` calls `TinyUSBDevice.attach()` after sleep, and
+[#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) records
+a 19.03-hour run reattaching across 76 cycles. This span establishes only that none of its
+samples observed the port; it does not overturn that measured re-attachment evidence.
 
 ### Not established by this entry
 
-- **Which image, from the device's own mouth.** The capture began ~110 s after the SDA image
-  booted, so the boot banner had already scrolled past; `banner_commit = NOT OBSERVED`. The
-  commit above is asserted from the build and DFU inputs, not read off the board.
-- **Which *variant* is executing, by any device-side means.** `print_banner()`
+- **Which *variant* is executing from the banner alone.** `print_banner()`
   (`src/main.cpp:167`) prints version, commit, `built`, the `features` bitfield and the
   interval bounds — it does **not** print `kBatteryPin`. Both `env:rak4631` and
   `env:rak4631_sda` were built from the same commit and both report `battery=1`, so **no
-  banner read can distinguish them.** That `rak4631_sda` is the resident image rests entirely
-  on the DFU log naming `.pio/build/rak4631_sda/firmware.zip`. A device-side discriminator
+  banner read can distinguish them.** That `rak4631_sda` is the resident image is established
+  by the fresh DFU log naming `.pio/build/rak4631_sda/firmware.zip`, while the board separately
+  attests the matching commit. A pin-level device-side discriminator
   would need either a banner line carrying the pin or an observed pack exchange on P0.13.
 - **What is physically connected.** No RK900 line and no pack line appears in the captured
   window, and nothing was inspected on the sensor side. This entry makes **no** statement
