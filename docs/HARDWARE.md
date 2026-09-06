@@ -182,11 +182,88 @@ operator picks gets a `CITATIONS.md` row before it goes on the BOM. It is labell
 **Procedure and the node's state while `S1` is open** are in ADR-0011 § "Decision": `S1` OFF → mate
 → `S1` ON; `S1` OFF → unplug. No wait is needed; node-side capacitors discharge into node-side loads.
 
-**The diagram** is in [`BUILD.md`](BUILD.md) § "The build, in one picture" — one picture, kept
-there so the build has a single thing to follow. Read it against the failure: on 2026-09-05 pin 1
-was feeding the buck and the RK900 while pin 2 was still in the air, and the only way back to the
-pack for that current was pins 3/5 → `SDA` → the pad. With `S1` open at that moment pin 1 feeds
-nothing.
+**The whole-node picture.** Solid lines are spring clips or terminal-block landings; dashed lines
+are solder joints on the base-board header. The build-sequence version is
+[`BUILD.md`](BUILD.md) § "The build, in one picture".
+
+```mermaid
+flowchart LR
+    subgraph PACK["RAK9154 pack — SP11 5-pin connector"]
+        direction TB
+        P1["pin 1<br/><b>P+</b> 12 V"]
+        P2["pin 2<br/><b>P−</b> ground"]
+        P35["pins 3 + 5<br/><b>joined</b> = data"]
+        P4["pin 4<br/><b>3V3_In</b> reference"]
+    end
+
+    S1{{"<b>S1</b> load disconnect<br/>OFF to plug / unplug"}}
+
+    subgraph B5802["RAK5802 — the wiring hub"]
+        direction TB
+        CBAT["BAT — empty"]
+        CGND["<b>GND</b>"]
+        CA["<b>A/RX</b>"]
+        CB["<b>B/TX</b>"]
+        CSCL["<b>SCL</b> = nRF P0.14<br/>→ K1 EN"]
+        CSDA["<b>SDA</b> = nRF P0.13"]
+        C3V3["3V3 — NEVER USE<br/><i>switches off mid-cycle</i>"]
+        CAIN["AIN — empty"]
+    end
+
+    K1{{"<b>K1</b> Pololu 5426<br/>RK900 duty-cycle switch"}}
+
+    subgraph RK["RK900-09 weather"]
+        direction TB
+        RKV["12 V"]
+        RKG["GND"]
+        RKA["A"]
+        RKB["B"]
+    end
+
+    subgraph BUCK["Buck 12 V → 5 V"]
+        direction TB
+        BVI["VIN+"]
+        BVG["VIN−"]
+        BUSB["USB-C out → core"]
+    end
+
+    MUON["muon-wx<br/>+ / −"]
+    VDD["<b>VDD</b> pad<br/>base-board header<br/>always on"]
+    GNDPAD["<b>GND</b> pad<br/>base-board header"]
+
+    P1 --> S1
+    S1 --> BVI
+    S1 --> K1
+    K1 --> RKV
+    S1 --> MUON
+    P2 --> BVG
+    P2 --> RKG
+    P2 --> MUON
+    P2 --> CGND
+    P2 -.->|<b>SOLDER</b>| GNDPAD
+    P35 --> CSDA
+    P4 -.->|<b>SOLDER</b>| VDD
+    VDD -.->|<b>SOLDER</b> K1 VIN| K1
+    CSCL --> K1
+    RKA --> CA
+    RKB --> CB
+    BUSB --> CORE["RAK4631 core<br/>USB-C"]
+
+    style P35 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style CSDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
+    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
+    style K1 fill:#e3ecff,stroke:#2a4d9b,stroke-width:3px
+    style VDD fill:#d9ecff,stroke:#1f6feb,stroke-width:3px
+    style P4 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
+    style C3V3 fill:#ffd6d6,stroke:#b22222,stroke-dasharray: 4 3
+    style P1 fill:#fff3cd,stroke:#856404,stroke-width:2px
+    style CBAT fill:#eeeeee,stroke:#bbbbbb
+    style CAIN fill:#eeeeee,stroke:#bbbbbb
+```
+
+Read it against the failure: on 2026-09-05 pin 1 was feeding the buck and the RK900 while pin 2
+was still in the air, and the only way back to the pack for that current was pins 3/5 → `SDA` →
+the pad. With `S1` open at that moment pin 1 feeds nothing.
 
 **What `S1` does not do.** It depends on a hand. Mate with `S1` on and today's fault is back,
 unchanged. The label and the procedure are the whole guard; there is no interlock. That is the
