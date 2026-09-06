@@ -23,25 +23,40 @@ contacts land. Rationale: `HARDWARE.md` § "The wiring plan".
 
 ## The build, in one picture
 
-Every wire in the node. Build to this; the numbered steps below are this picture in order.
+Every wire in the node, one per row. The numbered steps below are these wires in build order.
+
+| # | From | To |
+|---|---|---|
+| 1 | pack pin 1 `P+` | power switch |
+| 2 | power switch | buck `VIN+` |
+| 3 | power switch | Pololu relay, one big terminal |
+| 4 | Pololu relay, other big terminal | RK900 12 V |
+| 5 | pack pin 2 `P−` | base-board `GND` pad |
+| 6 | pack pin 2 `P−` | buck `VIN−` |
+| 7 | pack pin 2 `P−` | RK900 GND |
+| 8 | pack pin 2 `P−` | Pololu relay `GND` |
+| 9 | pack pins 3 + 5, joined | RAK5802 `SDA` clip |
+| 10 | pack pin 4 `3V3_In` | base-board `VDD` pad |
+| 11 | base-board `VDD` pad | Pololu relay `VIN` |
+| 12 | RAK5802 `SCL` clip | Pololu relay `EN` |
+| 13 | RK900 A | RAK5802 `A/RX` |
+| 14 | RK900 B | RAK5802 `B/TX` |
+| 15 | buck output | board USB-C |
 
 ```mermaid
-flowchart LR
-    P1["pack pin 1  P+"] --> S1["power switch<br/>OFF to plug / unplug"]
-    S1 --> BUCK["buck VIN+"]
-    S1 --> K1["Pololu relay"]
-    K1 --> RK12["RK900 12 V"]
+flowchart TB
+    P1["pin 1  P+"] --> SW["power switch"]
+    SW --> BUCK["buck"]
+    SW --> RELAY["Pololu relay"]
+    RELAY --> RK["RK900 12 V"]
 
-    P2["pack pin 2  P−"] --> GND["base-board GND pad<br/>buck VIN−<br/>RK900 GND<br/>Pololu relay GND"]
+    P2["pin 2  P−"] --> GND["GND pad · buck VIN− · RK900 GND · relay GND"]
 
-    P35["pack pins 3 + 5  joined"] --> SDA["RAK5802 SDA clip"]
+    P35["pins 3+5"] --> SDA["SDA clip"]
 
-    P4["pack pin 4  3V3_In"] --> VDD["base-board VDD pad"]
-    VDD -->|VIN| K1
-    SCL["RAK5802 SCL clip"] -->|EN| K1
-
-    RKA["RK900 A"] --> A["RAK5802 A/RX"]
-    RKB["RK900 B"] --> B["RAK5802 B/TX"]
+    P4["pin 4  3V3_In"] --> VDD["VDD pad"]
+    VDD --> RELAY
+    SCL["SCL clip"] --> RELAY
 ```
 
 | | Rule |
