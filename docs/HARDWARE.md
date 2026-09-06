@@ -17,18 +17,19 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | Role | Part | SKU |
 |---|---|---|
 | Core | RAK4631 US915 | **116000** |
-| Base (bench / as built) | RAK19007 | **110082** |
-| Base (field, recommended — [ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md) § "Base board") | RAK19010 base with power slot **+ RAK19016** 5–24 V power module | **110086** + RAK19016 |
+| Base | RAK19007 | **110082** |
 | RS-485 | RAK5802 | **100003** |
 | Antenna | Blade 915 RP-SMA (if needed) | **926019** |
 | Enclosure | Unify **solar** variant — the no-solar 910406 was out of stock | **910421** (confirm) |
-| Buck | 12 V → 5 V — **RAK19007 build only**; the RAK19016 takes the pack's 12 V directly and removes it | (separate) |
+| Buck | 12 V → 5 V | (separate) |
+| RK900 duty-cycle switch `K1` | Pololu Isolated Solid State Relay/Switch, SPST, 100 V, 4.5 A [CIT-POLOLU-5426] — in hand for 002/003; wiring agreed in [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117), **firmware not yet written** | Pololu **5426** |
 | Pack cable | one SP11 plug mating `SP1110/P5` [CIT-RAK-WX-MANUAL] | — |
 | Load disconnect `S1` | switch or inline fuse holder on `P+`, ≥ 2 A at 13.2 V DC — **part not yet chosen**, gets a `CITATIONS.md` row when it is | — |
 | Power source | RAK9154 Solar Battery Lite, **large-panel variant** | — |
 
-**Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, AS923 kit **119012**, RAK19012
-(the RAK19007 power topology on a card — keeps the buck, gains nothing).
+**Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, AS923 kit **119012**.
+**Evaluated, not adopted:** RAK19010 (110086) + RAK19016 as a field base — see § "What the
+schematics establish"; the hardware stays as built.
 
 ### The enclosure that arrived has its own solar panel — and we do not want to use it
 
@@ -131,7 +132,7 @@ uses this module as the wiring hub rather than the base-board header.
 | 1 | `GND` | common ground — same net as the base-board `GND` pad | pack pin 2 (`P−`) |
 | 1 | `A/RX` | RS-485 A, non-inverting | RK900 `A` |
 | 1 | `B/TX` | RS-485 B, inverting | RK900 `B` |
-| 2 | `SCL` | I²C clock, an otherwise unused GPIO | *empty* |
+| 2 | `SCL` | I²C clock, an otherwise unused GPIO — nRF P0.14, with the base board's 4.7 kΩ pull-up to `VDD` [CIT-RAK19007-SCH-SLOTS] | `K1` `EN` (Pololu 5426), [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
 | 2 | `SDA` | **nRF P0.13 — the one-wire pin**, direct passthrough, no buffer | pack pins 3+5 joined |
 | 2 | `3V3` | **switched** output on `3V3_S` — dies mid-cycle | *empty. never use* |
 | 2 | `AIN` | one analog input | *empty* |
@@ -165,7 +166,8 @@ buses**, so neither can interfere with or block the other.
 
 ### The wiring plan — 2026-09-05 ([ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md))
 
-Everything crosses the one 5-pin plug; the 4-pin socket is not used. The plug's contacts do not
+Everything crosses the one 5-pin plug; the 4-pin socket is not used. The hardware is as built —
+RAK19007, buck, USB-C. The plug's contacts do not
 land together and `P−` lands last — measured, ~25 times, two packs, core removed. The connector
 cannot be changed and the pack cannot be changed, so the one variable left is **how much current
 is flowing at the instant the contacts land: none.** A manual load disconnect (`S1`) sits on `P+`
@@ -176,17 +178,32 @@ through pin 1, node ground cannot be pulled toward `P+`, and the data wire has n
 | From pack 5-pin | To | Notes |
 |---|---|---|
 | Pin 1 `P+` (12 V boost) | **`S1` load disconnect**, then the terminal block `+` bus | `S1` is the fix. Everything downstream of it is unchanged from the harness as built |
-| `+` bus | **RAK19007 build:** buck `VIN+` (buck `VOUT` 5 V → the board's USB-C, as today). **RAK19016 build:** screw terminal **pin 1 `VCC_IN`** — no buck | RAK19016 takes 5–24 V behind a reverse-polarity gate [CIT-RAK19016-SCH] |
-| `+` bus | RK900 `V+` | through the high-side #113 switch when it lands; direct until then |
+| `+` bus | buck `VIN+` (buck `VOUT` 5 V → the board's USB-C, as today) | |
+| `+` bus | **`K1` load slot A** (Pololu 5426) | the RK900 duty-cycle switch, high-side, in the RK900 branch only [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
+| `K1` load slot B | RK900 `V+` | the two load slots are symmetric back-to-back MOSFETs [CIT-POLOLU-5426] |
+| `K1` `VIN` | base-board `VDD` pad | same always-on `3V3` that feeds pack pin 4 — the `VDD` pad carries **two** conductors. Never the RAK5802 `3V3` clip (`3V3_S`) |
+| `K1` `GND` | terminal block `−` bus | |
+| `K1` `EN` | RAK5802 `SCL` clip (nRF P0.14) | control input, 2.7–40 V = on. **Nothing drives `SCL` yet** — see the note below the table |
 | `+` bus | muon-wx `+` | |
-| Pin 2 `P−` | terminal block `−` bus → buck `VIN−` (RAK19016: screw terminal **pin 3 `GND`**; pin 2 of that terminal is unconnected on the module), RK900 `−`, muon-wx `−`, and **`GROUND A` → base-board `GND` pad** | |
+| Pin 2 `P−` | terminal block `−` bus → buck `VIN−`, RK900 `−`, muon-wx `−`, and **`GROUND A` → base-board `GND` pad** | |
 | Pin 2 `P−` | a second conductor from the same pin, **`GROUND B` → RAK5802 `GND` clip** | redundancy against a return going intermittent after mating — not a mating-order fix, and not claimed as one |
 | Pins 3 + 5 joined | RAK5802 `SDA` clip (nRF P0.13) | the one-wire line. The base board already pulls it up with 4.7 kΩ to `VDD` (`R10`, [CIT-RAK19007-SCH-SLOTS]); no external pull-up needed on this landing |
 | Pin 4 `3V3_In` | base-board `VDD` pad | the always-on `3V3` looped through the core (ADR-0010). Never the RAK5802 `3V3` clip (`3V3_S`, switched by `IO2`), never 5 V |
 
-Both pads named above are on the 2.54 mm edge header (`SDA SCL TX1 RX1 GND VDD BOOT0` on the
-RAK19007; the RAK19010 carries the same three headers [CIT-RAK19010-RAW]). `SDA` and `GND B` land
-in spring clips; `VDD` and `GND A` are solder joints.
+Both pads named above are on the 2.54 mm edge header (`SDA SCL TX1 RX1 GND VDD BOOT0`). `SDA`,
+`SCL` and `GND B` land in spring clips; `VDD` (two wires: pack pin 4 and `K1 VIN`) and `GND A`
+are solder joints.
+
+**`K1` before its firmware exists — a hypothesis to meter, not a claim.** #117 says "until
+firmware drives `SCL`, the switch stays open and the head is dark." The schematic says the base
+board pulls `I2C1_SCL` to `VDD` through `R11` 4.7 kΩ [CIT-RAK19007-SCH-SLOTS], so an undriven
+`SCL` clip sits at ~3.3 V, inside `K1`'s 2.7–40 V on-range. Whether 4.7 kΩ can source enough
+current to light the optocoupler's LED is not on Pololu's page (`EN` input current is not
+specified). So the default state of an unfirmwared `K1` is **unknown**: meter `K1`'s load side with
+the board powered, no core, `SCL` undriven, and record it. If it reads on, the RK900 simply runs
+continuously as it does today until the firmware lands; nothing is damaged either way. The
+firmware (drive `SCL` HIGH → settle → poll → LOW) is [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)
+and is **not** in any image yet. `FEATURE_BATTERY_PIN_SCL` and `K1` cannot both be on.
 
 **`S1` requirements.** Breaks `P+` only — never `P−`. Rated for the plug's ceiling, 2 A at 13.2 V
 DC [CIT-RAK-WX-MANUAL]. Reachable with the lid open and nothing unplugged. Either a toggle/rocker
@@ -205,90 +222,11 @@ measured 20 mV in exactly that condition). The nRF pad — if one is fitted — 
 ground that is already common. When `S1` closes, `VDD` rises, pin 4 powers the pack's IO MCU, and
 the line idles high through the 4.7 kΩ pull-up. Ground never moves.
 
-**The whole node, wired.** Green = ground, red = the wire that killed nine pads, yellow = `S1`.
-The dashed box is the only thing that changes between the two base boards.
-
-```mermaid
-flowchart LR
-    subgraph PACK["RAK9154 — 5-pin Sensor Hub Load plug"]
-        P1["1  P+  (12 V)"]
-        P2["2  P−"]
-        P3["3  TXD"]
-        P4["4  3V3_In"]
-        P5["5  RXD"]
-    end
-
-    S1{{"S1 — load disconnect<br/>OFF to plug / unplug"}}
-
-    subgraph TB["terminal block"]
-        TBP["+ bus"]
-        TBN["− bus"]
-    end
-
-    subgraph SUPPLY["node supply — pick one"]
-        BUCK["RAK19007 build:<br/>12 V → 5 V buck → USB-C"]
-        R16["RAK19010 + RAK19016 build:<br/>screw terminal 1 VCC_IN / 3 GND"]
-    end
-
-    subgraph RK["RK900-09"]
-        RKP["V+"]
-        RKN["GND"]
-        RKA["A"]
-        RKB["B"]
-    end
-
-    MUON["muon-wx  + / −"]
-
-    subgraph BOARD["base board + RAK4631"]
-        BGND["GND pad — GROUND A"]
-        VDD["VDD pad (always-on 3V3)"]
-        subgraph MOD["RAK5802"]
-            MGND["GND clip — GROUND B"]
-            MA["A/RX"]
-            MB["B/TX"]
-            MSDA["SDA clip → nRF P0.13"]
-            M3V3["3V3 clip — 3V3_S — never use"]
-        end
-    end
-
-    JOIN(("3+5 joined"))
-
-    P1 --> S1 --> TBP
-    P2 --> TBN
-    P2 --> MGND
-    TBP --> BUCK
-    TBP --> R16
-    TBP --> RKP
-    TBP --> MUON
-    TBN --> BUCK
-    TBN --> R16
-    TBN --> RKN
-    TBN --> MUON
-    TBN --> BGND
-
-    P3 --> JOIN
-    P5 --> JOIN
-    JOIN --> MSDA
-    P4 --> VDD
-
-    RKA --> MA
-    RKB --> MB
-
-    style SUPPLY stroke-dasharray: 5 5
-    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
-    style M3V3 fill:#f0f0f0,stroke:#999,stroke-dasharray: 3 3
-    style MSDA fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style JOIN fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style P2 fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
-    style TBN fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
-    style BGND fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
-    style MGND fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
-```
-
-Read it against the failure: on 2026-09-05 `P1` was feeding the buck and the RK900 while `P2` was
-still in the air, and the only way back to the pack for that current was `P3/P5 → JOIN → MSDA`
-and down through the pad. With `S1` open at that moment `P1` feeds nothing, so there is no current
-to find a way back.
+**The diagram** is in [`BUILD.md`](BUILD.md) § "The build, in one picture" — one picture, kept
+there so the build has a single thing to follow. Read it against the failure: on 2026-09-05 pin 1
+was feeding the buck and the RK900 while pin 2 was still in the air, and the only way back to the
+pack for that current was pins 3/5 → `SDA` → the pad. With `S1` open at that moment pin 1 feeds
+nothing.
 
 **What `S1` does not do.** It depends on a hand. Mate with `S1` on and today's fault is back,
 unchanged. The label and the procedure are the whole guard; there is no interlock. That is the
@@ -1023,12 +961,12 @@ Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 
 |---|---|
 | RS-485 A | RAK5802 `A/RX` |
 | RS-485 B | RAK5802 `B/TX` |
-| 12 V + | pack `P+` — **as deployed.** The duty-cycle switch ([CIT-POLOLU-5426](CITATIONS.md), on order 2026-08-31) goes in this run only, high-side, when #113 lands |
+| 12 V + | pack `P+` via `S1` and **`K1`** (Pololu 5426, [CIT-POLOLU-5426](CITATIONS.md)) — high-side, in this run only; firmware for `K1` is [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117), not yet written. Node 001 as deployed has neither switch |
 | Negative | pack `P−` |
 
 1. `P+` — **through `S1`** (ADR-0011) — feeds **three** loads: the node's supply (the
    buck's VIN+ → WisBlock 5 V through its **USB-C** port on a RAK19007, the battery JST not used
-   per `FIRMWARE_SPEC.md` §2; or the RAK19016 screw terminal directly), the RK900's 12 V, and
+   per `FIRMWARE_SPEC.md` §2), the RK900's 12 V, and
    the muon-wx. The RK900 is a 12 V device and the RAK5802 cannot supply it — that module's
    `BAT` and `3V3` terminals are sensor outputs at 4.2 V and 3.3 V. Size the buck for the
    WisBlock alone and select it on no-load quiescent draw; the RK900 does not pass through it.
@@ -1121,13 +1059,13 @@ Consequences, each one a thing this repo had wrong or unknown:
 5. **`CIT-RAK19007-DS` said the USB-C input had no clamp. It has one** (`D3`, 5.6 V, 500 mW). The
    5.5 V ceiling stands — a half-watt Zener clamps a transient, not a supply.
 
-**The RAK19010 (SKU 110086) + RAK19016 alternative** — evaluated in
-[ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md) § "Base board". Short
-form: it is the better power front end (12 V straight onto a screw terminal, PMOS reverse-polarity
-gate, `SGM61230` with soft-start/OVP/foldback, same `SGM6036` 3.3 V stage, runs with no battery,
-no USB in the power path, ~25 µA front-end idle) and it changes **nothing** about the pad problem,
-whose fix is the pack harness. Its cost is no USB at all — SWD or BLE OTA only — so keep a
-RAK19007 on the bench as the fixture the core is programmed and soaked in.
+**The RAK19010 (SKU 110086) + RAK19016 alternative — evaluated 2026-09-05, not adopted; the
+hardware stays as built.** Record in
+[ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md) § "Base board" and the
+`CIT-RAK19010-RAW` / `CIT-RAK19016-*` registry rows, so the question does not have to be
+researched twice. Short form: a cleaner power front end (12 V straight onto a screw terminal,
+reverse-polarity gate, `SGM61230`, same `SGM6036` 3.3 V stage, no USB in the power path) that
+changes **nothing** about the pad problem and costs the USB port entirely.
 
 ### The former `VDD` conflict — what still holds
 

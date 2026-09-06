@@ -18,17 +18,15 @@ Documentation only; no firmware change. **🚧 NOT YET DEPLOYED.**
   putting the data wire at −8.1 V with the node's supply current returning through it. The
   connector and the pack cannot change and the 4-pin socket is not in play, so the one variable
   left is how much current flows when the contacts land: with `S1` open, none. `docs/HARDWARE.md`
-  § "The wiring plan" carries the harness and diagram for both base boards; `docs/BUILD.md`
+  § "The wiring plan" carries the harness and diagram; `docs/BUILD.md`
   section A builds it (one plug, `S1`, terminal-block fan-out, label), and the pre-Core gate is
   ADR-0011's coreless mating test instead of the #101 isolation switch, which is dropped: it
   guards a different mechanism and an ESD-class part cannot absorb 183 ms of reverse conduction.
   `S1`'s part is not yet chosen and gets a `CITATIONS.md` row when it is.
-- **RAK19010 (SKU 110086) + RAK19016 recommended for the field base; RAK19007 stays the bench
-  fixture** (ADR-0011 § "Base board"). From the RAK19016 schematic: 12 V pack input straight onto
-  a screw terminal through a PMOS reverse-polarity gate and an `SGM61230` (soft-start, OVP,
-  foldback, 25 µA idle) into the same `SGM6036` 3.3 V stage the RAK19007 uses; runs with no
-  battery fitted; no USB in the power path. Cost: no USB at all, so programming is SWD or BLE OTA.
-  The base board does not change the pad problem — the harness does.
+- **RAK19010 (SKU 110086) + RAK19016 evaluated as a field base and not adopted; the hardware
+  stays as built** (ADR-0011 appendix, `CIT-RAK19010-RAW`, `CIT-RAK19016-*`). Cleaner power front
+  end on the drawings, no effect on the pad problem, and it costs the USB port. Kept on record so
+  it is not researched twice.
 
 ### Fixed
 

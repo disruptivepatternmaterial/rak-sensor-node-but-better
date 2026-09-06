@@ -19,12 +19,76 @@ coreless mating test
 **Why `S1` exists** (measured 2026-09-05, `EVIDENCE.md`): on the 5-pin plug, `P−` lands ~180 ms
 after `P+` and the data pin, and the node's supply current returns through the data wire at
 −8.1 V. `S1` is open whenever the plug is mated or unmated, so no current is flowing when the
-contacts land. Rationale and the two-base-board comparison: `HARDWARE.md` § "The wiring plan".
+contacts land. Rationale: `HARDWARE.md` § "The wiring plan".
+
+## The build, in one picture
+
+Every wire in the node. Build to this; the numbered steps below are this picture in order.
+
+```mermaid
+flowchart LR
+    subgraph PACK["RAK9154 — 5-pin plug"]
+        P1["1  P+"]
+        P2["2  P−"]
+        P3["3  TXD"]
+        P4["4  3V3_In"]
+        P5["5  RXD"]
+    end
+
+    S1{{"S1<br/>OFF to plug / unplug"}}
+    BUS["terminal block<br/>+ / −"]
+
+    BUCK["buck 12→5 V<br/>→ USB-C"]
+    K1{{"K1  Pololu 5426"}}
+    RK["RK900<br/>V+  GND  A  B"]
+    MUON["muon-wx<br/>+ / −"]
+
+    subgraph BOARD["RAK19007 + RAK4631"]
+        GNDPAD["GND pad"]
+        VDDPAD["VDD pad"]
+        subgraph R5802["RAK5802 clips"]
+            GNDC["GND"]
+            SDAC["SDA"]
+            SCLC["SCL"]
+            AC["A/RX"]
+            BC["B/TX"]
+        end
+    end
+
+    P1 --> S1 --> BUS
+    P2 --> BUS
+    P2 --> GNDC
+    BUS --> BUCK
+    BUS --> K1 --> RK
+    BUS --> MUON
+    BUS --> GNDPAD
+    RK --> AC
+    RK --> BC
+
+    P3 & P5 --> SDAC
+    P4 --> VDDPAD
+
+    VDDPAD -. VIN .-> K1
+    SCLC -. EN .-> K1
+    BUS -. GND .-> K1
+
+    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
+    style K1 fill:#e3ecff,stroke:#2a4d9b,stroke-width:3px
+    style SDAC fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+```
+
+| | Rule |
+|---|---|
+| `S1` | OFF before the plug moves, every time. It is the only thing between a late-landing pin 2 and a dead pad. |
+| `K1` | High-side in the RK900 branch only. Control: `VIN` from the `VDD` pad, `GND` to the `−` bus, `EN` from the `SCL` clip. Firmware for it does not exist yet ([#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)). |
+| `SDA` and `VDD` (red / pin 4) | **Not landed until step 24 exists.** Core stays out of the board until then. |
+| `VDD` pad | Two wires: pack pin 4 and `K1 VIN`. Never the RAK5802 `3V3` clip. |
+| Buses | `+` bus: buck `VIN+`, `K1` load A, muon `+`. `−` bus: buck `VIN−`, RK900 `−`, muon `−`, `GND` pad, `K1 GND`. |
+| Not connected | 4-pin Gateway Load socket; RAK5802 `BAT`, `3V3`, `AIN` clips; enclosure lid panel. |
 
 ## Required equipment
 
-- RAK19007 WisBlock base board (bench fixture; the RAK19010 + RAK19016 field base follows the
-  same steps with the screw terminal in place of the buck — noted inline)
+- RAK19007 WisBlock base board
 - RAK5802 RS-485 module with spring terminals
 - RK900 weather sensor
 - RAK9154 solar battery pack and one SP11 plug mating its 5-pin `Sensor Hub Load` socket
@@ -32,7 +96,7 @@ contacts land. Rationale and the two-base-board comparison: `HARDWARE.md` § "Th
 - **`S1`** — a toggle/rocker switch or an inline blade-fuse holder, rated ≥ 2 A at 13.2 V DC,
   with a label reading `OFF before plugging or unplugging the pack`
 - a terminal block for the `P+`/`P−` fan-out inside the enclosure
-- 12 V-to-5 V buck converter (RAK19007 build only)
+- 12 V-to-5 V buck converter
 - multimeter
 - Saleae Logic Pro 8 for any unqualified signal
 - current-limited 3.3 V bench supply for the pack-data qualification
@@ -44,7 +108,7 @@ passes.
 
 1. Disconnect USB.
 2. Unmate the RAK9154 plug.
-3. Disconnect the buck from its input (RAK19016: nothing on the screw terminal).
+3. Disconnect the buck from its input.
 4. Confirm with the meter that the buck output, base-board `VDD`, pack pin 4, and the free data
    lead are not energised. Record the readings; do not proceed on a non-zero reading.
 5. Remove the RAK4631 Core if one is fitted.
@@ -53,7 +117,7 @@ passes.
 **Ground.**
 
 7. Wire pack pin 2 (`P−`) to the terminal block's `−` bus. From that bus, one conductor each to:
-   - buck input negative (RAK19016: screw terminal **pin 3 `GND`**);
+   - buck input negative;
    - RK900 negative;
    - muon-wx negative;
    - `GROUND A` → the base-board `GND` pad.
@@ -65,8 +129,7 @@ passes.
 9. Wire pack pin 1 (`P+`) to one terminal of `S1`. Nothing else connects to pin 1.
 10. Wire the other terminal of `S1` to the terminal block's `+` bus. From that bus, one conductor
     each to:
-    - buck input positive (RAK19016: screw terminal **pin 1 `VCC_IN`**; pin 2 of that terminal
-      is unconnected on the module [CIT-RAK19016-SCH]);
+    - buck input positive;
     - RK900 12 V positive;
     - muon-wx positive.
 11. Set `S1` **OFF** and fit its label. Mount it where it can be operated with the lid open and
@@ -90,80 +153,10 @@ passes.
     record both readings.
 18. Connect RK900 `A` to RAK5802 `A/RX` and RK900 `B` to RAK5802 `B/TX`.
 
-### Wiring checkpoint after step 18
+### Checkpoint after step 18
 
-Your wiring must match this before taking measurements. Red lines end unconnected. The RAK4631
-Core is not fitted, the plug is not mated, `S1` is OFF, and the buck output is not connected.
-
-```mermaid
-flowchart LR
-    subgraph PACK["RAK9154 5-pin plug — UNMATED"]
-        P1["pin 1 — P+"]
-        P2["pin 2 — P−"]
-        P35["pins 3 + 5 joined"]
-        P4["pin 4 — 3V3_In"]
-    end
-
-    S1{{"S1 — OFF"}}
-
-    subgraph TB["terminal block"]
-        TBP["+ bus"]
-        TBN["− bus"]
-    end
-
-    subgraph BUCK["12 V → 5 V buck<br/>(RAK19016: screw terminal 1 / 3)"]
-        BINP["VIN+"]
-        BINN["VIN−"]
-        BOUT["5 V output<br/>DISCONNECTED"]
-    end
-
-    subgraph WEATHER["RK900 weather sensor"]
-        RKP["12 V+"]
-        RKN["GND"]
-        RKA["A"]
-        RKB["B"]
-    end
-
-    MUON["muon-wx<br/>+ / −"]
-
-    subgraph BOARD["base board — NO CORE"]
-        BGND["GND pad<br/>GROUND A"]
-        NOVDD["VDD<br/>NO CONNECTION"]
-        subgraph MOD["RAK5802"]
-            MGND["GND terminal<br/>GROUND B"]
-            MA["A/RX"]
-            MB["B/TX"]
-            MSDA["SDA<br/>NO CONNECTION"]
-        end
-    end
-
-    FREE["insulated data lead<br/>NO CONNECTION"]
-    FREE4["insulated pin 4 lead<br/>NO CONNECTION"]
-
-    P1 --> S1 --> TBP
-    P2 --> TBN
-    P2 --> MGND
-    TBP --> BINP
-    TBP --> RKP
-    TBP --> MUON
-    TBN --> BINN
-    TBN --> RKN
-    TBN --> MUON
-    TBN --> BGND
-    RKA --> MA
-    RKB --> MB
-    P35 --> FREE
-    P4 --> FREE4
-
-    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
-    style FREE fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style FREE4 fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style MSDA fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style NOVDD fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style BOUT fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style BGND fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
-    style MGND fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
-```
+Your wiring must match § "The build, in one picture" with the red `SDA` clip and pin 4 still
+unconnected, the Core not fitted, the plug not mated, `S1` OFF, and the buck output not connected.
 
 ## B. Qualify the actual base board and pack path
 

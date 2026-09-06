@@ -70,15 +70,16 @@ that is already common through pin 2 by the time `S1` closes.
   test passed" instead of "isolation and contention unresolved".
 - `S1` also gives the field a clean power-cycle without touching the plug.
 
-## Base board: RAK19010 (SKU 110086) + RAK19016, or keep the RAK19007
+## Appendix — base board: RAK19010 (SKU 110086) + RAK19016, evaluated and not adopted
 
-Asked 2026-09-05. The answer is in two parts because the question has two parts.
+Asked 2026-09-05 as an idea; the operator kept the hardware as built (RAK19007, buck, USB-C) the
+same day. The evaluation is kept so it is not redone.
 
 **Does the base board change the pad problem?** No. The mechanism lives in the pack plug; the
 same −8.1 V appears on any base board, and `S1` is the fix on any base board.
 
-**Is RAK19010 + RAK19016 a better power front end than RAK19007 + hobby buck + USB-C?** Yes,
-on the evidence, with one real cost.
+**Is RAK19010 + RAK19016 a better power front end than RAK19007 + hobby buck + USB-C?** On the
+drawings, yes, with one real cost.
 
 | | RAK19007 as built | RAK19010 + RAK19016 |
 |---|---|---|
@@ -93,17 +94,12 @@ on the evidence, with one real cost.
 | Programming / console | USB CDC | **none.** SWD (the CMSIS-DAP already on the bench) or a RAK5804 in the IO slot — which the RAK5802 occupies. No free UART reaches a header: `TXD1/RXD1` on the edge header is the RS-485 UART (`CIT-RAK4631-SCH`, `CIT-RAK19007-SCH-SLOTS`) |
 | Parts | in hand | RAK19010 (110086) + RAK19016; RAK5802, RAK4631, antenna carry over |
 
-**Recommendation.** Use RAK19010 + RAK19016 for the field build and keep a RAK19007 on the bench
-as the programming/soak fixture — the core moves between them, which is the workflow RAK itself
-describes for these modules. The field node is reflashed over BLE OTA anyway (`HARDWARE.md`
-§ "Reflashing a sealed field node"), so losing USB in the woods costs nothing; losing it on the
-bench would, and the RAK19007 avoids that. The buck module, the USB-C-as-power-input, and the
-backfeed rule all leave the field build. RAK19012 (USB + LiPo + solar) is not recommended: it is
-the RAK19007 power topology on a plug-in card and keeps the buck.
-
-What does **not** change with the new base: `S1` and the plug rule above, `3V3_In` from the `VDD`
-pad (RAK19010 has the same header and the same `VDD` = looped `3V3` arrangement,
-`CIT-RAK19010-RAW`), the `SDA` clip as the one-wire landing, and the 2 A connector ceiling.
+**Not adopted.** If it is ever revisited: the workable shape is RAK19010 + RAK19016 in the field
+with a RAK19007 kept on the bench as the programming/soak fixture, the core moving between them;
+the field node is reflashed over BLE OTA (`HARDWARE.md` § "Reflashing a sealed field node").
+RAK19012 (USB + LiPo + solar) would gain nothing — it is the RAK19007 power topology on a card.
+`S1`, the plug rule, `3V3_In` on the `VDD` pad, and the `SDA` landing are the same on either base
+(`CIT-RAK19010-RAW`).
 
 ## Exit criteria
 
