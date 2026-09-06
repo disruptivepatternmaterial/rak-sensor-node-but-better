@@ -199,6 +199,99 @@ Both pads named above are on the 2.54 mm edge header (`SDA SCL TX1 RX1 GND VDD B
 RAK19007; the RAK19010 carries the same three headers [CIT-RAK19010-RAW]). The `SDA` and `GND`
 connections land in spring clips; `VDD` is a solder joint.
 
+**The whole node, wired.** Green = ground paths, red = the one wire that killed nine pads and the
+conductor that no longer exists. The dashed box is the only thing that changes between the two
+base boards.
+
+```mermaid
+flowchart LR
+    subgraph PACK["RAK9154"]
+        subgraph P4S["4-pin Gateway Load — POWER — mates FIRST"]
+            Q1["1  P+  (9–13.2 V)"]
+            Q2["2  P−"]
+            Q34["3, 4  RS-485 — empty"]
+        end
+        subgraph P5S["5-pin Sensor Hub Load — DATA — mates SECOND"]
+            P1["1  P+ — NO WIRE"]
+            P2["2  P−"]
+            P3["3  TXD"]
+            P4["4  3V3_In"]
+            P5["5  RXD"]
+        end
+    end
+
+    subgraph TB["terminal block (in the enclosure)"]
+        TBP["+ bus"]
+        TBN["− bus"]
+    end
+
+    subgraph SUPPLY["node supply — pick one"]
+        BUCK["RAK19007 build:<br/>12 V → 5 V buck → USB-C"]
+        R16["RAK19010 + RAK19016 build:<br/>screw terminal 1 VCC_IN / 3 GND"]
+    end
+
+    subgraph RK["RK900-09"]
+        RKP["V+"]
+        RKN["GND"]
+        RKA["A"]
+        RKB["B"]
+    end
+
+    MUON["muon-wx  + / −"]
+
+    subgraph BOARD["base board + RAK4631"]
+        BGND["GND pad"]
+        VDD["VDD pad (always-on 3V3)"]
+        subgraph MOD["RAK5802"]
+            MGND["GND clip"]
+            MA["A/RX"]
+            MB["B/TX"]
+            MSDA["SDA clip → nRF P0.13"]
+            M3V3["3V3 clip — 3V3_S — never use"]
+        end
+    end
+
+    JOIN(("3+5 joined"))
+
+    Q1 --> TBP
+    Q2 --> TBN
+    TBP --> BUCK
+    TBP --> R16
+    TBP --> RKP
+    TBP --> MUON
+    TBN --> BUCK
+    TBN --> R16
+    TBN --> RKN
+    TBN --> MUON
+    TBN --> BGND
+
+    P2 --> MGND
+    P3 --> JOIN
+    P5 --> JOIN
+    JOIN --> MSDA
+    P4 --> VDD
+
+    RKA --> MA
+    RKB --> MB
+
+    style SUPPLY stroke-dasharray: 5 5
+    style P1 fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+    style Q34 fill:#f0f0f0,stroke:#999,stroke-dasharray: 3 3
+    style M3V3 fill:#f0f0f0,stroke:#999,stroke-dasharray: 3 3
+    style MSDA fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+    style JOIN fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+    style Q2 fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+    style P2 fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+    style TBN fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+    style BGND fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+    style MGND fill:#d7f8d7,stroke:#2e7d32,stroke-width:3px
+```
+
+Read it against the failure: in the old harness `Q1`'s current came in on the **5-pin** plug, and
+when `P2` landed last the only path back to the pack was `P3/P5 → JOIN → MSDA` and through the
+pad. Here nothing on the 5-pin plug draws current, and `Q2 → TBN → BGND` is already made before
+`P2`, `P3`, `P4`, `P5` touch anything.
+
 **Order of operations at the pack, every time:** 4-pin on → 5-pin on; 5-pin off → 4-pin off.
 Wrong order recreates a small version of the fault (node `3V3` into the pack's IO MCU through
 pin 4, returning through pin 5 and a pad). Right order makes contact sequence inside either plug
