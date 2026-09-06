@@ -12,16 +12,17 @@ Documentation only; no firmware change. **🚧 NOT YET DEPLOYED.**
 
 ### Changed
 
-- **The pack harness is split: all supply current on the 4-pin `Gateway Load` plug, data and a
-  second ground on the 5-pin plug, which carries no `P+` conductor**
-  ([ADR-0011](docs/decisions/ADR-0011-power-on-the-4-pin-data-on-the-5-pin.md)). The 2026-09-05
-  capture showed the 5-pin plug's `P−` landing ~180 ms after `P+` and the data pin, putting the
-  data wire at −8.1 V with the node's supply current returning through it; removing that current
-  from the plug removes the mechanism. `docs/HARDWARE.md` § "The wiring plan" is the harness for
-  both base boards; `docs/BUILD.md` section A now builds it (two plugs, terminal-block fan-out,
-  mating-order labels), and the pre-Core gate is ADR-0011's coreless mating test instead of the
-  #101 isolation switch, which is dropped: it guards a different mechanism and an ESD-class part
-  cannot absorb 183 ms of reverse conduction.
+- **A load disconnect `S1` on `P+`, open whenever the pack plug is mated or unmated**
+  ([ADR-0011](docs/decisions/ADR-0011-no-current-across-the-plug-while-mating.md)). The
+  2026-09-05 capture showed the 5-pin plug's `P−` landing ~180 ms after `P+` and the data pin,
+  putting the data wire at −8.1 V with the node's supply current returning through it. The
+  connector and the pack cannot change and the 4-pin socket is not in play, so the one variable
+  left is how much current flows when the contacts land: with `S1` open, none. `docs/HARDWARE.md`
+  § "The wiring plan" carries the harness and diagram for both base boards; `docs/BUILD.md`
+  section A builds it (one plug, `S1`, terminal-block fan-out, label), and the pre-Core gate is
+  ADR-0011's coreless mating test instead of the #101 isolation switch, which is dropped: it
+  guards a different mechanism and an ESD-class part cannot absorb 183 ms of reverse conduction.
+  `S1`'s part is not yet chosen and gets a `CITATIONS.md` row when it is.
 - **RAK19010 (SKU 110086) + RAK19016 recommended for the field base; RAK19007 stays the bench
   fixture** (ADR-0011 § "Base board"). From the RAK19016 schematic: 12 V pack input straight onto
   a screw terminal through a PMOS reverse-polarity gate and an `SGM61230` (soft-start, OVP,

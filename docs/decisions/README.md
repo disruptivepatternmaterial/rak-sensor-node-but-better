@@ -38,7 +38,7 @@ Every ADR carries citations to the same standard as code (rule 20).
 | [0008](ADR-0008-console-in-the-field-image.md) | The console stays in the field image | Accepted |
 | [0009](ADR-0009-address-exposure-rotate-not-rewrite.md) | Leaked build host address is rotated and hardened, not erased from history | Accepted — mitigation is operator-side and open ([#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85)) |
 | [0010](ADR-0010-rak19007-vdd-source-conflict.md) | RAK19007 `VDD` source — resolved by the schematics: base-board `3V3` looped through the core | Closed 2026-09-05 |
-| [0011](ADR-0011-power-on-the-4-pin-data-on-the-5-pin.md) | All supply current on the pack's 4-pin socket; the 5-pin carries data and ground only. RAK19010 + RAK19016 recommended for the field base | Proposed — accepted when the coreless mating test passes |
+| [0011](ADR-0011-no-current-across-the-plug-while-mating.md) | No current crosses the pack plug while it is mated or unmated: load disconnect `S1` on `P+`. RAK19010 + RAK19016 recommended for the field base | Proposed — accepted when the coreless mating test passes |
 
 ## Open decisions not yet ADR'd
 

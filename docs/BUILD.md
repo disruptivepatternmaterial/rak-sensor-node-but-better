@@ -10,15 +10,16 @@ and the conflict must be resolved before hardware is connected.
 
 **Do not install a RAK4631 Core and do not connect the pack data wire to any GPIO.**
 
-The safe procedure currently ends at step 22. Steps after that do not exist yet because the
-split harness of [ADR-0011](decisions/ADR-0011-power-on-the-4-pin-data-on-the-5-pin.md) has not
-passed its coreless mating test
+The safe procedure currently ends at step 23. Steps after that do not exist yet because the
+harness with the `S1` load disconnect of
+[ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md) has not passed its
+coreless mating test
 ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
 
-**Why the harness is split** (measured 2026-09-05, `EVIDENCE.md`): on the single 5-pin plug,
-`P−` lands ~180 ms after `P+` and the data pin, and the node's supply current returns through the
-data wire at −8.1 V. Putting every load on the 4-pin plug leaves the 5-pin plug with no current to
-divert. Rationale and the two-base-board comparison: `HARDWARE.md` § "The wiring plan".
+**Why `S1` exists** (measured 2026-09-05, `EVIDENCE.md`): on the 5-pin plug, `P−` lands ~180 ms
+after `P+` and the data pin, and the node's supply current returns through the data wire at
+−8.1 V. `S1` is open whenever the plug is mated or unmated, so no current is flowing when the
+contacts land. Rationale and the two-base-board comparison: `HARDWARE.md` § "The wiring plan".
 
 ## Required equipment
 
@@ -26,79 +27,84 @@ divert. Rationale and the two-base-board comparison: `HARDWARE.md` § "The wirin
   same steps with the screw terminal in place of the buck — noted inline)
 - RAK5802 RS-485 module with spring terminals
 - RK900 weather sensor
-- RAK9154 solar battery pack
-- **two** SP11 cable plugs: one mating the 4-pin `Gateway Load` socket (`SP1110/P4`), one mating
-  the 5-pin `Sensor Hub Load` socket (`SP1110/P5`) [CIT-RAK-WX-MANUAL]
+- RAK9154 solar battery pack and one SP11 plug mating its 5-pin `Sensor Hub Load` socket
+  (`SP1110/P5`) [CIT-RAK-WX-MANUAL]
+- **`S1`** — a toggle/rocker switch or an inline blade-fuse holder, rated ≥ 2 A at 13.2 V DC,
+  with a label reading `OFF before plugging or unplugging the pack`
 - a terminal block for the `P+`/`P−` fan-out inside the enclosure
 - 12 V-to-5 V buck converter (RAK19007 build only)
 - multimeter
 - Saleae Logic Pro 8 for any unqualified signal
 - current-limited 3.3 V bench supply for the pack-data qualification
 
-Keep the candidate/donor RAK4631 CPU/radio Core somewhere outside the assembly area until step 22
+Keep the candidate/donor RAK4631 CPU/radio Core somewhere outside the assembly area until step 23
 passes.
 
 ## A. Assemble only the non-Core wiring
 
 1. Disconnect USB.
-2. Unmate both RAK9154 plugs.
+2. Unmate the RAK9154 plug.
 3. Disconnect the buck from its input (RAK19016: nothing on the screw terminal).
 4. Confirm with the meter that the buck output, base-board `VDD`, pack pin 4, and the free data
    lead are not energised. Record the readings; do not proceed on a non-zero reading.
 5. Remove the RAK4631 Core if one is fitted.
 6. Fit the RAK5802 in its documented WisBlock IO slot.
 
-**Power plug — 4-pin `Gateway Load`.**
+**Ground.**
 
-7. Wire the 4-pin plug's pin 2 (`P−`) to the terminal block's negative bus. From that bus, one
-   conductor each to:
+7. Wire pack pin 2 (`P−`) to the terminal block's `−` bus. From that bus, one conductor each to:
    - buck input negative (RAK19016: screw terminal **pin 3 `GND`**);
    - RK900 negative;
    - muon-wx negative;
    - `GROUND A` → the base-board `GND` pad.
-8. Wire the 4-pin plug's pin 1 (`P+`) to the terminal block's positive bus. From that bus, one
-   conductor each to:
-   - buck input positive (RAK19016: screw terminal **pin 1 `VCC_IN`**; pin 2 of that terminal
-     is unconnected on the module [CIT-RAK19016-SCH]);
-   - RK900 12 V positive;
-   - muon-wx positive.
-9. Leave the 4-pin plug's pins 3 and 4 (RS-485) unconnected and insulated.
+8. From pack pin 2, a **second** conductor, `GROUND B` → the RAK5802 `GND` spring terminal. Make
+   the pin-2 junction soldered and heat-shrunk.
 
-**Data plug — 5-pin `Sensor Hub Load`, no `P+` conductor.**
+**Power, through `S1`.**
 
-10. Wire the 5-pin plug's pin 2 (`P−`) as `GROUND B` → the RAK5802 `GND` spring terminal.
-    **Do not join it to the terminal block** — the two grounds meet only inside the node.
-11. **Leave the 5-pin plug's pin 1 (`P+`) with no wire at all.** If the plug came pre-wired, cut
-    that conductor back to the boot and insulate it.
-12. Join the 5-pin plug's pins 3 and 5. Terminate the resulting data lead so it cannot touch
+9. Wire pack pin 1 (`P+`) to one terminal of `S1`. Nothing else connects to pin 1.
+10. Wire the other terminal of `S1` to the terminal block's `+` bus. From that bus, one conductor
+    each to:
+    - buck input positive (RAK19016: screw terminal **pin 1 `VCC_IN`**; pin 2 of that terminal
+      is unconnected on the module [CIT-RAK19016-SCH]);
+    - RK900 12 V positive;
+    - muon-wx positive.
+11. Set `S1` **OFF** and fit its label. Mount it where it can be operated with the lid open and
+    nothing unplugged.
+
+**Data.**
+
+12. Join pack pins 3 and 5 at the plug. Terminate the resulting data lead so it cannot touch
     anything. **Do not put it in `SDA`, `A1`, `IO1`, or any other node terminal.**
-13. Leave the 5-pin plug's pin 4 (`3V3_In`) disconnected and insulated.
-14. Label the plugs: **`1 — POWER — mate first, unplug last`** and
-    **`2 — DATA — mate second, unplug first`**.
+13. Leave pack pin 4 (`3V3_In`) disconnected and insulated.
 
 **Checks and the RS-485 pair.**
 
-15. Short the meter probes together and record the lead-resistance reading.
-16. Measure 4-pin pin 2 to the base-board `GND` pad. Record the resistance. It must remain stable
+14. Short the meter probes together and record the lead-resistance reading.
+15. Measure pack pin 2 to the base-board `GND` pad. Record the resistance. It must remain stable
     while the harness and each termination are moved gently; an overload/open or changing reading
     fails this step.
-17. Measure 5-pin pin 2 to the RAK5802 `GND` terminal in the same way. Record the resistance.
-    Then measure 4-pin pin 2 to 5-pin pin 2 **with both plugs unmated**: this must read open —
-    if it does not, step 10 was wired to the terminal block.
+16. Measure pack pin 2 to the RAK5802 `GND` terminal in the same way. Record the resistance.
+17. With `S1` OFF, measure pack pin 1 to the terminal block's `+` bus: **must read open.** Switch
+    `S1` ON, repeat: must read the lead resistance from step 14. Switch `S1` **OFF** again and
+    record both readings.
 18. Connect RK900 `A` to RAK5802 `A/RX` and RK900 `B` to RAK5802 `B/TX`.
 
 ### Wiring checkpoint after step 18
 
 Your wiring must match this before taking measurements. Red lines end unconnected. The RAK4631
-Core is not fitted, neither plug is mated, and the buck output is not connected.
+Core is not fitted, the plug is not mated, `S1` is OFF, and the buck output is not connected.
 
 ```mermaid
 flowchart LR
-    subgraph PWR["4-pin Gateway Load plug — UNMATED — mates FIRST"]
-        Q1["pin 1 — P+"]
-        Q2["pin 2 — P−"]
-        Q34["pins 3, 4 — RS-485<br/>NO CONNECTION"]
+    subgraph PACK["RAK9154 5-pin plug — UNMATED"]
+        P1["pin 1 — P+"]
+        P2["pin 2 — P−"]
+        P35["pins 3 + 5 joined"]
+        P4["pin 4 — 3V3_In"]
     end
+
+    S1{{"S1 — OFF"}}
 
     subgraph TB["terminal block"]
         TBP["+ bus"]
@@ -120,13 +126,6 @@ flowchart LR
 
     MUON["muon-wx<br/>+ / −"]
 
-    subgraph DATA["5-pin Sensor Hub Load plug — UNMATED — mates SECOND"]
-        P1["pin 1 — P+<br/>NO WIRE"]
-        P2["pin 2 — P−"]
-        P35["pins 3 + 5 joined"]
-        P4["pin 4 — 3V3_In"]
-    end
-
     subgraph BOARD["base board — NO CORE"]
         BGND["GND pad<br/>GROUND A"]
         NOVDD["VDD<br/>NO CONNECTION"]
@@ -141,8 +140,9 @@ flowchart LR
     FREE["insulated data lead<br/>NO CONNECTION"]
     FREE4["insulated pin 4 lead<br/>NO CONNECTION"]
 
-    Q1 --> TBP
-    Q2 --> TBN
+    P1 --> S1 --> TBP
+    P2 --> TBN
+    P2 --> MGND
     TBP --> BINP
     TBP --> RKP
     TBP --> MUON
@@ -150,14 +150,12 @@ flowchart LR
     TBN --> RKN
     TBN --> MUON
     TBN --> BGND
-    P2 --> MGND
     RKA --> MA
     RKB --> MB
     P35 --> FREE
     P4 --> FREE4
 
-    style P1 fill:#ffd6d6,stroke:#b22222,stroke-width:3px
-    style Q34 fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
     style FREE fill:#ffd6d6,stroke:#b22222,stroke-width:3px
     style FREE4 fill:#ffd6d6,stroke:#b22222,stroke-width:3px
     style MSDA fill:#ffd6d6,stroke:#b22222,stroke-width:3px
@@ -179,8 +177,9 @@ flowchart LR
     unstable reading fails the board; do not install a Core.
 
 20. If this is the same pack and harness as capture 13 in `EVIDENCE.md`, record that existing
-    pack-side qualification in the build sheet and continue. The split harness **is** a changed
-    harness: repeat steps 21–22 the first time it is built.
+    pack-side qualification in the build sheet and continue. Adding `S1` does not change the
+    pack-side data path, so an existing capture-13 result for the same pack and plug still stands;
+    a new pack or a new plug means repeating steps 21–22.
 
 21. Qualify a changed pack or harness with **no Core and no base board in the measurement loop**:
     - bench supply OFF;
@@ -208,28 +207,28 @@ flowchart LR
 23. Confirm all of the following:
     - the RAK4631 Core is still not fitted;
     - the pack data lead is insulated and reaches no node terminal;
-    - the 5-pin plug's pin 1 has no conductor;
-    - both ground-path readings and the open reading between the two plugs' pin 2 are recorded;
+    - `S1` is OFF, labelled, and both its OFF/ON readings from step 17 are recorded;
+    - both ground-path readings are recorded;
     - all three `BAT`-isolation readings are recorded;
     - the applicable pack-side analyzer result is recorded.
 
-    Then stop. Do not mate either plug to a Core-equipped node.
+    Then stop. Do not mate the plug to a Core-equipped node.
 
 ## What must be added before step 24 can exist
 
-[ADR-0011](decisions/ADR-0011-power-on-the-4-pin-data-on-the-5-pin.md) § "Exit criteria", all
+[ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md) § "Exit criteria", all
 three in `EVIDENCE.md` with host and SHA:
 
-1. **Pack alone, meter:** 4-pin `P+`→`P−` reads pack voltage; 4-pin `P−` ↔ 5-pin `P−` continuity
-   at the pack.
-2. **Coreless mating test, this harness:** analyzer ground on the base-board `GND` pad, analog
-   channel on the joined pins 3+5 lead, buck output connected and the board powered from the pack
-   exactly as it will be in the field. Mate the 4-pin plug, then the 5-pin plug; unmate in
-   reverse. ≥ 10 cycles. **Pass = the data lead never goes below −0.3 V.** Runs 6 and 7
-   (2026-09-05, single-plug harness, ~25 matings, every one below −0.3 V) are the control. Then
-   ≥ 5 cycles in the *wrong* order, recorded, to size the residual path.
+1. **Coreless mating test, this harness:** analyzer ground on the base-board `GND` pad, analog
+   channel on the joined pins 3+5 lead, buck output connected so the board powers from the pack
+   exactly as it will in the field. Each cycle: `S1` OFF → mate → `S1` ON → (pause) → `S1` OFF →
+   unmate. ≥ 10 cycles. **Pass = the data lead never goes below −0.3 V.** Runs 6 and 7
+   (2026-09-05, same harness without `S1`, ~25 matings, every one below −0.3 V) are the control.
+2. **The same, ≥ 3 cycles with `S1` left ON**, recorded — to confirm the switch is the variable
+   and not the day.
 3. **First core:** meter the incoming core's `IO1`, `A1`, `SDA` to `GND` (megohms), fit it, land
-   the data lead in `SDA` and pin 4 on `VDD`, one mating in order, re-meter the pad afterwards.
+   the data lead in `SDA` and pin 4 on `VDD`, one cycle by the procedure, re-meter the pad
+   afterwards.
 
 Until those results are in `EVIDENCE.md`, there is no step that says to install the donor Core.
 The isolation switch of #101 (`SN74CBTLV1G125`) is no longer a prerequisite: it guards the
@@ -245,10 +244,11 @@ Date:
 Base board identifier (or NOT IDENTIFIED):
 Pack/harness identifier (or NOT IDENTIFIED):
 Meter lead resistance:
-4-pin pin 2 -> base-board GND:
-5-pin pin 2 -> RAK5802 GND:
-4-pin pin 2 <-> 5-pin pin 2, plugs unmated (must be open):
-5-pin pin 1 conductor present? (must be NO):
+Pack pin 2 -> base-board GND:
+Pack pin 2 -> RAK5802 GND:
+Pack pin 1 -> + bus, S1 OFF (must be open):
+Pack pin 1 -> + bus, S1 ON:
+S1 left OFF and labelled? (must be YES):
 BAT -> IO1:
 BAT -> A1:
 BAT -> SDA:
