@@ -65,14 +65,22 @@ counter resets as soon as any field is read. Implemented in `src/main.cpp`
 
 ### 2.2 RAK9154 (battery) — implemented path
 
-**Implemented: 5-pin Sensor Hub Load one-wire** (TXD+RXD bridged to base-board `A1` /
-`WB_A1`, 9600 half-duplex, IPSO TLV), chosen in
-[ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) and working on the original IO1 path since
-2026-08-05. A1 replaces damaged IO1 pins under [#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)
-and remains hardware-unverified until that issue closes. This is the socket to go to when
-battery reads fail.
+**Implemented protocol; physical layer changing:** 5-pin Sensor Hub Load one-wire (TXD+RXD
+bridged, 9600 half-duplex, IPSO TLV), chosen in
+[ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) and proven end to end on a direct GPIO.
+Direct GPIO wiring is now rejected: ordinary unplug/replug puts the wire outside both nRF52840
+rails [CITE(bench): `EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT](EVIDENCE.md).
+
+[ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md) puts one
+`XR33052` ±60 V RS-485 transceiver on the wire, powered from `3V3_S`. The firmware consequence
+is a **two-pin** half-duplex driver: RX on `RO` (default `IO1`), TX on `DE` (default `A1`) with
+inverted polarity, so a data 0 pulls the wire LOW and a data 1 releases it. The node never drives
+the wire HIGH. `SwitchedRailHold` is engaged for every battery read. Protocol, frame layer, and
+`kTurnaroundMs` are unchanged. That firmware lands in its own PR after `BUILD.md` gates G1–G4
+pass with no Core; the current image is for direct-GPIO nodes (001) only.
 [CITE(prior-art): Meshtastic `RAK9154Sensor`, `beegee-tokyo/RAK-OneWireSerial`, `forest-weather-machines/rak-4-5-wire/firmware/nanoc6-onewire-poll`](CITATIONS.md)
 [CITE(bench): pack latches pid `0x01` and reports 12.23 V / 98 % / 23.0 °C, `1a203d3`](EVIDENCE.md)
+[CITE(datasheet): XR33052 bus-pin ratings, driver enable, receiver output — CIT-XR33052](CITATIONS.md)
 
 **Not used — held in reserve:** 4-pin **Gateway Load** SP11/P4 Modbus (same map as field Hub /
 `rak-4-5-wire`). Raw Modbus at slave `0x6E` over the one-wire line was proven dead (0 bytes every

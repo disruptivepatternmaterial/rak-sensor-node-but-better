@@ -17,7 +17,7 @@ and holds it across resets, after which the phase-0 direct probe is the only pat
 The one non-obvious requirement is **timing, not framing**: the firmware must not answer the
 announcement sooner than about 2 ms after the pack's last byte. Our reply bytes were always
 byte-correct and the handshake still failed for weeks because we answered under one bit time
-later, before the pack's receiver had re-armed on the open-drain line. That gap is
+later, before the pack's receiver had re-armed on the shared line. That gap is
 `kTurnaroundMs` in `src/sensors/battery.cpp`, and deleting it as dead weight re-breaks the whole
 subsystem.
 
@@ -84,6 +84,15 @@ needed. Any power-budget arithmetic written against the 50 s figure is stale —
 
 ## Then
 
+<<<<<<< Updated upstream
+=======
+- **The pack data wire lands on the XR33052 transceiver, never a GPIO**
+  ([ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md)). Ordinary
+  unplug/replug crosses both nRF rails (`EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT); the plug
+  is hot-plugged in the field, so the Core-removal rule is rejected
+  ([ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md)). `BUILD.md` gates
+  G1–G4 pass with no Core before `RO`/`DE` reach one.
+>>>>>>> Stashed changes
 - 24 h bench soak: both sensors live, TTN uplinks arriving, no watchdog resets.
 - 7 d field shadow: node in its enclosure, outdoors, before anything is trusted.
 
@@ -92,8 +101,9 @@ Only after both does the status in [`README.md`](../README.md) change. See
 
 ## What this procedure does not cover
 
-Two open items block deployment and are **not** firmware:
+Three open items block deployment and are **not** firmware:
 
+- **ADR-0012 transceiver** — `BUILD.md` gates G1–G4 with no Core, then the two-pin firmware.
 - **Buck converter selection** — must be chosen on no-load quiescent current, since it is a
   24/7 parallel load. See [`HARDWARE.md`](HARDWARE.md) and [`POWER_BUDGET.md`](POWER_BUDGET.md).
 - **TTN device registration** for additional nodes, with MSB-order keys. Now scripted —

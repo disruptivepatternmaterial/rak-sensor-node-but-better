@@ -132,6 +132,7 @@ runtime_hours = usable_pack_capacity_mAh / I_avg_mA
 | MCU wake + init | TBD | TBD | measured | ⬜ |
 | RS-485 enabled, RK900 poll | ≤ 1 s per txn, ≤ 2 retries (`FIRMWARE_SPEC.md` §2.1) | TBD — includes RAK5802 transceiver | [CIT-RAK5802] + measured | ⬜ |
 | BMS poll | ≤ 1 s per txn | TBD | measured | ⬜ |
+| ADR-0012 `XR33052` on `3V3_S` | battery transaction only | ≤ 4 mA supply + 0.165 mA reference divider while `3V3_S` is up; **0** between reads (unpowered). Also on for the RK900 read, since it shares the rail. | [CIT-XR33052] + measured | datasheet ceiling; measure on the bench |
 | LoRa TX | depends on DR/SF and payload | TBD at US915 TX power — datasheet reference **92 mA @ 17 dBm**, **125 mA @ 20 dBm** | [CIT-SX1262] + [CIT-RAK4631-RAW] | ⬜ |
 | Whole board, peak over one 900 s cycle | burst | **~40 mA ± 10 mA observed** — coarse; the meter likely missed the TX burst | bench meter, 2026-08-13 ([EVIDENCE.md](EVIDENCE.md)) | coarse |
 | RX1 + RX2 windows | per Class A | TBD | [CIT-LW-LINK] + [CIT-SX1262] | ⬜ |
@@ -145,8 +146,11 @@ runtime_hours = usable_pack_capacity_mAh / I_avg_mA
 | Solar panel | 10 W regular (34 × 27 cm); large-panel variant deployed | [CIT-RAK9154-SOLAR] |
 | Winter harvest under canopy | TBD — **must be measured on site, not modelled** | field |
 | Integrated heater draw | TBD — not firmware-controllable; may dominate in winter | [CIT-RAK9154-SOLAR] + measured |
-| Buck 12 V → 5 V efficiency | TBD | buck module datasheet (part not yet selected) |
-| Buck no-load quiescent | TBD — a 24/7 load; select the part on this figure | buck module datasheet |
+| Node 001 buck | PlusRoc PR4A070, 5 V / 5 A; listing says >90% efficiency | [CIT-PLUSROC-PR4A070] + operator identification |
+| Node 002 original buck | YIPIN HEXHA, 5 V / 3 A; removed 2026-09-06 | [CIT-YIPIN-HEXHA-3A] + operator identification |
+| Node 002 temporary A/B buck | PlusRoc PR4A070; did not clear the connector fault | `EVIDENCE.md` 2026-09-06 09:51 PDT |
+| Production buck selection | Pololu D24V22F5 is the leading candidate; not yet adopted | [CIT-POLOLU-D24V22F5] + rail-relative mating A/B |
+| Buck no-load quiescent | TBD for both — a 24/7 load | measured |
 
 The buck converter's **quiescent draw is a load 24/7** and is easy to forget. A buck with
 poor no-load efficiency can dominate the entire budget regardless of firmware quality.

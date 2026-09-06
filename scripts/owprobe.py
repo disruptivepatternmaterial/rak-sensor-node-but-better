@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Turn a Saleae analog export of the RAK9154 data line into a verdict.
 
-Nine GPIO pads have been destroyed (#102), always the pad carrying the pack's data line, and
-every one of them was running diagnostic firmware that the operator never authorized -- written
-by agents and flashed by agents over SSH, across multiple sessions. Zero pads have been destroyed
-by the production image. This script exists so the question can be answered with a probe clip
-instead of a pad: does the pack put more on that wire than an nRF52840 pad can survive?
+Nine GPIO pads used for the pack data line are dead (#102), every one after agent-written
+diagnostic firmware and none under the production image. No death was instrumented. This script
+keeps the next measurement on analyzer inputs instead of another pad: does the wire leave an
+nRF52840 pad's rail-relative absolute limits?
 
 The thresholds are not opinions. They come from the parts:
 
@@ -15,28 +14,39 @@ The thresholds are not opinions. They come from the parts:
                               -10 V .. +10 V analog range, 2 MOhm || 10 pF
 
 The analyzer has roughly 7x the pad's tolerance and loads the line with 2 MOhm against the
-pack's measured 15 kOhm pull-down, so it reads the answer without spending a core. Its range
-saturates at +/-10 V: a reading pinned there means "at least 10 V", which already convicts.
+pack's measured 15 kOhm pull-down. Its inputs, not a GPIO, take the exposure; differential mode
+may fit a Core only to complete `VDD` while the data wire remains isolated from it. The analyzer
+range saturates at +/-10 V: a reading pinned there means "at least 10 V", which already convicts.
 
-Why a capture and not a meter: every dead pad measures a few ohms to GROUND, which is the
-LOWER clamp's failure direction, and no mechanism proposed so far predicts that
-[CIT-NRF-GNDLIFT]. A meter averages a negative transient away. This looks for it explicitly.
+Why a capture and not a meter: a valid three-channel connector capture crossed both local rails
+for millisecond intervals; no pad death was instrumented. The earlier single-ended -8.1 V
+interpretation had an invalid analyzer ground reference and is withdrawn.
+CITE(bench): docs/EVIDENCE.md 2026-09-06 09:24 PDT and ground-reference correction.
 
 Usage:
     scripts/owprobe.py /tmp/rak-owprobe/live/analog.csv
     scripts/owprobe.py /tmp/rak-owprobe/live/analog.csv --label "pack live, harness off node"
+    scripts/owprobe.py /tmp/capture/binary/analog_0.bin \
+        --vdd-bin /tmp/capture/binary/analog_1.bin --vdd-volts 3.3 --require-seconds 610
+    scripts/owprobe.py /tmp/capture/binary/analog_0.bin \
+        --vdd-bin /tmp/capture/binary/analog_1.bin \
+        --gnd-bin /tmp/capture/binary/analog_2.bin --require-seconds 60
 
 Exit status:
     0  line is within what a powered pad tolerates
-    2  line is out of spec -- do not connect a core
+    2  line is out of spec -- keep it isolated from every GPIO
     1  the capture could not be read, or is not evidence of anything
 """
 
 from __future__ import annotations
 
 import argparse
+from array import array
 import csv
+from dataclasses import dataclass
+import math
 import statistics
+import struct
 import sys
 
 # CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification, GPIO -- absolute maximum on
@@ -49,9 +59,19 @@ PAD_ABS_MAX_V = 3.6
 #   and you will backpower the device via the GPIO."
 PAD_ABS_MAX_UNPOWERED_V = 0.3
 
-# The nominal rail the pack's logic is assumed to reference. Assumed, never measured -- which
-# is the entire reason this script exists.
+# The nominal rail used only in the legacy single-ended report. Differential mode requires the
+# measured rail voltage on its command line and does not silently assume this value.
 NOMINAL_LOGIC_V = 3.3
+
+# CITE(datasheet): [CIT-NRF-GPIO] A powered GPIO must stay between GND - 0.3 V and
+# VDD + 0.3 V. Expressed as VDD - data, the upper-rail bound is -0.3 V and the lower-rail
+# bound is the measured VDD-to-GND voltage plus 0.3 V.
+PAD_RAIL_MARGIN_V = 0.3
+
+# CITE(datasheet): [CIT-NRF-GPIO-TOTAL] VIL(max) is 0.3 * VDD. A measured drop from VDD of
+# at least (1 - 0.3) * VDD therefore establishes that the capture contains a guaranteed LOW
+# instead of only an idle HIGH.
+VIL_MAX_VDD_RATIO = 0.3
 
 # CITE(datasheet): [CIT-SALEAE-LOGICPRO8] Logic Pro 8 data sheet -- analog input range is
 #   -10 V to +10 V and saturates outside it, so a sample at the rail is a floor, not a value.
@@ -72,8 +92,8 @@ FLOATING_PROBE_MAX_ABS_V = 0.30
 # ground does not. 20 mV sits ~4x above the connected case and ~4x below the floating one.
 FLOATING_NOISE_STDEV_V = 0.020
 
-# A negative excursion this far below the pack's own ground is the signature worth catching:
-# it forward-biases the pad's LOWER clamp, which is the direction all seven dead pads failed in.
+# A negative excursion this far below node ground forward-biases the pad's LOWER clamp, matching
+# the direction in which all nine dead pads failed. No historical pad death was instrumented.
 NEGATIVE_ALARM_V = -0.30
 
 
@@ -106,6 +126,343 @@ def read_analog_csv(path: str) -> tuple[list[float], list[float], str]:
     return times, volts, channel
 
 
+@dataclass(frozen=True)
+class AnalogBinary:
+    begin_time: float
+    sample_rate: int
+    downsample: int
+    samples: array
+
+
+def read_analog_binary(path: str) -> AnalogBinary:
+    """Read one Saleae Logic Pro 8 analog binary export.
+
+    CITE(datasheet): [CIT-SALEAE-BINARY-V0] Saleae's version-0 analog layout: little-endian
+    identifier/version/type, begin time, sample rate, downsample, count, then float32 volts.
+    """
+    try:
+        with open(path, "rb") as fh:
+            identifier = fh.read(8)
+            version, datatype = struct.unpack("<ii", fh.read(8))
+            begin_time, sample_rate, downsample, count = struct.unpack("<dQQQ", fh.read(32))
+            samples = array("f")
+            samples.fromfile(fh, count)
+    except (EOFError, OSError, struct.error) as exc:
+        raise SystemExit(f"ERROR cannot read Saleae analog binary {path}: {exc}") from exc
+
+    if identifier != b"<SALEAE>":
+        raise SystemExit(f"ERROR {path} does not have the Saleae binary identifier.")
+    if version != 0 or datatype != 1:
+        raise SystemExit(
+            f"ERROR {path} is Saleae version {version}, type {datatype}; expected analog "
+            "binary version 0."
+        )
+    if not sample_rate or not downsample or len(samples) != count:
+        raise SystemExit(f"ERROR {path} has invalid or incomplete sample geometry.")
+    return AnalogBinary(begin_time, sample_rate, downsample, samples)
+
+
+def analyze_differential(
+    data_path: str,
+    vdd_path: str,
+    vdd_to_ground: float,
+    require_seconds: float,
+    label: str,
+) -> int:
+    """Time-align simultaneous VDD and data exports and check the pad's rail-relative limits."""
+    data = read_analog_binary(data_path)
+    vdd = read_analog_binary(vdd_path)
+    geometry_data = (data.sample_rate, data.downsample, len(data.samples))
+    geometry_vdd = (vdd.sample_rate, vdd.downsample, len(vdd.samples))
+    if geometry_data != geometry_vdd:
+        raise SystemExit(
+            f"ERROR channel sample geometry differs: data={geometry_data}, VDD={geometry_vdd}."
+        )
+    if not math.isfinite(vdd_to_ground) or vdd_to_ground <= 0:
+        raise SystemExit("ERROR --vdd-volts must be a measured positive VDD-to-GND voltage.")
+    if not math.isfinite(require_seconds) or require_seconds < 0:
+        raise SystemExit("ERROR --require-seconds must be finite and non-negative.")
+
+    sample_period = data.downsample / data.sample_rate
+    offset_samples = (data.begin_time - vdd.begin_time) / sample_period
+    if abs(offset_samples) >= 1:
+        raise SystemExit(
+            f"ERROR channel timestamps differ by {offset_samples:.6f} samples; these do not "
+            "look like simultaneous exports from one capture."
+        )
+
+    base = math.floor(offset_samples)
+    fraction = offset_samples - base
+    if math.isclose(fraction, 0.0, abs_tol=1e-9):
+        fraction = 0.0
+    first = max(0, -base)
+    last = min(
+        len(data.samples),
+        len(vdd.samples) - base - (1 if fraction else 0),
+    )
+    pair_count = last - first
+    if pair_count < 2:
+        raise SystemExit("ERROR the two channels have no usable time-aligned overlap.")
+
+    minimum = math.inf
+    maximum = -math.inf
+    minimum_index = maximum_index = -1
+    upper_violations = lower_violations = 0
+    saturation_samples = 0
+    total = total_sq = 0.0
+    ordered_sample: list[float] = []
+    sample_stride = max(1, pair_count // 200_000)
+    lower_bound = -PAD_RAIL_MARGIN_V
+    upper_bound = vdd_to_ground + PAD_RAIL_MARGIN_V
+    minimum_low_drop = (1.0 - VIL_MAX_VDD_RATIO) * vdd_to_ground
+
+    for chunk_start in range(first, last, 500_000):
+        chunk_end = min(chunk_start + 500_000, last)
+        differences: list[float] = []
+        for index in range(chunk_start, chunk_end):
+            vdd_index = index + base
+            vdd_value = vdd.samples[vdd_index]
+            if fraction:
+                vdd_value = (
+                    (1.0 - fraction) * vdd_value
+                    + fraction * vdd.samples[vdd_index + 1]
+                )
+            data_value = data.samples[index]
+            if not math.isfinite(vdd_value) or not math.isfinite(data_value):
+                raise SystemExit("ERROR a channel contains a non-finite voltage sample.")
+            difference = vdd_value - data_value
+            differences.append(difference)
+            if abs(vdd_value) >= SALEAE_ANALOG_RANGE_V - SALEAE_SATURATION_MARGIN_V:
+                saturation_samples += 1
+            if abs(data_value) >= SALEAE_ANALOG_RANGE_V - SALEAE_SATURATION_MARGIN_V:
+                saturation_samples += 1
+
+        chunk_min = min(differences)
+        chunk_max = max(differences)
+        if chunk_min < minimum:
+            minimum = chunk_min
+            minimum_index = chunk_start + differences.index(chunk_min)
+        if chunk_max > maximum:
+            maximum = chunk_max
+            maximum_index = chunk_start + differences.index(chunk_max)
+        upper_violations += sum(value < lower_bound for value in differences)
+        lower_violations += sum(value > upper_bound for value in differences)
+        total += math.fsum(differences)
+        total_sq += math.fsum(value * value for value in differences)
+        ordered_sample.extend(
+            differences[index]
+            for index in range(0, len(differences), sample_stride)
+        )
+
+    span_s = (pair_count - 1) * sample_period
+    mean = total / pair_count
+    stdev = math.sqrt(max(0.0, total_sq / pair_count - mean * mean))
+    ordered_sample.sort()
+    p01 = percentile(ordered_sample, 0.01)
+    p50 = percentile(ordered_sample, 0.50)
+    p99 = percentile(ordered_sample, 0.99)
+
+    print("=== powered-pad differential probe ===")
+    if label:
+        print(f"   probed           : {label}")
+    print(f"   data file        : {data_path}")
+    print(f"   VDD file         : {vdd_path}")
+    print(f"   measured VDD     : {vdd_to_ground:.6f} V")
+    print(f"   sample rate      : {data.sample_rate / data.downsample:.3f} S/s")
+    print(f"   aligned pairs    : {pair_count} over {span_s:.6f} s")
+    print(f"   timestamp offset : {(data.begin_time - vdd.begin_time) * 1e6:+.3f} us "
+          f"({offset_samples:+.6f} sample)")
+    print(f"   min VDD-data     : {minimum:+.6f} V at "
+          f"{data.begin_time + minimum_index * sample_period:.6f} s")
+    print(f"   p01 / median     : {p01:+.6f} V / {p50:+.6f} V")
+    print(f"   p99              : {p99:+.6f} V")
+    print(f"   max VDD-data     : {maximum:+.6f} V at "
+          f"{data.begin_time + maximum_index * sample_period:.6f} s")
+    print(f"   mean / stdev     : {mean:+.6f} V / {stdev:.6f} V")
+    print(f"   data > VDD+0.3   : {upper_violations}")
+    print(f"   data < GND-0.3   : {lower_violations}")
+    print(f"   inferred data    : {vdd_to_ground - maximum:+.6f} V .. "
+          f"{vdd_to_ground - minimum:+.6f} V against GND")
+    print()
+
+    if span_s < require_seconds:
+        print("=== NOT EVIDENCE -- CAPTURE TOO SHORT ===")
+        print(f"   Required {require_seconds:.3f} s; captured {span_s:.3f} s.")
+        return 1
+    if saturation_samples:
+        print("=== OUT OF RANGE ===")
+        print(f"   {saturation_samples} channel sample(s) reached the analyzer range margin.")
+        return 2
+    if maximum < minimum_low_drop:
+        print("=== NOT EVIDENCE -- NO GUARANTEED LOW CAPTURED ===")
+        print(f"   Maximum VDD-data was {maximum:.3f} V; at least "
+              f"{minimum_low_drop:.2f} V is needed to establish a LOW.")
+        return 1
+    if upper_violations or lower_violations:
+        print("=== OUTSIDE A POWERED PAD'S ABSOLUTE LIMITS ===")
+        print(f"   Allowed VDD-data range: {lower_bound:+.3f} V .. {upper_bound:+.3f} V.")
+        return 2
+
+    print("=== WITHIN A POWERED PAD'S RAIL-RELATIVE LIMITS ===")
+    print(f"   All {pair_count} aligned pairs stayed inside "
+          f"{lower_bound:+.3f} V .. {upper_bound:+.3f} V.")
+    return 0
+
+
+def analyze_three_channel(
+    data_path: str,
+    vdd_path: str,
+    gnd_path: str,
+    require_seconds: float,
+    label: str,
+) -> int:
+    """Check data against simultaneous, independently captured VDD and local ground."""
+    data = read_analog_binary(data_path)
+    vdd = read_analog_binary(vdd_path)
+    gnd = read_analog_binary(gnd_path)
+    geometry = (data.sample_rate, data.downsample, len(data.samples))
+    for name, channel in (("VDD", vdd), ("GND", gnd)):
+        other = (channel.sample_rate, channel.downsample, len(channel.samples))
+        if other != geometry:
+            raise SystemExit(
+                f"ERROR channel sample geometry differs: data={geometry}, {name}={other}."
+            )
+    if not math.isfinite(require_seconds) or require_seconds < 0:
+        raise SystemExit("ERROR --require-seconds must be finite and non-negative.")
+
+    sample_period = data.downsample / data.sample_rate
+
+    def alignment(channel: AnalogBinary, name: str) -> tuple[int, float]:
+        offset = (data.begin_time - channel.begin_time) / sample_period
+        if abs(offset) >= 1:
+            raise SystemExit(
+                f"ERROR {name} timestamp differs from data by {offset:.6f} samples; "
+                "these do not look like simultaneous exports from one capture."
+            )
+        base = math.floor(offset)
+        fraction = offset - base
+        if math.isclose(fraction, 0.0, abs_tol=1e-9):
+            fraction = 0.0
+        return base, fraction
+
+    vdd_base, vdd_fraction = alignment(vdd, "VDD")
+    gnd_base, gnd_fraction = alignment(gnd, "GND")
+    first = max(0, -vdd_base, -gnd_base)
+    last = min(
+        len(data.samples),
+        len(vdd.samples) - vdd_base - (1 if vdd_fraction else 0),
+        len(gnd.samples) - gnd_base - (1 if gnd_fraction else 0),
+    )
+    pair_count = last - first
+    if pair_count < 2:
+        raise SystemExit("ERROR the three channels have no usable time-aligned overlap.")
+
+    def aligned(channel: AnalogBinary, index: int, base: int, fraction: float) -> float:
+        other_index = index + base
+        value = channel.samples[other_index]
+        if fraction:
+            value = (
+                (1.0 - fraction) * value
+                + fraction * channel.samples[other_index + 1]
+            )
+        return value
+
+    data_gnd_min = vdd_gnd_min = data_vdd_min = math.inf
+    data_gnd_max = vdd_gnd_max = data_vdd_max = -math.inf
+    data_gnd_min_index = data_gnd_max_index = -1
+    data_vdd_min_index = data_vdd_max_index = -1
+    lower_violations = upper_violations = rail_inversions = 0
+    lower_run = upper_run = longest_lower_run = longest_upper_run = 0
+    saturation_samples = 0
+
+    for index in range(first, last):
+        data_value = data.samples[index]
+        vdd_value = aligned(vdd, index, vdd_base, vdd_fraction)
+        gnd_value = aligned(gnd, index, gnd_base, gnd_fraction)
+        if not all(math.isfinite(value) for value in (data_value, vdd_value, gnd_value)):
+            raise SystemExit("ERROR a channel contains a non-finite voltage sample.")
+        saturation_samples += sum(
+            abs(value) >= SALEAE_ANALOG_RANGE_V - SALEAE_SATURATION_MARGIN_V
+            for value in (data_value, vdd_value, gnd_value)
+        )
+
+        data_gnd = data_value - gnd_value
+        vdd_gnd = vdd_value - gnd_value
+        data_vdd = data_gnd - vdd_gnd
+
+        if data_gnd < data_gnd_min:
+            data_gnd_min, data_gnd_min_index = data_gnd, index
+        if data_gnd > data_gnd_max:
+            data_gnd_max, data_gnd_max_index = data_gnd, index
+        vdd_gnd_min = min(vdd_gnd_min, vdd_gnd)
+        vdd_gnd_max = max(vdd_gnd_max, vdd_gnd)
+        if data_vdd < data_vdd_min:
+            data_vdd_min, data_vdd_min_index = data_vdd, index
+        if data_vdd > data_vdd_max:
+            data_vdd_max, data_vdd_max_index = data_vdd, index
+
+        if data_gnd < -PAD_RAIL_MARGIN_V:
+            lower_violations += 1
+            lower_run += 1
+            longest_lower_run = max(longest_lower_run, lower_run)
+        else:
+            lower_run = 0
+        if data_vdd > PAD_RAIL_MARGIN_V:
+            upper_violations += 1
+            upper_run += 1
+            longest_upper_run = max(longest_upper_run, upper_run)
+        else:
+            upper_run = 0
+        if vdd_gnd < -PAD_RAIL_MARGIN_V:
+            rail_inversions += 1
+
+    span_s = (pair_count - 1) * sample_period
+
+    def relative_time(index: int) -> float:
+        return (index - first) * sample_period
+
+    print("=== three-channel rail-relative probe ===")
+    if label:
+        print(f"   probed           : {label}")
+    print(f"   data file        : {data_path}")
+    print(f"   VDD file         : {vdd_path}")
+    print(f"   GND file         : {gnd_path}")
+    print(f"   sample rate      : {data.sample_rate / data.downsample:.3f} S/s")
+    print(f"   aligned triples  : {pair_count} over {span_s:.6f} s")
+    print(f"   min data-GND     : {data_gnd_min:+.6f} V at "
+          f"{relative_time(data_gnd_min_index):.6f} s")
+    print(f"   max data-GND     : {data_gnd_max:+.6f} V at "
+          f"{relative_time(data_gnd_max_index):.6f} s")
+    print(f"   VDD-GND range    : {vdd_gnd_min:+.6f} V .. {vdd_gnd_max:+.6f} V")
+    print(f"   min data-VDD     : {data_vdd_min:+.6f} V at "
+          f"{relative_time(data_vdd_min_index):.6f} s")
+    print(f"   max data-VDD     : {data_vdd_max:+.6f} V at "
+          f"{relative_time(data_vdd_max_index):.6f} s")
+    print(f"   data < GND-0.3   : {lower_violations}; longest "
+          f"{longest_lower_run * sample_period:.9f} s")
+    print(f"   data > VDD+0.3   : {upper_violations}; longest "
+          f"{longest_upper_run * sample_period:.9f} s")
+    print(f"   VDD < GND-0.3    : {rail_inversions}")
+    print()
+
+    if span_s < require_seconds:
+        print("=== NOT EVIDENCE -- CAPTURE TOO SHORT ===")
+        print(f"   Required {require_seconds:.3f} s; captured {span_s:.3f} s.")
+        return 1
+    if saturation_samples:
+        print("=== OUT OF RANGE ===")
+        print(f"   {saturation_samples} raw channel sample(s) reached the analyzer range margin.")
+        return 2
+    if lower_violations or upper_violations:
+        print("=== OUTSIDE THE GPIO'S INSTANTANEOUS RAIL LIMITS ===")
+        print("   Required: data >= GND-0.300 V and data <= VDD+0.300 V.")
+        return 2
+
+    print("=== WITHIN THE GPIO'S INSTANTANEOUS RAIL LIMITS ===")
+    print(f"   All {pair_count} aligned triples passed both bounds.")
+    return 0
+
+
 def percentile(sorted_v: list[float], q: float) -> float:
     if not sorted_v:
         raise ValueError("empty")
@@ -115,11 +472,59 @@ def percentile(sorted_v: list[float], q: float) -> float:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("csv", help="Saleae raw analog CSV export (e.g. .../analog.csv)")
+    ap.add_argument("capture", help="data-channel Saleae CSV or version-0 analog binary export")
+    ap.add_argument(
+        "--vdd-bin",
+        help="simultaneous VDD-channel binary export; enables rail-relative differential mode",
+    )
+    ap.add_argument(
+        "--vdd-volts",
+        type=float,
+        help="measured VDD-to-GND voltage; required for two-channel --vdd-bin mode",
+    )
+    ap.add_argument(
+        "--gnd-bin",
+        help="simultaneous local-ground binary export; enables three-channel rail checking",
+    )
+    ap.add_argument(
+        "--require-seconds",
+        type=float,
+        default=0.0,
+        help="minimum time-aligned duration required for a differential verdict",
+    )
     ap.add_argument("--label", default="", help="what was probed, for the printed record")
     args = ap.parse_args()
 
-    times, volts, channel = read_analog_csv(args.csv)
+    if args.gnd_bin:
+        if not args.vdd_bin:
+            print("ERROR --gnd-bin requires --vdd-bin.", file=sys.stderr)
+            return 1
+        if args.vdd_volts is not None:
+            print("ERROR --vdd-volts is not used when --gnd-bin is present.", file=sys.stderr)
+            return 1
+        return analyze_three_channel(
+            args.capture,
+            args.vdd_bin,
+            args.gnd_bin,
+            args.require_seconds,
+            args.label,
+        )
+    if args.vdd_bin:
+        if args.vdd_volts is None:
+            print("ERROR --vdd-volts is required with --vdd-bin.", file=sys.stderr)
+            return 1
+        return analyze_differential(
+            args.capture,
+            args.vdd_bin,
+            args.vdd_volts,
+            args.require_seconds,
+            args.label,
+        )
+    if args.vdd_volts is not None or args.require_seconds:
+        print("ERROR --vdd-volts and --require-seconds require --vdd-bin.", file=sys.stderr)
+        return 1
+
+    times, volts, channel = read_analog_csv(args.capture)
 
     lo, hi = min(volts), max(volts)
     mean = statistics.mean(volts)
@@ -132,13 +537,14 @@ def main() -> int:
     p01 = percentile(ordered, 0.01)
     span_s = (times[-1] - times[0]) if len(times) > 1 else 0.0
     neg_samples = sum(1 for v in volts if v < NEGATIVE_ALARM_V)
+    high_samples = sum(1 for v in volts if v > PAD_ABS_MAX_V)
     sat_hi = sum(1 for v in volts if v >= SALEAE_ANALOG_RANGE_V - SALEAE_SATURATION_MARGIN_V)
     sat_lo = sum(1 for v in volts if v <= -SALEAE_ANALOG_RANGE_V + SALEAE_SATURATION_MARGIN_V)
 
     print("=== one-wire data line probe ===")
     if args.label:
         print(f"   probed  : {args.label}")
-    print(f"   file    : {args.csv}")
+    print(f"   file    : {args.capture}")
     print(f"   channel : {channel}")
     print(f"   samples : {len(volts)} over {span_s:.3f} s")
     print(f"   min     : {lo:+.3f} V")
@@ -156,7 +562,7 @@ def main() -> int:
         print("   this far out and possibly much further. Treat as convicted, not measured.")
         print()
 
-    verdict = 0
+    verdict = 2 if sat_hi or sat_lo else 0
 
     stdev = statistics.pstdev(volts) if len(volts) > 1 else 0.0
     print(f"   stdev   : {stdev * 1000:.3f} mV")
@@ -181,52 +587,39 @@ def main() -> int:
         print("   pack's driver has no rail and the line rests at 0 V through the pack's measured")
         print("   15 kOhm pull-down. That happens whether the harness is lethal or benign.")
         print()
-        print("   So a 0 V reading here CLEARS NOTHING. To see what the pack actually drives, its")
-        print("   pin 4 has to be energised from 3.3 V while the data wire goes only to the")
-        print("   analyzer. The base board's 3V3 regulator is on the BASE BOARD, not the Core")
-        print("   [CIT-RAK19007], so a powered base board with NO CORE FITTED presents 3.3 V on")
-        print("   VDD and exposes no nRF52840 pad at all. See docs/HARDWARE.md")
-        print("   § 'Qualifying the pack harness'.")
+        print("   So a 0 V reading here CLEARS NOTHING. To see what the pack actually drives,")
+        print("   energise pin 4 from the current-limited external 3.3 V source specified in")
+        print("   docs/BUILD.md, with no Core or base board in that measurement loop. A coreless")
+        print("   RAK19007 VDD pad is open-circuit [CIT-RAK4631-SCH].")
         return 1
 
     if neg_samples:
         pct = 100.0 * neg_samples / len(volts)
         print(f"!! NEGATIVE EXCURSION: {neg_samples} sample(s) ({pct:.3f} %) below "
               f"{NEGATIVE_ALARM_V} V, floor {lo:+.3f} V.")
-        print("   This is the direction that matches the failure signature. All seven dead pads")
-        print("   measure a few ohms to GROUND, which is the lower ESD clamp's failure mode, and")
-        print("   no mechanism proposed so far predicts it [CIT-NRF-GNDLIFT]. A driven-negative")
-        print("   line does. Capture this before connecting anything.")
+        print("   This exceeds the lower pad rail only if the single-ended ground reference was")
+        print("   independently verified. Use --gnd-bin for a rail-relative connector verdict.")
+        print("   Keep the wire isolated from every GPIO.")
         print()
         verdict = 2
 
-    if p99 > SALEAE_ANALOG_RANGE_V - SALEAE_SATURATION_MARGIN_V:
-        print("=== THIS IS THE PIN KILLER ===")
-        print(f"   Idle level is at or beyond the analyzer's +{SALEAE_ANALOG_RANGE_V} V range against a")
-        print(f"   {PAD_ABS_MAX_V} V pad maximum. DO NOT CONNECT ANOTHER CORE TO THIS HARNESS.")
-        verdict = 2
-    elif p99 > 5.0:
-        print("=== THIS IS THE PIN KILLER ===")
-        print(f"   Idle level {p99:+.3f} V against a {PAD_ABS_MAX_V} V pad absolute maximum")
-        print(f"   ({p99 / PAD_ABS_MAX_V:.1f}x over). DO NOT CONNECT ANOTHER CORE TO THIS HARNESS.")
-        print("   A series resistor does not make this safe -- it needs a level translator, and")
-        print("   a 1 kOhm resistor was already inline when SDA/P0.13 died (#101).")
-        verdict = 2
-    elif p99 > PAD_ABS_MAX_V:
-        print("=== OUT OF SPEC ===")
-        print(f"   Idle level {p99:+.3f} V exceeds the pad absolute maximum of {PAD_ABS_MAX_V} V.")
-        print("   Every connection made so far has been overstressing the pad. Needs a level")
-        print("   translator or an isolation switch, not a resistor (#101).")
+    if high_samples:
+        print("=== OUTSIDE A POWERED PAD'S ABSOLUTE LIMITS ===")
+        pct = 100.0 * high_samples / len(volts)
+        print(f"   {high_samples} sample(s) ({pct:.6f} %) exceeded +{PAD_ABS_MAX_V} V; "
+              f"peak {hi:+.3f} V.")
+        print("   Keep the wire isolated from every GPIO.")
         verdict = 2
     elif verdict == 0:
         print("=== WITHIN A POWERED PAD'S RATING ===")
         print(f"   Idle level {p99:+.3f} V, at or below the {PAD_ABS_MAX_V} V pad maximum")
         print(f"   (nominal logic rail is {NOMINAL_LOGIC_V} V).")
         print()
-        print("   This CLEARS the harness as a gross-overvoltage source. It does NOT close #102:")
+        print("   This clears only this powered, fixed-reference sample. It does NOT clear hot-plug")
+        print("   or an unpowered pad:")
         print(f"   an unpowered pad's maximum is {PAD_ABS_MAX_UNPOWERED_V} V, so this level is still roughly")
-        print(f"   {p99 / PAD_ABS_MAX_UNPOWERED_V:.0f}x over whenever the core is dark with the harness mated, which is")
-        print("   what the connector-sequencing rule in docs/HARDWARE.md exists for.")
+        print(f"   {p99 / PAD_ABS_MAX_UNPOWERED_V:.0f}x over whenever the core is dark. Use simultaneous")
+        print("   data, VDD, and local-ground channels before approving a GPIO connection.")
 
     print()
     print("Record the numbers above in docs/EVIDENCE.md with the date, the host, and this file")
