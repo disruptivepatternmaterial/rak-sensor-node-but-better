@@ -172,12 +172,12 @@ operator picks gets a `CITATIONS.md` row before it goes on the BOM. It is labell
 
 ```mermaid
 flowchart LR
-    P1["pack pin 1  P+"] --> S1["S1"]
+    P1["pack pin 1  P+"] --> S1["power switch<br/>OFF to plug / unplug"]
     S1 --> BUCK["buck VIN+"]
-    S1 -->|load| K1["K1"]
-    K1 -->|load| RK12["RK900 12 V"]
+    S1 --> K1["Pololu relay"]
+    K1 --> RK12["RK900 12 V"]
 
-    P2["pack pin 2  P−"] --> GND["base-board GND pad<br/>buck VIN−<br/>RK900 GND<br/>K1 GND"]
+    P2["pack pin 2  P−"] --> GND["base-board GND pad<br/>buck VIN−<br/>RK900 GND<br/>Pololu relay GND"]
 
     P35["pack pins 3 + 5  joined"] --> SDA["RAK5802 SDA clip"]
 
