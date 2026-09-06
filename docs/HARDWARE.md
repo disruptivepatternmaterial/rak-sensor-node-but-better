@@ -144,8 +144,7 @@ through pin 1, node ground cannot be pulled toward `P+`, and the data wire has n
 | Pins 3 + 5 joined | RAK5802 `SDA` clip (nRF P0.13) | the one-wire line. The base board already pulls it up with 4.7 kΩ to `VDD` (`R10`, [CIT-RAK19007-SCH-SLOTS]); no external pull-up needed on this landing |
 | Pin 4 `3V3_In` | base-board `VDD` pad | the always-on `3V3` looped through the core (ADR-0010). Never the RAK5802 `3V3` clip (`3V3_S`, switched by `IO2`), never 5 V |
 
-`SDA` and `SCL` are spring clips on the RAK5802. `VDD` (two wires: pack pin 4 and `K1 VIN`) and
-`GND` are solder joints on the base board's 2.54 mm edge header (`SDA SCL TX1 RX1 GND VDD BOOT0`).
+The `VDD` pad carries two wires: pack pin 4 and `K1 VIN`.
 
 **`K1` before its firmware exists — a hypothesis to meter, not a claim.** #117 says "until
 firmware drives `SCL`, the switch stays open and the head is dark." The schematic says the base
@@ -168,7 +167,7 @@ operator picks gets a `CITATIONS.md` row before it goes on the BOM. It is labell
 **Procedure and the node's state while `S1` is open** are in ADR-0011 § "Decision": `S1` OFF → mate
 → `S1` ON; `S1` OFF → unplug. No wait is needed; node-side capacitors discharge into node-side loads.
 
-**The whole-node picture.** Buck output → the board's USB-C. `S1` OFF whenever the plug moves. The build-sequence version is
+**The whole-node picture.** Buck output → the board's USB-C. The build-sequence version is
 [`BUILD.md`](BUILD.md) § "The build, in one picture".
 
 ```mermaid
