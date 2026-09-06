@@ -84,15 +84,12 @@ needed. Any power-budget arithmetic written against the 50 s figure is stale —
 
 ## Then
 
-<<<<<<< Updated upstream
-=======
 - **The pack data wire lands on the XR33052 transceiver, never a GPIO**
   (ADR-0012). Ordinary
   unplug/replug crosses both nRF rails (`EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT); the plug
   is hot-plugged in the field, so the Core-removal rule is rejected
   (ADR-0011). `BUILD.md` gates
   G1–G4 pass with no Core before `RO`/`DE` reach one.
->>>>>>> Stashed changes
 - 24 h bench soak: both sensors live, TTN uplinks arriving, no watchdog resets.
 - 7 d field shadow: node in its enclosure, outdoors, before anything is trusted.
 
