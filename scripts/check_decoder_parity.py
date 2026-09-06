@@ -506,7 +506,9 @@ def check_encoder(schema) -> list:
 
     failures = []
 
-    # name -> (channel, type, size, signed), deduplicated across add() and build().
+    # name -> (channel, type, size, signed). build() is the only encoder, so this is a plain
+    # collection now; the dedup used to span a second, unreachable add() and would have shown
+    # two disagreeing encoders to this gate as the union of both.
     encoded = {}
     for m in _CALL_RE.finditer(src):
         emitter, ch_name, ty_name, value_arg = m.groups()

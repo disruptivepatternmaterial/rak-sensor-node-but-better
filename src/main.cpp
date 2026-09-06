@@ -398,6 +398,15 @@ void loop()
                                          ? cycles_until_join_attempt(empty_cycles)
                                          : 1);
 
+    if (keepalive) {
+        // Granted before ensure_joined(), because the deferral it clears sits inside that call.
+        // A node holding on a persisted brownout bit whose stored session will not restore
+        // refuses to join, and refusing to join withholds the keepalive that is the hold's only
+        // bound — so the bound was unreachable in exactly the state it exists for. Consumed by
+        // prepare_fresh_join() whether or not a deferral was in the way. See session.h.
+        session::permit_join_escape();
+    }
+
     if (!brownout.transmit_allowed() && !keepalive) {
         // Deliberately still reading the sensors and still waking on schedule. The pack
         // recovers on sunlight, not on being left alone, and the node has to notice the
@@ -456,6 +465,16 @@ void loop()
             DownlinkCommand cmd;
             if (radio.take_downlink(cmd)) {
                 if (cmd.set_interval) {
+                    // Any accepted command supersedes a pending one, and the retry state has to
+                    // go with it. Left standing, a pending_interval whose three attempts were
+                    // already spent keeps governing sleep_for at the top of every later cycle —
+                    // so a *successful* later command reported itself saved, took effect for one
+                    // sleep, and was then silently overridden by the value it replaced, for the
+                    // rest of the deployment. Class A leaves no way to notice or correct that
+                    // from the network side.
+                    pending_interval             = 0;
+                    pending_interval_writes_left = 0;
+
                     if (brownout.flash_write_allowed() &&
                         config.set_interval_seconds(cmd.interval_value)) {
                         // Live and on flash, and it governs the sleep that starts in a few

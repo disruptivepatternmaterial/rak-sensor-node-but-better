@@ -55,18 +55,17 @@ class Payload {
         m_budget  = kMaxPayloadBytes;
     }
 
+    // Fills up to `budget` bytes in priority order. Anything that does not fit is left out
+    // and counted in dropped(). A budget of zero means the full buffer.
+    //
+    // The only encoder. A pair of `add()` overloads used to append the same fields in field
+    // order; nothing called them, and keeping a second copy of every channel/type pairing that
+    // never ran was a standing invitation for the two to disagree — invisibly, because the
+    // parity gate deduplicates the calls it finds in payload.cpp. Removed; see payload.cpp.
+    //
     // Appends every valid field and skips every invalid one. A field that was not read
     // contributes nothing at all — the decoder treats an absent channel as no data, which
     // is the only honest way to say "the sensor did not answer".
-    //
-    // These append in field order and are what the tests exercise. For a real uplink,
-    // prefer build(), which orders by importance so that a tight budget drops the fields
-    // that matter least.
-    void add(const WeatherReading &w);
-    void add(const BatteryReading &b);
-
-    // Fills up to `budget` bytes in priority order. Anything that does not fit is left out
-    // and counted in dropped(). A budget of zero means the full buffer.
     //
     // The order puts state of charge first, then wind speed, then air temperature. The
     // reasoning: for a node nobody can visit, whether it is about to die outranks any

@@ -73,6 +73,41 @@ enum class JoinPreparation {
 // failure cannot suppress the keepalive forever. Call before lmh_join().
 JoinPreparation prepare_fresh_join();
 
+// Authorizes exactly one fresh join past a brownout-held stale session, for the next
+// prepare_fresh_join() call. Consumed by that call whether or not it was needed, exactly like
+// permit_counter_checkpoint().
+//
+// Without this, Blocked was the one hold in this firmware with no exit at all, and the shape was
+// the familiar one (#61, #74, #68): the exit was the action the hold suppressed. A persisted
+// brownout hold survives a reset and closes the gate before radio.begin() runs; if restore()
+// then rejects the stored file for any of its seven reasons, reject_stored_session() retains the
+// file and sets s_fresh_join_blocked, because removing it is a flash write the gate forbids.
+// From then on every cycle returns Blocked, so no uplink leaves — and the keepalive that is
+// supposed to bound the brownout hold is exactly what cannot get out. If the one-wire link is
+// what failed, no valid pack reading is coming, so nothing ever lifts the gate. Mute, and being
+// Class A, uncommandable, on a pack that may be perfectly healthy.
+//
+// The escape spends one bounded lfs_remove — the same size of write, on the same reasoning, as
+// the counter checkpoint above. A removal that lands makes the fresh join wholly safe. A removal
+// that fails still joins, because being unreachable is the worse of the two outcomes, and the
+// residual risk is bounded and one-sided: a later reset may resume a session TTN has since
+// invalidated, which costs data until the next reset, where being mute costs the deployment.
+//
+// s_fresh_join_blocked is deliberately NOT cleared when the removal fails. Ordinary cycles stay
+// blocked, so the replay protection still holds for everything except the one uplink §7.1 counts
+// on; the bound is therefore the keepalive cadence itself, one attempt per
+// kNoEvidenceKeepaliveCycles.
+//
+// CITE(spec): docs/FIRMWARE_SPEC.md §7.1 — every hold names a bound that does not depend on the
+//   action the hold suppresses. This row was missing, which is why the dependency went unasked.
+// CITE(spec): [CIT-LW-LINK] §3 Class A — a downlink may only follow an uplink, so a hold that
+//   stops transmission also removes the only route by which it could be countermanded.
+// CITE(prior-art): [CIT-LITTLEFS-DESIGN] remove is atomic even across power loss, so the escape
+//   either removes the stale file or leaves it intact — never half-removed.
+// CITE(policy): docs/POWER_BUDGET.md — never let the node reach a state it cannot recover from
+//   by itself.
+void permit_join_escape();
+
 // Reads the live session out of the MAC and stores it. Call right after a successful join.
 bool save();
 

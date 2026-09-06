@@ -8,6 +8,56 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-09-06
+
+`0.4.6` closes a hold that could leave the node permanently mute, plus five defects found in
+the same multi-model review. **🚧 NOT YET DEPLOYED:** nothing here has been compiled on the
+build host or observed on hardware; H1–H8 remain open.
+
+### Fixed
+
+- **The fresh-join deferral was an unbounded hold, and the second one whose exit was the action
+  it suppressed.** A persisted brownout hold closes the flash-write gate before `radio.begin()`
+  runs. If `session::restore()` then rejected the stored file for any of its seven reasons,
+  `reject_stored_session()` retained the file and set `s_fresh_join_blocked`, because removing
+  it is a flash write the gate forbids — so `prepare_fresh_join()` returned `Blocked` on every
+  later cycle and no uplink left the node, **including the keepalive that is the brownout hold's
+  only bound**. With the one-wire link as the thing that failed, no valid pack reading is coming,
+  so nothing ever lifts the gate: mute and, being Class A, uncommandable, on a pack that may be
+  fine. An armed keepalive now authorizes one join attempt via `session::permit_join_escape()`,
+  which first spends one bounded `lfs_remove` — the same write the counter checkpoint already
+  takes during a hold, and deliberately not a format. Ordinary cycles stay deferred, so the bound
+  is the keepalive cadence. `FIRMWARE_SPEC.md` §7.1 gains the row it never had, which is why the
+  dependency question went unasked.
+- **An out-of-range stored interval silently cleared the persisted brownout hold.**
+  `Config::load()` returned before assigning `m_brownout_engaged`, so the whole record went with
+  the bad field and `Brownout::begin()` read "not holding" — the fail-open hole #38 closed,
+  reached by another door. It needed no corruption: the interval floor has moved twice
+  (300 → 1800 → 900 s), so any node updated to a build whose range excludes its stored value hit
+  it on the first boot. Only the interval is discarded now; the boot count and the brownout bit
+  survive.
+- **A spent `pending_interval` silently overrode a later, successful set-interval command.** The
+  success branch never cleared it, and `sleep_for` is recomputed from it every cycle — so the new
+  cadence applied for exactly one sleep, then reverted to the value it replaced for the rest of
+  the deployment, having reported itself saved.
+- **The RK900 console printed −0.1 to −0.9 °C as positive.** `v / 10` truncates toward zero, so
+  the integer part rendered as an unsigned `0`. The uplink was always correct; the console is
+  what register maps and sign conventions get confirmed against, and a forest sits in that band
+  all winter. Same fix `battery.cpp` already applies to pack current and temperature.
+- **The downlink frame was handed across contexts on a `volatile` flag alone.** `on_rx()` runs
+  from the MAC task; the buffer, length and port were plain. Nothing ordered those stores against
+  the flag, and the length is what selects the exact-length checks that refuse a malformed
+  command. Frame and flag are now written and snapshotted inside `taskENTER_CRITICAL()`.
+
+### Removed
+
+- **`Payload::add()`, a second encoder nothing called.** It carried its own copy of every
+  channel/type pairing and the reasoning behind them, so it read as authoritative while never
+  running, and a width fix applied to one of the two would have left the other wrong. It also hid
+  that drift: `check_decoder_parity.py` deduplicates the `put_*()` calls it finds, so two
+  disagreeing encoders would have presented as the union of both and passed. Emitted bytes are
+  unchanged — `build()` was always the shipped path — so this is a PATCH, not a payload change.
+
 ## [0.4.5] — 2026-09-05
 
 `0.4.5` is the node 002 battery-retry correction. **🚧 NOT YET DEPLOYED:** source and host tests

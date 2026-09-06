@@ -111,6 +111,26 @@ void eui_to_hex(const uint8_t *eui, char *out)
 
 volatile bool s_joined       = false;
 volatile bool s_join_failed  = false;
+
+// The downlink frame and the flag that announces it, written from the LoRaMac task and read
+// from loop(). Every access below is inside taskENTER_CRITICAL(), and that is the point.
+//
+// Marking only the flag `volatile` — which is what this was — orders nothing. `volatile` forbids
+// the compiler from caching that one object; it does not stop the plain stores to the buffer,
+// the length and the port being sunk past the flag's store, and it imposes no ordering the
+// reading context has to observe. So take_downlink() could see s_have_downlink true against a
+// stale s_rx_len, and s_rx_len is precisely what selects the `== 5` and `== 1` exact-length
+// branches that exist to refuse a malformed command. A short read of a set-interval frame would
+// be discarded, which is safe; a stale length that happens to match is not.
+//
+// The critical section gives mutual exclusion and the barriers together, and it also closes the
+// other direction: send() clears the flag from loop() while the callback may be writing it.
+// Cheap at this size — 64 bytes, once per receive window, against a LoRa transmit.
+//
+// CITE(prior-art): [CIT-SX126X-ARDUINO] lmh_callback_t.lorawan_rx_handler is invoked from the
+//   MAC's own context, not from loop(), which is what makes this a cross-context handoff.
+// CITE(spec): [CIT-LW-LINK] §3 Class A — the receive windows are the node's only downlink
+//   opportunity, so a frame mishandled here cannot be asked for again.
 volatile bool s_have_downlink = false;
 
 uint8_t s_rx_buf[64];
@@ -136,11 +156,17 @@ void on_rx(lmh_app_data_t *app_data)
     if (app_data == nullptr || app_data->buffsize == 0) {
         return;
     }
-    s_rx_len = (app_data->buffsize > sizeof(s_rx_buf)) ? sizeof(s_rx_buf)
-                                                       : (uint8_t)app_data->buffsize;
-    memcpy(s_rx_buf, app_data->buffer, s_rx_len);
+
+    const uint8_t len = (app_data->buffsize > sizeof(s_rx_buf))
+                            ? (uint8_t)sizeof(s_rx_buf)
+                            : (uint8_t)app_data->buffsize;
+
+    taskENTER_CRITICAL();
+    s_rx_len = len;
+    memcpy(s_rx_buf, app_data->buffer, len);
     s_rx_port       = app_data->port;
     s_have_downlink = true;
+    taskEXIT_CRITICAL();
 }
 
 void on_class_confirm(DeviceClass_t /*device_class*/) {}
@@ -337,9 +363,11 @@ bool Radio::send(const Payload &p)
     // command the network sent for the last one. For a set-interval command that means the node
     // silently adopts a stale interval nobody sent it. This restores what radio.h promises —
     // that a downlink belongs to the windows after *this* send and no other.
+    taskENTER_CRITICAL();
     s_have_downlink = false;
     s_rx_len        = 0;
     s_rx_port       = 0;
+    taskEXIT_CRITICAL();
 
     // Checked before the frame is handed to the MAC, because lmh_send() consumes the counter
     // and there is no putting it back. A save withheld by the brownout gate leaves the stored
@@ -498,26 +526,42 @@ uint32_t Radio::rx_window_ms() const
 
 bool Radio::take_downlink(DownlinkCommand &out)
 {
-    if (!s_have_downlink) {
+    // Snapshot the whole frame in one critical section, then parse the copy. Parsing the shared
+    // buffer directly would leave the length test and the byte reads on either side of a window
+    // the MAC task can write into.
+    uint8_t frame[sizeof(s_rx_buf)] = {0};
+    uint8_t len                     = 0;
+    uint8_t port                    = 0;
+
+    taskENTER_CRITICAL();
+    const bool have = s_have_downlink;
+    if (have) {
+        len  = s_rx_len;
+        port = s_rx_port;
+        memcpy(frame, s_rx_buf, len);
+        s_have_downlink = false;
+    }
+    taskEXIT_CRITICAL();
+
+    if (!have) {
         return false;
     }
-    s_have_downlink = false;
 
-    if (s_rx_port != kCommandPort || s_rx_len < 1) {
-        LOGF("   radio   : ignoring %u bytes on port %u\n", s_rx_len, s_rx_port);
+    if (port != kCommandPort || len < 1) {
+        LOGF("   radio   : ignoring %u bytes on port %u\n", len, port);
         return false;
     }
 
-    const uint8_t opcode = s_rx_buf[0];
+    const uint8_t opcode = frame[0];
 
     // Exact lengths, not minimums. A command that changes how often the node reports
     // should be ignored when it does not look exactly as expected — a message of the wrong
     // length is not a command with extra bytes, it is a message we have misunderstood, and
     // acting on half of it is worse than ignoring all of it.
-    if (opcode == kCmdSetInterval && s_rx_len == 5) {
+    if (opcode == kCmdSetInterval && len == 5) {
         out.set_interval = true;
-        out.interval_value = ((uint32_t)s_rx_buf[1] << 24) | ((uint32_t)s_rx_buf[2] << 16) |
-                             ((uint32_t)s_rx_buf[3] << 8) | (uint32_t)s_rx_buf[4];
+        out.interval_value = ((uint32_t)frame[1] << 24) | ((uint32_t)frame[2] << 16) |
+                             ((uint32_t)frame[3] << 8) | (uint32_t)frame[4];
         LOGF("   radio   : downlink — set interval %lu s\n",
              (unsigned long)out.interval_value);
         return true;
@@ -535,7 +579,7 @@ bool Radio::take_downlink(DownlinkCommand &out)
     // CITE(spec): [CIT-LW-LINK] §3 Class A — the node cannot ask the network to repeat a
     //   garbled command, so a frame that does not look exactly right is discarded, not
     //   guessed at.
-    if (opcode == kCmdRequestStatus && s_rx_len == 1) {
+    if (opcode == kCmdRequestStatus && len == 1) {
         out.request_status = true;
         LOGLN(F("   radio   : downlink — status requested"));
         return true;
@@ -547,7 +591,7 @@ bool Radio::take_downlink(DownlinkCommand &out)
     // Refs #64.
     if (opcode == kCmdSetInterval || opcode == kCmdRequestStatus) {
         LOGF("   radio   : downlink — opcode 0x%02X with wrong length %u, ignored\n", opcode,
-             (unsigned)s_rx_len);
+             (unsigned)len);
         return false;
     }
 

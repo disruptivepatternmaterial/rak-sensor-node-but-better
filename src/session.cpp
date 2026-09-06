@@ -95,6 +95,10 @@ uint16_t           s_filesystem_recovery_cooldown = 0;
 // See session::permit_counter_checkpoint() for why the reserve alone is not enough.
 bool s_checkpoint_permit = false;
 
+// The same one-shot, for the join itself. Set by main.cpp before ensure_joined() on a keepalive
+// cycle and consumed by the next prepare_fresh_join(). See session::permit_join_escape().
+bool s_join_escape_permit = false;
+
 // Null means "allowed". See set_flash_write_gate() — an un-wired gate must not disable
 // persistence, because that failure would be silent and would cost a rejoin every reset.
 session::FlashWriteGateFn s_flash_write_gate = nullptr;
@@ -469,6 +473,12 @@ static bool rebuild_filesystem_and_reanchor()
 
 JoinPreparation prepare_fresh_join()
 {
+    // Consumed on every call, used or not, for the same reason the checkpoint permit is: a token
+    // that outlived the keepalive it was granted for would sooner or later let an ordinary cycle
+    // join past a stale session, which is the replay this deferral exists to stop.
+    const bool escape_permitted = s_join_escape_permit;
+    s_join_escape_permit        = false;
+
     if (!s_fresh_join_blocked) {
         return JoinPreparation::ReadyToJoin;
     }
@@ -488,9 +498,33 @@ JoinPreparation prepare_fresh_join()
     }
 
     if (s_flash_write_gate != nullptr && !s_flash_write_gate()) {
-        LOGLN(F("   session : fresh join deferred — stale session remains and filesystem "
-                "repair is unsafe under the brownout hold"));
-        return JoinPreparation::Blocked;
+        if (!escape_permitted) {
+            LOGLN(F("   session : fresh join deferred — stale session remains and filesystem "
+                    "repair is unsafe under the brownout hold"));
+            return JoinPreparation::Blocked;
+        }
+
+        // A keepalive is due, and it is the bound on the very hold that is closing this gate.
+        // Deferring it makes the bound unreachable, which is the defect this branch exists to
+        // answer — see session::permit_join_escape() for the full trace.
+        //
+        // Removal first, because it is small, atomic, and makes the fresh join wholly safe. It
+        // is the same bounded write the counter checkpoint is already authorized to take during
+        // a hold, and it is a remove rather than a format: erasing the whole filesystem on
+        // unknown voltage stays forbidden here exactly as it is in counter_headroom_ok().
+        if (forget()) {
+            LOGLN(F("   session : stale session removed under keepalive authorization — fresh "
+                    "join allowed"));
+            return JoinPreparation::ReadyToJoin;
+        }
+
+        // Removal failed, so the stale file survives and a later reset may resume a session the
+        // network invalidated when it accepted this join. Joining anyway is still the better of
+        // the two: that costs data until the next repair, staying mute costs the deployment.
+        // s_fresh_join_blocked stays set, so only keepalive cycles take this path.
+        LOGLN(F("   session : stale session could not be removed — joining anyway to stay "
+                "reachable; a reset before the next repair may resume an invalidated session"));
+        return JoinPreparation::ReadyToJoin;
     }
 
     if (!format_filesystem_and_rebuild_config()) {
@@ -506,6 +540,11 @@ JoinPreparation prepare_fresh_join()
 void permit_counter_checkpoint()
 {
     s_checkpoint_permit = true;
+}
+
+void permit_join_escape()
+{
+    s_join_escape_permit = true;
 }
 
 bool counter_headroom_ok()
@@ -691,6 +730,7 @@ JoinPreparation prepare_fresh_join() { return JoinPreparation::ReadyToJoin; }
 bool save() { return false; }
 bool counter_headroom_ok() { return true; }
 void permit_counter_checkpoint() {}
+void permit_join_escape() {}
 void set_flash_write_gate(FlashWriteGateFn) {}
 void set_filesystem_rebuild(FilesystemRebuildFn) {}
 // True: with no radio there is no session and nothing stored, which is the state forget()

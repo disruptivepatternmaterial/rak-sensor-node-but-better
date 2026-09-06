@@ -156,12 +156,36 @@ bool Config::load()
     // Range-check on the way in as well as on the way out. Flash can degrade, and a
     // corrupted interval is the difference between reporting hourly and transmitting
     // continuously until the pack is flat.
-    if (s.interval < kIntervalMinSeconds || s.interval > kIntervalMaxSeconds) {
-        LOGLN(F("   config  : stored interval out of range — using default"));
-        return false;
+    //
+    // Only the interval is discarded, and that is the whole point of the change. Returning
+    // early here dropped the entire record — including the persisted brownout bit, which
+    // power::Brownout::begin() then read as "not holding". That is the fail-open hole #38
+    // closed, reached by a different door: the gate is documented as surviving a reset, and
+    // this path silently cleared it. It needs no flash corruption to happen, either. The
+    // interval floor has already moved twice (300 -> 1800 -> 900 s), so any node updated to a
+    // build whose range no longer contains its stored value takes this branch on the first
+    // boot and comes back transmitting on a pack it had decided to protect.
+    //
+    // Exposure was bounded — the no-evidence path re-engages within kInvalidReadsBeforeInhibit
+    // cycles, and a measured-low reading re-engages immediately — but "bounded" is not the
+    // property the persisted bit exists to provide, and the boot counter was lost with it.
+    //
+    // CITE(spec): docs/FIRMWARE_SPEC.md §7 H5 — the interval and the state that survives power
+    //   loss; a record is not "survived" if one bad field discards the rest.
+    // CITE(spec): docs/FIRMWARE_SPEC.md §4 — the allowed interval range, which is what makes an
+    //   out-of-range stored value a normal consequence of lowering the floor rather than a fault.
+    // CITE(policy): docs/POWER_BUDGET.md — never let the pack reach a state it cannot recover
+    //   from by itself; a hold that evaporates on update is how it gets there.
+    const bool interval_ok =
+        (s.interval >= kIntervalMinSeconds && s.interval <= kIntervalMaxSeconds);
+    if (!interval_ok) {
+        LOGF("   config  : stored interval %lu s out of range (%lu-%lu) — using default %lu s, "
+             "keeping boot count and brownout state\n",
+             (unsigned long)s.interval, (unsigned long)kIntervalMinSeconds,
+             (unsigned long)kIntervalMaxSeconds, (unsigned long)kIntervalDefaultSeconds);
     }
 
-    m_interval         = s.interval;
+    m_interval         = interval_ok ? s.interval : kIntervalDefaultSeconds;
     m_boots            = s.boots;
     m_brownout_engaged = (s.brownout_engaged != 0);
     return true;

@@ -140,18 +140,34 @@ WeatherReading RK900::read()
     //   disagrees with the encoded payload is not one.
     // CITE(policy): AGENTS.md — null sensor readings stay null and zeros are never
     //   fabricated. A console line that prints one is the same fabrication in another place.
+    // Sign is taken from the whole value, never from the integer part — the same defect
+    // battery.cpp:1696 documents and fixes for pack current and temperature, which this line
+    // never got. `v / 10` truncates toward zero, so every raw value from -9 to -1 renders its
+    // integer part as an unsigned "0" and the reading prints as positive: -0.5 degC as "0.5 C".
+    //
+    // That band is where a forest sits for much of the winter, and the console is the
+    // instrument the register map and the scaling get confirmed against, so a wrong sign here
+    // is the kind that gets believed and then frozen into the decoder.
+    // CITE(datasheet): [CIT-RK900] register 0x0002 is temperature, signed, x0.1 degC — the
+    //   sign is the sensor's, and the console is the only place it is read by eye.
+    // CITE(bench): docs/EVIDENCE.md — the same formulation inverted pack current between
+    //   -0.99 A and -0.01 A, found by review before it reached a sign-convention decision.
+    const int32_t  t_raw = (int16_t)regs[kTemperature];
+    const uint32_t t_mag = (uint32_t)(t_raw < 0 ? -t_raw : t_raw);
+    const char    *t_sgn = (t_raw < 0) ? "-" : "";
+
     if (out.pressure.valid) {
-        LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, %u.%u hPa\n",
+        LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %s%lu.%lu C, %u.%u %%RH, %u.%u hPa\n",
              regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,
              regs[kWindDirection],
-             (int16_t)regs[kTemperature] / 10, abs((int16_t)regs[kTemperature] % 10),
+             t_sgn, (unsigned long)(t_mag / 10), (unsigned long)(t_mag % 10),
              regs[kHumidity] / 10, regs[kHumidity] % 10,
              regs[kPressure] / 10, regs[kPressure] % 10);
     } else {
-        LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %d.%d C, %u.%u %%RH, pressure null\n",
+        LOGF("   RK900   : wind %u.%02u m/s @ %u deg, %s%lu.%lu C, %u.%u %%RH, pressure null\n",
              regs[kWindSpeed] / 100, regs[kWindSpeed] % 100,
              regs[kWindDirection],
-             (int16_t)regs[kTemperature] / 10, abs((int16_t)regs[kTemperature] % 10),
+             t_sgn, (unsigned long)(t_mag / 10), (unsigned long)(t_mag % 10),
              regs[kHumidity] / 10, regs[kHumidity] % 10);
     }
 
