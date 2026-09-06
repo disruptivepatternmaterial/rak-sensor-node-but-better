@@ -261,7 +261,8 @@ Not recorded here. A date-stamped snapshot in this file went stale and then cont
 record — it still claimed nothing had run on hardware long after two nodes had been flashed
 and joined. Read the sources instead:
 
-- What each build has proven on hardware: [`STATUS.md`](STATUS.md) and [`EVIDENCE.md`](EVIDENCE.md).
+- What each build has proven on hardware: [`EVIDENCE.md`](EVIDENCE.md). (`STATUS.md` was
+  removed in `5a9d584`; `EVIDENCE.md` is now the only record.)
 - Bring-up order for a new board: [`FIRST_FLASH.md`](FIRST_FLASH.md).
 
 Environment facts that do belong here: firmware compiles on the build host for all four

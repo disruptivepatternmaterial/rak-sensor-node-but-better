@@ -12,8 +12,8 @@ not build instructions.
 This file holds the electrical rationale: what each connection is, why, and what was measured.
 The one build diagram and the numbered steps are in `BUILD.md`. The pack data wire lands on a
 ±60 V RS-485 transceiver, never a GPIO
-([ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md)); the rejected
-Core-removal workaround is [ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md).
+(ADR-0012); the rejected
+Core-removal workaround is ADR-0011.
 >>>>>>> Stashed changes
 
 ## Mission
@@ -45,7 +45,7 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | RK900 duty-cycle switch `K1` | Pololu Isolated Solid State Relay/Switch, SPST, 100 V, 4.5 A [CIT-POLOLU-5426] — in hand for 002/003; wiring agreed in [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117), **firmware not yet written** | Pololu **5426**      |
 | Pack cable                   | one SP11 plug mating `SP1110/P5` [CIT-RAK-WX-MANUAL]                                                                                                                                                                                            | —                    |
 | Power source                 | RAK9154 Solar Battery Lite, **large-panel variant**                                                                                                                                                                                             | —                    |
-| Pack data front end `U1`     | MaxLinear `XR33052ID-F` ±60 V RS-485 transceiver [CIT-XR33052] on a SOIC-8 breakout, plus 2 × 10 kΩ, 1 × 47 kΩ, 1 × 100 nF — [ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md) | `XR33052ID-F` |
+| Pack data front end `U1`     | MaxLinear `XR33052ID-F` ±60 V RS-485 transceiver [CIT-XR33052] on a SOIC-8 breakout, plus 2 × 10 kΩ, 1 × 47 kΩ, 1 × 100 nF — ADR-0012 | `XR33052ID-F` |
 
 >>>>>>> Stashed changes
 
@@ -61,7 +61,7 @@ rather than a detail:
 **The RAK9154 must remain the power source, and the enclosure's panel should be left
 unconnected.** Half the firmware exists to read that pack — voltage, current, state of
 charge, and temperature come over the one-wire link on its 5-pin socket
-([ADR-0004](decisions/ADR-0004-bms-one-wire-path.md)), the low-voltage gate in
+(ADR-0004), the low-voltage gate in
 `src/power.h` decides whether to transmit based on what it reports, and four of the nine
 uplink fields come from it. Powering the node from the enclosure panel instead would mean
 no pack to interrogate: `BatteryReading` would be permanently absent, the brownout gate
@@ -109,7 +109,7 @@ repo, so it is cited rather than linked. See `[CITATIONS.md](CITATIONS.md)`.
 
 ### A — 4-pin Gateway Load (SP11/P4) — BMS Modbus — **fallback only**
 
-Superseded by [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md): the battery uses the
+Superseded by ADR-0004: the battery uses the
 one-wire path on socket B. This socket stays unused and available if one-wire proves
 unreliable on the bench.
 
@@ -221,12 +221,12 @@ The `BAT`, `GND`, and `AIN` clips get nothing. Pack pin 4 stays on the `VDD` pad
 4-wire: V+, GND, A, B → RAK5802 @ **9600**, slave `0x01`. Probe IO optional as junction box
 only. The datasheet and the one field-deployed twin both say 4800; **this physical unit
 answers only at 9600** and gives zero bytes at 4800 across four consecutive sweeps
-([ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md), 2026-08-03, `998dc26`).
+(ADR-0006, 2026-08-03, `998dc26`).
 Wiring from 4800 costs a bench session debugging a bus that is silent by configuration.
 
 ## P0 wiring — decided
 
-Per [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md). The two sensors are on **separate
+Per ADR-0004. The two sensors are on **separate
 buses**, so neither can interfere with or block the other.
 
 <<<<<<< Updated upstream
@@ -276,7 +276,7 @@ Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is e
 
 `U1`'s three resistors and capacitor sit on its breakout: 10 kΩ from `B/Z` to `3V3_S`, 10 kΩ
 from `B/Z` to GND, 47 kΩ from `DE` to GND, 100 nF from `VCC` to GND
-([ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md)).
+(ADR-0012).
 
 
 ```mermaid
@@ -1007,7 +1007,7 @@ Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 
    **This physical unit is set to 9600**, not the 4800 this line claimed until 2026-08-12: a
    `busscan` read the full register frame at 9600 and nothing at 4800
    [CITE(bench): docs/EVIDENCE.md, 2026-08-03 `998dc26` busscan](EVIDENCE.md), accepted in
-   [ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md). The baud is field-settable
+   ADR-0006. The baud is field-settable
    per sensor and the one fleet precedent for this sensor+battery pairing runs 4800, so
    confirm the rate on any replacement unit rather than assuming either value.
    `src/sensors/rk900.cpp:16` is the authority in code.
@@ -1055,7 +1055,7 @@ CITE(datasheet): [CIT-RAK-WX-MANUAL] — `SP1110/P5` pinout and 2 A contact rati
 
 The node already has one external interface that has taken every one of these mating events
 without losing a pin: the RS-485 pair, which sits on a transceiver rated −9 … +14 V
-[CIT-TP8485E]. [ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md)
+[CIT-TP8485E]. ADR-0012
 gives the one-wire line the same kind of pin, with more margin:
 
 ```text
@@ -1418,7 +1418,7 @@ connector has burned boards.
 
 ## Reflashing a sealed field node
 
-Moved to `[FIELD_UPDATE.md](FIELD_UPDATE.md)`: BLE OTA DFU through the shipped bootloader, the
+Moved to `FIELD_UPDATE.md` — **which has never been written**: BLE OTA DFU through the shipped bootloader, the
 `GPREGRET` downlink path, the `firmware.zip` artifact, and why a USB pigtail loses. Hardware
 consequence for this file: the enclosure can be sealed with the USB-C occupied by the buck.
 >>>>>>> Stashed changes

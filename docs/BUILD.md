@@ -10,7 +10,7 @@ and the conflict must be resolved before hardware is connected.
 
 **The pack data wire never touches a GPIO. It lands on `U1`, an XR33052 RS-485 transceiver, and
 only `U1`'s logic outputs reach the Core**
-([ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md)).
+(ADR-0012).
 
 <<<<<<< Updated upstream
 The safe procedure currently ends at step 22. Steps after that do not exist yet because the
@@ -22,7 +22,7 @@ Why: ordinary unplug/replug of the 5-pin plug puts the data wire at `−7.46 …
 node ground for up to 41 ms, with either buck (`EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT).
 An nRF52840 pad is rated −0.3 … `VDD` + 0.3 V; `U1`'s bus pin is rated ±60 V powered or
 unpowered [CIT-XR33052]. The plug is hot-plugged in the field, so the fix is a part, not a
-procedure — [ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md) is rejected.
+procedure — ADR-0011 is rejected.
 
 Sections A–C build and check everything except `U1` and the Core. Section D qualifies `U1` with
 no Core anywhere near it. Section E fits the Core. **Nothing in this document authorizes a

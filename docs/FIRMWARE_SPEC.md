@@ -28,7 +28,7 @@ Cross-links (sibling repos on this machine / org):
 | Param | Value | Source |
 |---|---|---|
 | Interface | Modbus-RTU over RAK5802 | Field + RAK Weather Station Solution Manual |
-| Baud | **9600** 8N1 — this unit | [ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md), bench-measured 2026-08-03 |
+| Baud | **9600** 8N1 — this unit | ADR-0006, bench-measured 2026-08-03 |
 | Slave | **0x01** | Same |
 | FC | 0x03 Read Holding | Same |
 
@@ -67,11 +67,11 @@ counter resets as soon as any field is read. Implemented in `src/main.cpp`
 
 **Implemented protocol; physical layer changing:** 5-pin Sensor Hub Load one-wire (TXD+RXD
 bridged, 9600 half-duplex, IPSO TLV), chosen in
-[ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) and proven end to end on a direct GPIO.
+ADR-0004 and proven end to end on a direct GPIO.
 Direct GPIO wiring is now rejected: ordinary unplug/replug puts the wire outside both nRF52840
 rails [CITE(bench): `EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT](EVIDENCE.md).
 
-[ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md) puts one
+ADR-0012 puts one
 `XR33052` ±60 V RS-485 transceiver on the wire, powered from `3V3_S`. The firmware consequence
 is a **two-pin** half-duplex driver: RX on `RO` (default `IO1`), TX on `DE` (default `A1`) with
 inverted polarity, so a data 0 pulls the wire LOW and a data 1 releases it. The node never drives
@@ -97,7 +97,7 @@ below is retained only so a future 4-pin harness does not have to rediscover it.
 | Reg | Field | Scale |
 |---|---|---|
 | 0x6000 | Pack V | ×0.01 V |
-| 0x6001 | Current | ×0.01 A (signed; **positive = charging**, negative = discharging — [ADR-0002](decisions/ADR-0002-payload-contract-conflicts.md), decided 2026-08-13) |
+| 0x6001 | Current | ×0.01 A (signed; **positive = charging**, negative = discharging — ADR-0002, decided 2026-08-13) |
 | 0x6002 | SoC | ×1 % |
 | 0x6009 | Batt T | ×1 °C |
 
@@ -123,7 +123,7 @@ this correction under [#108](https://github.com/disruptivepatternmaterial/rak-se
 **Power:** P+/P− from 4-pin or 5-pin → **12 V→5 V buck** → WisBlock 5 V. Never feed P+ to `BAT`.
 
 **Bus conflict note — HISTORICAL, resolved.** An earlier draft proposed sharing one RAK5802
-between the RK900 and the BMS by switching baud between polls. [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md)
+between the RK900 and the BMS by switching baud between polls. ADR-0004
 rejected it: the RAK5802 is dedicated to the RK900, and the BMS talks one-wire on its own line.
 Two buses, no baud switching, one fewer failure mode. Recorded here only so the option is not
 re-proposed as though it were still open.
@@ -243,7 +243,7 @@ The reason is that **the USB device task exists regardless of application code.*
 
 **The lever is VBUS and `detach()`, not `Serial`.** The residual true claim is that the USBD peripheral and its HFXO cost energy — but `NRF_USBD->ENABLE` is set only from the VBUS power-event handler, so **in the field, with no cable, the peripheral is never enabled at all**, whatever was built. With a cable present, `detach()` drops `USBPULLUP` and stops host polling, which step 7 already does.
 
-> **Do not re-derive the removal.** This paragraph asserted RAK's "**MUST NOT** be initialized / background task that never sleeps" mechanism as fact until 2026-08-12. It was acted on in `094d5f5` and reverted the same day in `636e421` after the mechanism was refuted from the core's source: the task blocks on `xQueueReceive(..., portMAX_DELAY)` rather than spinning, and SOF interrupts stay disabled for a CDC-only device. Full reasoning in [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md); the withdrawn claim and its counter-citations are in the `CIT-RAK-LOWPOWER` content-correction table in [CITATIONS.md](CITATIONS.md). **Prior art is not authority** — the primary source won, per `.cursor/rules/20-citation-discipline.mdc`. Whether a console-free build saves any measurable current is a magnitude question only, still unmeasured, tracked in issue #47.
+> **Do not re-derive the removal.** This paragraph asserted RAK's "**MUST NOT** be initialized / background task that never sleeps" mechanism as fact until 2026-08-12. It was acted on in `094d5f5` and reverted the same day in `636e421` after the mechanism was refuted from the core's source: the task blocks on `xQueueReceive(..., portMAX_DELAY)` rather than spinning, and SOF interrupts stay disabled for a CDC-only device. Full reasoning in ADR-0008; the withdrawn claim and its counter-citations are in the `CIT-RAK-LOWPOWER` content-correction table in [CITATIONS.md](CITATIONS.md). **Prior art is not authority** — the primary source won, per `.cursor/rules/20-citation-discipline.mdc`. Whether a console-free build saves any measurable current is a magnitude question only, still unmeasured, tracked in issue #47.
 
 Failing one sensor does not skip the other or skip uplink (uplink may be battery-only or weather-only with validity flags).
 
@@ -260,7 +260,7 @@ Prefer **RAK Standardized / Cayenne LPP–style** types already decoded by `fore
 | Wind 158/190 | speed |
 | Wind dir 159/191 | direction |
 | Temp 103 | air |
-| Humidity — ch **4**, type **112** only | RH. Type 104 is a single byte and decodes to key `humidity_4`, which is absent from the formatter's `CHANNEL_NAMES` and is therefore **silently discarded**. See [ADR-0002](decisions/ADR-0002-payload-contract-conflicts.md). |
+| Humidity — ch **4**, type **112** only | RH. Type 104 is a single byte and decodes to key `humidity_4`, which is absent from the formatter's `CHANNEL_NAMES` and is therefore **silently discarded**. See ADR-0002. |
 | Pressure 115 | hPa |
 | Cap 184 | SoC |
 | Current 185 | pack I |

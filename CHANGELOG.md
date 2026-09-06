@@ -63,7 +63,7 @@ a battery-bearing uplink.
   `kRulePeriodic` are genuinely live in the descriptor decode and were kept, with their citation.
 - **Five review documents, 1,530 lines.** The retracted `2026-08-30_onewire_pin_failures.md` (its
   pad count and its mechanism were both wrong); `2026-08-12_console_sleep_question.md` (superseded
-  by [ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md), which is the durable
+  by ADR-0008, which is the durable
   record); `2026-07-30-DOWNLINK-AND-RESILIENCE.md` (superseded by
   [`docs/DOWNLINK_MATRIX.md`](docs/DOWNLINK_MATRIX.md), 8/8 on hardware); and both 2026-08-12
   adversarial reviews, whose accepted findings are issues. Kept: the RAK reference benchmark,
@@ -100,7 +100,7 @@ a battery-bearing uplink.
 
 - **`src/sensors/rk900.h` told the reader the RS-485 port runs at 4800 baud. It runs at 9600.**
   `kBaud = 9600` in `rk900.cpp`, settled by measurement in
-  [ADR-0006](docs/decisions/ADR-0006-rk900-baud-and-register-map.md) — this physical unit replies
+  ADR-0006 — this physical unit replies
   at 9600 and returns **zero bytes at 4800** across four consecutive sweeps. The header asserted
   the datasheet's 4800 as though it were the firmware's setting, on the one constant that decides
   whether the sensor answers at all, which is the spec-parity failure
@@ -239,7 +239,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   `65f8615` — the only three commits a board has ever asserted from its own boot banner — and
   `572bcfa`, the 19.03 h soak. The decision, the options rejected, and the mitigation that
   does address the exposure are recorded in
-  [ADR-0009](docs/decisions/ADR-0009-address-exposure-rotate-not-rewrite.md); tracking in
+  ADR-0009; tracking in
   [#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85).
 - **`scripts/preflight.sh` now also verifies that the irreplaceable evidence commits still
   resolve** — the three banner-asserted SHAs plus `572bcfa` and `4510763`. It is the tripwire
@@ -466,7 +466,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   `scripts/push.sh` was the only option, which made an unreachable build host look like it
   stranded commits.
 - `docs/ENVIRONMENTS.md` "Known state (2026-07-30)" replaced with pointers to
-  [`docs/STATUS.md`](docs/STATUS.md) and [`docs/EVIDENCE.md`](docs/EVIDENCE.md). It still
+  `docs/STATUS.md` (since removed in `5a9d584`) and [`docs/EVIDENCE.md`](docs/EVIDENCE.md). It still
   claimed nothing had run on hardware and no RAK4631 was on the build host USB, long after two
   nodes had been flashed and joined.
 
@@ -474,7 +474,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
 
 **This release has now run on hardware, and the board named itself.** `1c2df3c` was flashed as
 `env:soak` (byte-identical to `env:rak4631`,
-[ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)) and, after a single RESET press
+ADR-0008) and, after a single RESET press
 at 17:50:12Z with a capture held open, printed `commit   : 1c2df3c` in its own boot banner —
 matching what was flashed, with no `-dirty` suffix. That is the standard `AGENTS.md` requires: a
 SHA read off the device, not asserted by the tooling. It is the **third distinct commit** ever to
@@ -530,7 +530,7 @@ pack re-latch path is still unproven),
 - **The battery-current sign convention is closed, and the payload freeze is unblocked.**
   Positive means the pack is **charging**, negative means **discharging** — the operator's
   decision on 2026-08-13, adopting the convention the pack itself reports. Recorded in
-  [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md), which moves from Open to
+  ADR-0002, which moves from Open to
   Accepted; `batt_current` in `payload/schema.yaml` moves from `status: BLOCKED` to `proposed`
   with the convention spelled out, so `scripts/preflight.sh` reaches `PREFLIGHT OK` instead of
   `=== PREFLIGHT BLOCKED ===` for the first time since the gate was added. This had blocked
@@ -634,7 +634,7 @@ cycle reached `sleep   : 900 s` and woke from it. Everything beyond those three 
 `H8` is **not met** — at the moment this tag was cut, `docs/EVIDENCE.md` records **zero soak
 hours**, no ≥24 h bench run and no ≥7 d field shadow. Sleep current has never been measured
 (the pack's telemetry LSB is 10 mA and the budget turns on ~1 mA, so pack telemetry cannot
-measure it). [ADR-0002](docs/decisions/ADR-0002-payload-contract-conflicts.md) is open: the
+measure it). ADR-0002 is open: the
 battery-current sign is still contradictory between the spec and the live decoder, and
 `payload/schema.yaml` still carries `batt_current` as `BLOCKED`, which is why
 `scripts/preflight.sh` legitimately ends `=== PREFLIGHT BLOCKED ===`. Open defects that this
@@ -823,7 +823,7 @@ any image in this repository has identified its own commit on hardware. Later th
   Costs nothing when `FEATURE_CONSOLE=0` — the `LOGF` macro discards its arguments without
   expanding them, so the string never reaches the image — and touches neither the sleep nor the
   USB path, so the field image's power behaviour is unchanged (rule 50,
-  [ADR-0008](docs/decisions/ADR-0008-console-in-the-field-image.md)).
+  ADR-0008).
   Deliberately **not** in the uplink: that is a payload contract change needing a paired TTN
   formatter change (rule 60), and `batt_current` already blocks the payload freeze.
 
@@ -985,8 +985,8 @@ release had been run on a board.
   [`scripts/remote.sh`](scripts/remote.sh) / [`build.sh`](scripts/build.sh) build-host wrappers.
 - [`AGENTS.md`](AGENTS.md), the [`.cursor/rules/`](.cursor/rules/) discipline baseline, issue and
   PR templates carrying the citation gate, and CI.
-- ADRs [0003](docs/decisions/ADR-0003-firmware-framework.md) (Arduino + WisBlock-API-V2) and
-  [0004](docs/decisions/ADR-0004-bms-one-wire-path.md) — **the RAK9154 goes on one-wire, not the
+- ADRs 0003 (Arduino + WisBlock-API-V2) and
+  0004 — **the RAK9154 goes on one-wire, not the
   shared RS-485 bus.**
 - A downlink-and-resilience review (since deleted; its conclusions are the downlink behavior in
   [`docs/FIRMWARE_SPEC.md`](docs/FIRMWARE_SPEC.md) and the 8/8 matrix in

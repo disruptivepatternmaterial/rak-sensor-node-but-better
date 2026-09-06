@@ -134,6 +134,17 @@ def main() -> int:
                   f"and in CI")
             return 0
 
+    # tools/ was removed in 5a9d584. Without the emitter there are no real encoder bytes to
+    # push through the decoder, so this gate has nothing to compare and says so. It is not a
+    # pass: reporting one would claim the encoder had been checked against ingest when the
+    # fixtures that do the checking are gone.
+    for fixture in (EMITTER_SRC, EXPECTED_PATH):
+        if not fixture.exists():
+            rel = fixture.relative_to(REPO_ROOT)
+            print(f"{YELLOW}SKIP{RESET} {rel} is absent (removed in 5a9d584) — the encoder is "
+                  f"not being checked against the live decoder")
+            return 0
+
     schema = load_yaml(SCHEMA_PATH)
     decoder_path, source = find_decoder(schema)
     if decoder_path is None:

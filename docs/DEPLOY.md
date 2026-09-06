@@ -72,7 +72,7 @@ All four, recorded in [`EVIDENCE.md`](EVIDENCE.md) with host and commit SHA:
 | Battery reads | ✅ `SENDAT Ok` from dest `0x01`, `12.23 V` ([`EVIDENCE.md`](EVIDENCE.md) 2026-08-05, `1a203d3`, re-verified `b6bbf31`) |
 | Awake time is sane | Measured cycle awake duration under 5 s, logged — **baseline now ~5 s**, down from 50.5 s |
 | Survives a reset | Power-cycle the node; data returns on the next wake with no manual step |
-| Sensors are independent | Unplug one sensor, confirm the other still uplinks — both directions ([ADR-0004](decisions/ADR-0004-bms-one-wire-path.md)) |
+| Sensors are independent | Unplug one sensor, confirm the other still uplinks — both directions (ADR-0004) |
 
 **The awake-time baseline changed materially, from ~50 s to ~5 s.** On an unprovisioned pack the
 wake ran **50.5 s**, of which **45.4 s was `acquire_pid()`** listening for announcements. Two
@@ -87,10 +87,10 @@ needed. Any power-budget arithmetic written against the 50 s figure is stale —
 <<<<<<< Updated upstream
 =======
 - **The pack data wire lands on the XR33052 transceiver, never a GPIO**
-  ([ADR-0012](decisions/ADR-0012-one-wire-behind-a-fault-tolerant-transceiver.md)). Ordinary
+  (ADR-0012). Ordinary
   unplug/replug crosses both nRF rails (`EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT); the plug
   is hot-plugged in the field, so the Core-removal rule is rejected
-  ([ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md)). `BUILD.md` gates
+  (ADR-0011). `BUILD.md` gates
   G1–G4 pass with no Core before `RO`/`DE` reach one.
 >>>>>>> Stashed changes
 - 24 h bench soak: both sensors live, TTN uplinks arriving, no watchdog resets.

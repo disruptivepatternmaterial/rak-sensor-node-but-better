@@ -310,7 +310,7 @@ FF 7E 00 55 02 00 00 FF 00 01 50 03 44 01 02 09 00 33 09 00
 1. **The pack transmits without being asked.** Every ~2.2 s, with no master on the bus and no MCU
    connected at all. Previously the protocol was believed to be strictly request/response.
 2. **9600 8N1 is confirmed on the pack side**, decoded rather than inferred. Independent of
-   [ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md), which established 9600 for the
+   ADR-0006, which established 9600 for the
    *RK900* on a different bus.
 3. **The device identity is on the wire in plain ASCII**, confirming this is the RAK2560 Sensor Hub
    probe protocol and that [CIT-RAK-ONEWIRESERIAL] / [CIT-MESHTASTIC-9154] are the right
@@ -1831,7 +1831,7 @@ CITE(bench): `docs/EVIDENCE.md` 2026-08-15, this entry — `dev_addr 260CE734`, 
 
 **Host:** Heliotrope Ridge, `/dev/cu.usbmodem31201`. **Commit, asserted from the device:**
 `1c2df3c`. **Environment:** `env:soak` (byte-identical to `env:rak4631`,
-[ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)). **Raw capture:** `/tmp/banner.log`
+ADR-0008). **Raw capture:** `/tmp/banner.log`
 on the build host, 81 lines. **Verdict: pass — image identity confirmed, cadence confirmed, both
 sensors confirmed.**
 
@@ -1970,7 +1970,7 @@ holding pid and declining is the correct behaviour; the fix is to kill the prior
 ### 2026-08-14 — `1c2df3c` flashed as `env:soak`; both sensors and `sleep : 900 s` observed. Banner SHA still NOT read back.
 
 **Host:** Heliotrope Ridge. **Commit built and flashed:** `1c2df3c`. **Environment:** `env:soak`
-(byte-identical to `env:rak4631`, [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)).
+(byte-identical to `env:rak4631`, ADR-0008).
 **Verdict: flash confirmed, image identity NOT confirmed from the device.**
 
 **Why this flash happened:** the operator is taking the node to the field today and chose to ship
@@ -2272,7 +2272,7 @@ forty-four minutes *after* this attempt ended. At `f626698` the `rak4631` image 
 the console in, so the board should have enumerated.
 
 > **Doubly refuted, appended later the same day.** `FEATURE_CONSOLE=0` was itself reverted in
-> `636e421` ([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)): the Adafruit core
+> `636e421` (ADR-0008): the Adafruit core
 > calls `SerialTinyUSB.begin()` and creates the `usbd` task before `setup()` runs, so USB
 > enumeration never depended on the sketch calling `Serial.begin()` at all. The flag could not
 > have suppressed enumeration even had it been on the board. The timeline above already ruled
@@ -3288,7 +3288,7 @@ narrower and checkable: nothing reads them.
 | H3 brownout | `power::Brownout` instantiated and wired: `update()` from the pack voltage, `transmit_allowed()` gates TX, `flash_write_allowed()` gates the flash write. Thresholds 9.60 V stop / 10.20 V resume | Behavior through a real low-voltage excursion |
 | H4 backoff | `radio.backoff_seconds()` replaces the normal interval after any join or send failure | — implemented |
 | H5 session persist | `session.cpp` writes through `Adafruit_LittleFS` to `InternalFS` | **Real join → reset → rejoin** (issue #12) |
-| H6/H7 no livelock | Sensors read sequentially and independently; neither read gates the other; watchdog fed between them | **Physically unplug each sensor mid-cycle** — [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md) requires the bench test, and a code audit is explicitly not sufficient |
+| H6/H7 no livelock | Sensors read sequentially and independently; neither read gates the other; watchdog fed between them | **Physically unplug each sensor mid-cycle** — ADR-0004 requires the bench test, and a code audit is explicitly not sufficient |
 | H8 soak | — | 24 h bench, then 7 d field shadow |
 
 **Verdict: no gate closes here.** H4 is implemented and H1's known feeding gap is fixed in
@@ -4401,7 +4401,7 @@ on it. No background processes were left running.
   the first hardware confirmation of the `033b584` banner change and the first evidence entry that
   did not have to infer a SHA.
 - **Host:** Heliotrope Ridge, `pio run -e soak -t upload --upload-port /dev/cu.usbmodem31201`.
-  `env:soak` is byte-identical to `env:rak4631` per [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md).
+  `env:soak` is byte-identical to `env:rak4631` per ADR-0008.
 - **Measured:** the DFU transfer and the first cycle of the field image.
 - **Observation:** the transfer was real, not a bare `[SUCCESS]` (#59) — eleven rows of `#` progress marks,
   `Activating new firmware`, `Device programmed.`, and zero occurrences of
@@ -4480,7 +4480,7 @@ on it. No background processes were left running.
     ```
 
     This is the first hardware observation of the [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)
-    / [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md) detach path on the field image.
+    / ADR-0008 detach path on the field image.
     It is **half** of [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
     item 1: the detach is observed, the matching `attach()` and a successful host re-enumeration at
     the next wake are not. Absence from `ioreg` is by design and is not a dead board.
@@ -4618,7 +4618,7 @@ on it. No background processes were left running.
 
 - **Board left:** running `env:soak` at `65f8615`, asleep on a 900 s cycle, session `0x260CE734`.
   The field image detaches from USB ~180 s after boot by design
-  ([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md),
+  (ADR-0008,
   [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)), so the
   board disappearing from `/dev/cu.usbmodem*` is correct behavior, not a dead board. One RESET
   press restores the console and a flashable window.
@@ -4657,7 +4657,7 @@ on it. No background processes were left running.
 ### 2026-08-13 — inline USB current meter: peak ~40 mA, minimum reads `0` at a **10 mA** resolution floor
 
 - **Commit:** `572bcfa` — the `v0.4.2` soak image (`env:soak`, byte-identical to `env:rak4631`
-  per [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)), running a 900 s cycle.
+  per ADR-0008), running a 900 s cycle.
 - **Host:** **not** Heliotrope Ridge. The node was moved off the bench and the readings come from
   the **operator's inline USB current meter**, wired between the USB host power source and the
   RAK4631. Heliotrope Ridge built and flashed the image; it did not take this measurement. The
@@ -4710,7 +4710,7 @@ on it. No background processes were left running.
 ### 2026-08-14 — the meter finally caught a transmit-shaped peak: **0.14 A**, stable across many cycles; minimum still `0` at the same **10 mA** floor
 
 - **Commit:** `572bcfa` — the `v0.4.2` soak image (`env:soak`, byte-identical to `env:rak4631` per
-  [ADR-0008](decisions/ADR-0008-console-in-the-field-image.md)), 900 s cycle. **Both readings are
+  ADR-0008), 900 s cycle. **Both readings are
   attributed to `572bcfa`, and the attribution is clean rather than assumed.** The board carried
   `572bcfa` until it was reflashed to `1c2df3c` (`v0.4.3`) that afternoon; the soak on `1c2df3c`
   started at **16:09:16Z**, so the flash preceded that. The operator's readings are timestamped

@@ -89,8 +89,17 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No platformio.ini yet — WP1 has not created the skeleton. \
-          Nothing to compile."
+            echo "::notice::No platformio.ini yet. Nothing to compile."
+          fi
+          # The off-target suites were removed in 5a9d584. `pio test` against an empty tree
+          # is not a pass, so the step is skipped and the absence is raised as a warning —
+          # a gate that disappears silently reads exactly like one that ran and was green.
+          if [ -d test ]; then
+            echo "tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tests=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No test/ directory (removed in 5a9d584) — payload.cpp, \
+          crc16.cpp and battery_frame.cpp are compiled but not verified."
           fi
 
       - uses: actions/setup-python@v5
@@ -115,7 +124,7 @@ jobs:
       # checksum makes a working sensor look unplugged — which is exactly the class of bug
       # that should never reach a device nobody can visit.
       - name: Tests
-        if: steps.check.outputs.present == 'true'
+        if: steps.check.outputs.present == 'true' && steps.check.outputs.tests == 'true'
         run: pio test -e native
 
       # Every staged image has to keep compiling, not just the field one. The stages exist

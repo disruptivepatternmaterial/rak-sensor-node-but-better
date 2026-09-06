@@ -122,6 +122,20 @@ if python3 scripts/check_golden_vectors.py; then :; else bad "golden vectors"; f
 step "citations"
 if python3 scripts/check_citations.py; then :; else bad "citation discipline"; fi
 
+# --------------------------------------------------------------- conflict markers
+# 5a9d584 committed 44 of these across five docs, twelve of them in BUILD.md -- the file
+# AGENTS.md calls the only build sequence. A conflicted procedure is worse than a missing
+# one: it reads as instructions right up to the point where it gives two contradictory
+# answers, and the reader following it is standing next to the hardware.
+step "conflict markers"
+MARKERS=$(git grep -lE '^(<{7} |={7}$|>{7} )' -- . 2>/dev/null || true)
+if [[ -n "$MARKERS" ]]; then
+  echo "$MARKERS" | sed 's/^/  /'
+  bad "unresolved merge/stash conflict markers in tracked files"
+else
+  ok "no conflict markers in tracked files"
+fi
+
 # --------------------------------------------------------------- doc links
 step "internal doc links"
 BROKEN=0

@@ -114,7 +114,7 @@ Ranked by consequence:
    taken from RAK's narrative.
 
    Why it is withdrawn, in one line each — decision and full reasoning in
-   [ADR-0008](../decisions/ADR-0008-console-in-the-field-image.md):
+   ADR-0008:
 
    - `Adafruit_USBD_Device::begin()` calls `SerialTinyUSB.begin(115200)` itself
      (`Adafruit_USBD_Device.cpp:262`, commented _"Serial is always added by default"_) and creates
@@ -333,7 +333,7 @@ reopening the framework question.
 
 | # | Gap | Consequence | Fix |
 |---|---|---|---|
-| 1 | ~~Console compiled into the field image~~ **WITHDRAWN — not a gap.** `[REF-LOWPOWER]:45`'s mechanism is false, and false on RAK's own BSP: the core calls `Serial.begin()` and creates the `usbd` task before `setup()`, so our call is a no-op and RAK's `MAX_SAVE` builds get the same task. See §"Verdict" item 1, [ADR-0008](../decisions/ADR-0008-console-in-the-field-image.md) | **None.** No task, peripheral or clock is removed by the flag | Nothing. `FEATURE_CONSOLE=0` was tried in `094d5f5` and reverted the same day; `detach()` in `power.cpp:135` was already the correct lever. Magnitude-only question tracked in #47 |
+| 1 | ~~Console compiled into the field image~~ **WITHDRAWN — not a gap.** `[REF-LOWPOWER]:45`'s mechanism is false, and false on RAK's own BSP: the core calls `Serial.begin()` and creates the `usbd` task before `setup()`, so our call is a no-op and RAK's `MAX_SAVE` builds get the same task. See §"Verdict" item 1, ADR-0008 | **None.** No task, peripheral or clock is removed by the flag | Nothing. `FEATURE_CONSOLE=0` was tried in `094d5f5` and reverted the same day; `detach()` in `power.cpp:135` was already the correct lever. Magnitude-only question tracked in #47 |
 | 2 | `delay(1000)` loop instead of `xSemaphoreTake(..., portMAX_DELAY)` (`power.cpp:134-136`) | Battery life; magnitude unmeasured. **Do not adopt `portMAX_DELAY` without fixing `WDT_CONFIG_SLEEP`** or you trade current for a hike | Semaphore + FreeRTOS timer, bounded timeout |
 | 3 | `lmh_reset_mac()` never called (`[REF-API2-LORA]:210-216`, "Workaround for bug after NAK") | Data loss and wasted energy in a rejoin loop; not a hike (watchdog covers it) | Call it on the `kFailuresBeforeRejoin` path |
 | 4 | ADR-0003 Decision line contradicts its Status line | Documentation only; misleads the next reader | Edit the ADR |

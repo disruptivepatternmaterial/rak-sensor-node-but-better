@@ -213,7 +213,7 @@ the node is plugged in there and nowhere else.
 the usual cause — try swapping them), the sensor not powered, the wrong slave address, or
 the wrong baud rate. The firmware fixes the RK900 at **9600** 8N1, slave `0x01` — not the
 4800 on the datasheet, because this physical unit answers only at 9600
-([ADR-0006](decisions/ADR-0006-rk900-baud-and-register-map.md)).
+(ADR-0006).
 
 **If reads succeed but the numbers are wrong**, that is a register map or scaling problem,
 not wiring. Record the raw values and check them against `FIRMWARE_SPEC.md` §2.1.
@@ -242,7 +242,7 @@ and #5 respectively:
 
 **If the battery does not answer at all**, the one-wire bridge between TXD and RXD is the
 first thing to check. The 4-pin socket remains a documented fallback — see
-[ADR-0004](decisions/ADR-0004-bms-one-wire-path.md).
+ADR-0004.
 
 ## Stage 3 — add the radio
 

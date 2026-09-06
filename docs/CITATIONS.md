@@ -74,7 +74,7 @@ record the date. Do not add a row from memory.
 | `CIT-PIO-STRINGIFY` | PlatformIO Core — `builder/tools/piobuild.py` | PlatformIO | https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/builder/tools/piobuild.py | `StringifyMacro(env, value)` at :275 returns `'\\"%s\\"' % value.replace('"', '\\\\\\"')` — the supported way to pass a **C string literal** through a `CPPDEFINES` tuple so the quotes survive the shell. Present in PlatformIO Core 6.1.19, the version on the build host. | VERIFIED 2026-08-13 |
 | `CIT-GIT-REV-PARSE` | git-rev-parse | Git | https://git-scm.com/docs/git-rev-parse | `--short[=n]` yields the abbreviated object name, and a non-zero exit on a directory that is not a repository (or a repository with no commits) is what lets the stamp degrade to `unknown` instead of failing a build. | VERIFIED 2026-08-13 |
 | `CIT-GIT-STATUS` | git-status | Git | https://git-scm.com/docs/git-status | `--porcelain` is the **stable, script-readable** short format, guaranteed not to change between versions; empty output means the working tree matches `HEAD`. This is the dirty test behind the `-dirty` suffix on the banner. | VERIFIED 2026-08-13 |
-| `CIT-GIT-OBJECTS` | Git Internals — Git Objects | Pro Git, 2nd ed. | https://git-scm.com/book/en/v2/Git-Internals-Git-Objects | A commit object's name **is** the hash of its content and ancestry, so altering any file in a commit renames that commit and every descendant. This is why a history purge cannot preserve commit SHAs, which is the whole basis of [ADR-0009](decisions/ADR-0009-address-exposure-rotate-not-rewrite.md). | VERIFIED 2026-08-28 |
+| `CIT-GIT-OBJECTS` | Git Internals — Git Objects | Pro Git, 2nd ed. | https://git-scm.com/book/en/v2/Git-Internals-Git-Objects | A commit object's name **is** the hash of its content and ancestry, so altering any file in a commit renames that commit and every descendant. This is why a history purge cannot preserve commit SHAs, which is the whole basis of ADR-0009. | VERIFIED 2026-08-28 |
 | `CIT-GH-SENSITIVE` | Removing sensitive data from a repository | GitHub Docs | https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository | A force-push does **not** make removed data unreachable: GitHub retains the old objects and serves them by SHA, and purging cached views and unreachable commits requires contacting GitHub Support. Establishes that a rewrite alone does not achieve secrecy — ADR-0009. | VERIFIED 2026-08-28 |
 | `CIT-FILTER-REPO` | git-filter-repo | Elijah Newren | https://github.com/newren/git-filter-repo | The supported history-rewriting tool, and the source of the complete old→new `commit-map` that any SHA-translation layer would have to be built on. Recorded as the mechanism ADR-0009 considered and rejected. | VERIFIED 2026-08-28 |
 
@@ -229,7 +229,7 @@ sleeping."**
 _Status: **the stated mechanism is false**, and false on RAK's own BSP. Established 2026-08-12 by
 reading the core's source. Acted on in `094d5f5` (`FEATURE_CONSOLE=0` in the field image) and
 **reverted the same day** — see
-[ADR-0008](decisions/ADR-0008-console-in-the-field-image.md), which is now the whole record;
+ADR-0008, which is now the whole record;
 the working review that preceded it has been deleted._
 
 | Claim | What the primary source says | Counter-citation |

@@ -177,7 +177,7 @@ instrument. A number without its window and its measurement point is not a measu
 
 The serial harness has to hold the port open for the whole run, and that is not free. The
 field image detaches USB about 180 s after boot **when no host is attached**
-([ADR-0008](decisions/ADR-0008-console-in-the-field-image.md),
+(ADR-0008,
 [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)). A
 reader that stays attached suppresses the detach, so a 24 h serial soak measures a bench
 variant of the image rather than the one that ships.

@@ -77,7 +77,7 @@ and [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 
 | Question | File |
 |---|---|
-| What has each release proven on hardware? | [`docs/STATUS.md`](docs/STATUS.md) |
+| What has each release proven on hardware? | [`docs/EVIDENCE.md`](docs/EVIDENCE.md) — `STATUS.md` was removed in `5a9d584` |
 | What has been measured, on which core, at which SHA? | [`docs/EVIDENCE.md`](docs/EVIDENCE.md) |
 | What exact assembly step comes next? | [`docs/BUILD.md`](docs/BUILD.md) — the only build sequence |
 | Wiring research, pinouts, electrical rationale | [`docs/HARDWARE.md`](docs/HARDWARE.md) |

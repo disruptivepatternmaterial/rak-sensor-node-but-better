@@ -40,8 +40,7 @@ echo "${BLUE}== 3/3 compile ==${NC}"
 SHA=$(git rev-parse HEAD)
 
 if [[ ! -f platformio.ini ]]; then
-  echo "${YELLOW}SKIP${NC} no platformio.ini yet -- no firmware in-tree (WP1 not started)."
-  echo "${DIM}     plans/P0_HARDENED_NODE.md WP1 creates the PlatformIO skeleton.${NC}"
+  echo "${YELLOW}SKIP${NC} no platformio.ini yet -- no firmware in-tree."
   echo "=== BUILD SKIPPED (no firmware) ==="
   exit 0
 fi
@@ -51,14 +50,26 @@ fi
 # removed first: a stale object survived a missing include once and let the build host pass
 # while CI failed on the same commit, which is the worst possible split — the machine that
 # says yes is the one nobody re-checks.
-scripts/remote.sh run "rm -rf .pio/build/native && pio test -e native" \
-  || { echo; echo "=== TESTS FAILED ==="; echo "commit: ${SHA}"; exit 1; }
+#
+# The suites were removed in 5a9d584. `pio test` against an empty tree is not a pass, so the
+# absence is announced rather than skipped quietly: a gate that vanishes without saying so is
+# indistinguishable from one that ran.
+if [[ -d test ]]; then
+  scripts/remote.sh run "rm -rf .pio/build/native && pio test -e native" \
+    || { echo; echo "=== TESTS FAILED ==="; echo "commit: ${SHA}"; exit 1; }
+else
+  echo "${YELLOW}SKIP${NC} no test/ directory -- the off-target suites were removed in 5a9d584."
+  echo "${DIM}     payload.cpp, crc16.cpp and battery_frame.cpp now compile unverified.${NC}"
+fi
 
 echo
 
 # Preflight skips this on the workstation, which has no node. The build host has both node
 # and a live checkout of the decoder, so this is the machine where the encoder's real bytes
 # can be pushed through the real formatter.
+#
+# tools/ went with the test suites in 5a9d584; the checker announces its own skip when the
+# emitter and the expectation file are absent, so this call stays and reports it.
 scripts/remote.sh run "python3 scripts/check_golden_vectors.py" \
   || { echo; echo "=== GOLDEN VECTORS FAILED ==="; echo "commit: ${SHA}"; exit 1; }
 
