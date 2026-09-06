@@ -19,11 +19,15 @@ Documentation only; no firmware change. **🚧 NOT YET DEPLOYED.**
   connector and the pack cannot change and the 4-pin socket is not in play, so the one variable
   left is how much current flows when the contacts land: with `S1` open, none. `docs/HARDWARE.md`
   § "The wiring plan" carries the harness and diagram; `docs/BUILD.md`
-  section A builds it (one plug, `S1`, terminal-block fan-out, label), and the pre-Core gate is
+  section A builds it (one plug, `S1`, label), and the pre-Core gate is
   ADR-0011's coreless mating test instead of the #101 isolation switch, which is dropped: it
   guards a different mechanism and an ESD-class part cannot absorb 183 ms of reverse conduction.
   `S1`'s part is not yet chosen and gets a `CITATIONS.md` row when it is.
-- **`docs/HARDWARE.md` cut from 1263 lines to ~390.** Everything written before the 2026-09-05
+- **The wiring picture and build steps match the harness as built**: one common ground to the
+  base-board `GND` pad, no terminal block, no second ground wire, no series resistor, no muon-wx
+  — those were agent additions (`5c394ac`, `7cce1b9`) that were never on the bench. `S1` and `K1`
+  (#117) are the only additions to the as-built harness.
+- **`docs/HARDWARE.md` cut from 1263 lines to ~470.** Everything written before the 2026-09-05
   measurement that still called the cause "not established", proposed a third-plus hypothesis,
   or kept the 1 kΩ resistor / isolation switch / historical topologies alive as build paths is
   gone; one table lists what was tried and why each was dropped (full text at `8b0ae85`). The

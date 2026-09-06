@@ -85,8 +85,8 @@ undocumented part.
 
 | Pin | Signal | This node |
 |---|---|---|
-| 1 | P+ (12 V boost) | → **`S1` load disconnect** → every load (node supply, RK900, muon-wx). `S1` is open whenever this plug is being mated or unmated — § "The wiring plan" |
-| 2 | P− | → all load negatives and the base-board `GND` pad; a second conductor → RAK5802 `GND` clip |
+| 1 | P+ (12 V boost) | → **`S1` load disconnect** → every load (node supply, RK900). `S1` is open whenever this plug is being mated or unmated — § "The wiring plan" |
+| 2 | P− | → base-board `GND` pad; common with buck `VIN−`, RK900 `GND`, `K1 GND` |
 | 3 | TXD | joined to pin 5 → the one-wire wire → RAK5802 `SDA` clip |
 | 4 | 3V3_In | → base-board `VDD` pad (the always-on `3V3`, ADR-0010) — **never 5 V**, never the RAK5802 `3V3` clip |
 | 5 | RXD | joined to pin 3 |
@@ -96,27 +96,18 @@ the sum.
 
 **Not** full-duplex UART to RX1/TX1 as two independent lines without bridging — Hub protocol is half-duplex one-wire @ 9600. See Meshtastic / RAK-OneWireSerial / `rak-4-5-wire`.
 
-## RAK5802 terminal blocks — what each one actually is
+## RAK5802 clips — what to connect
 
-Two 4-way spring terminals, silkscreened `BAT GND A/RX B/TX` and `SCL SDA 3V3 AIN`. Eight clips
-total. **Six of the node's seven external connections land in them**, which is why the wiring plan
-uses this module as the hub rather than the base-board header.
+| Clip | Connect | Why it is this clip |
+|---|---|---|
+| `A/RX` | RK900 `A` | RS-485 A [CIT-RAK5802] |
+| `B/TX` | RK900 `B` | RS-485 B |
+| `SDA` | pack pins 3+5 joined | nRF P0.13, straight through, base-board 4.7 kΩ pull-up to `VDD` [CIT-RAK19007-SCH-SLOTS] |
+| `SCL` | `K1` `EN` | nRF P0.14, otherwise unused, same pull-up — [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
 
-| Block | Clip | What it is | What this node puts in it |
-|---|---|---|---|
-| 1 | `BAT` | battery rail **output**, 2.6–4.2 V, for powering a sensor [CIT-RAK5802] | *empty* |
-| 1 | `GND` | common ground — same net as the base-board `GND` pad | pack pin 2 (`P−`) |
-| 1 | `A/RX` | RS-485 A, non-inverting | RK900 `A` |
-| 1 | `B/TX` | RS-485 B, inverting | RK900 `B` |
-| 2 | `SCL` | I²C clock, an otherwise unused GPIO — nRF P0.14, with the base board's 4.7 kΩ pull-up to `VDD` [CIT-RAK19007-SCH-SLOTS] | `K1` `EN` (Pololu 5426), [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
-| 2 | `SDA` | **nRF P0.13 — the one-wire pin**, direct passthrough, no buffer | pack pins 3+5 joined |
-| 2 | `3V3` | **switched** output on `3V3_S` — dies mid-cycle | *empty. never use* |
-| 2 | `AIN` | one analog input | *empty* |
-
-Each clip takes **one** conductor. `BAT` and `3V3` are sensor-power **outputs**, not supply
-inputs, and `3V3` is on `3V3_S`, which `src/sensors/rk900.cpp` drops LOW after each weather read —
-so pack pin 4 taken from that clip would go dark exactly when the battery is read. Pin 4 goes to the
-always-on `VDD` pad (ADR-0010).
+The other four clips (`BAT`, `GND`, `3V3`, `AIN`) get nothing. `3V3` in particular is `3V3_S`,
+which the firmware switches off after every weather read — pack pin 4 goes to the always-on `VDD`
+pad instead (ADR-0010).
 
 ## RK900
 
@@ -144,22 +135,17 @@ through pin 1, node ground cannot be pulled toward `P+`, and the data wire has n
 
 | From pack 5-pin | To | Notes |
 |---|---|---|
-| Pin 1 `P+` (12 V boost) | **`S1` load disconnect**, then the terminal block `+` bus | `S1` is the fix. Everything downstream of it is unchanged from the harness as built |
-| `+` bus | buck `VIN+` (buck `VOUT` 5 V → the board's USB-C, as today) | |
-| `+` bus | **`K1` load slot A** (Pololu 5426) | the RK900 duty-cycle switch, high-side, in the RK900 branch only [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
-| `K1` load slot B | RK900 `V+` | the two load slots are symmetric back-to-back MOSFETs [CIT-POLOLU-5426] |
-| `K1` `VIN` | base-board `VDD` pad | same always-on `3V3` that feeds pack pin 4 — the `VDD` pad carries **two** conductors. Never the RAK5802 `3V3` clip (`3V3_S`) |
-| `K1` `GND` | terminal block `−` bus | |
+| Pin 1 `P+` (12 V boost) | **`S1` load disconnect**, then buck `VIN+` and `K1` load slot A | `S1` is the fix. Buck `VOUT` 5 V → the board's USB-C, as built |
+| `K1` load slot B | RK900 12 V | high-side, RK900 branch only; the two load slots are symmetric [CIT-POLOLU-5426] [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
+| `K1` `VIN` | base-board `VDD` pad | the same always-on `3V3` that feeds pack pin 4 — the `VDD` pad carries **two** conductors. Never the RAK5802 `3V3` clip (`3V3_S`) |
+| `K1` `GND` | node ground | |
 | `K1` `EN` | RAK5802 `SCL` clip (nRF P0.14) | control input, 2.7–40 V = on. **Nothing drives `SCL` yet** — see the note below the table |
-| `+` bus | muon-wx `+` | |
-| Pin 2 `P−` | terminal block `−` bus → buck `VIN−`, RK900 `−`, muon-wx `−`, and **`GROUND A` → base-board `GND` pad** | |
-| Pin 2 `P−` | a second conductor from the same pin, **`GROUND B` → RAK5802 `GND` clip** | redundancy against a return going intermittent after mating — not a mating-order fix, and not claimed as one |
+| Pin 2 `P−` | base-board `GND` pad; buck `VIN−`; RK900 `GND`; `K1 GND` | one common ground, as built |
 | Pins 3 + 5 joined | RAK5802 `SDA` clip (nRF P0.13) | the one-wire line. The base board already pulls it up with 4.7 kΩ to `VDD` (`R10`, [CIT-RAK19007-SCH-SLOTS]); no external pull-up needed on this landing |
 | Pin 4 `3V3_In` | base-board `VDD` pad | the always-on `3V3` looped through the core (ADR-0010). Never the RAK5802 `3V3` clip (`3V3_S`, switched by `IO2`), never 5 V |
 
-Both pads named above are on the 2.54 mm edge header (`SDA SCL TX1 RX1 GND VDD BOOT0`). `SDA`,
-`SCL` and `GND B` land in spring clips; `VDD` (two wires: pack pin 4 and `K1 VIN`) and `GND A`
-are solder joints.
+`SDA` and `SCL` are spring clips on the RAK5802. `VDD` (two wires: pack pin 4 and `K1 VIN`) and
+`GND` are solder joints on the base board's 2.54 mm edge header (`SDA SCL TX1 RX1 GND VDD BOOT0`).
 
 **`K1` before its firmware exists — a hypothesis to meter, not a claim.** #117 says "until
 firmware drives `SCL`, the switch stays open and the head is dark." The schematic says the base
@@ -182,83 +168,26 @@ operator picks gets a `CITATIONS.md` row before it goes on the BOM. It is labell
 **Procedure and the node's state while `S1` is open** are in ADR-0011 § "Decision": `S1` OFF → mate
 → `S1` ON; `S1` OFF → unplug. No wait is needed; node-side capacitors discharge into node-side loads.
 
-**The whole-node picture.** Solid lines are spring clips or terminal-block landings; dashed lines
-are solder joints on the base-board header. The build-sequence version is
+**The whole-node picture.** Buck output → the board's USB-C. `S1` OFF whenever the plug moves. The build-sequence version is
 [`BUILD.md`](BUILD.md) § "The build, in one picture".
 
 ```mermaid
 flowchart LR
-    subgraph PACK["RAK9154 pack — SP11 5-pin connector"]
-        direction TB
-        P1["pin 1<br/><b>P+</b> 12 V"]
-        P2["pin 2<br/><b>P−</b> ground"]
-        P35["pins 3 + 5<br/><b>joined</b> = data"]
-        P4["pin 4<br/><b>3V3_In</b> reference"]
-    end
+    P1["pack pin 1  P+"] --> S1["S1"]
+    S1 --> BUCK["buck VIN+"]
+    S1 -->|load| K1["K1"]
+    K1 -->|load| RK12["RK900 12 V"]
 
-    S1{{"<b>S1</b> load disconnect<br/>OFF to plug / unplug"}}
+    P2["pack pin 2  P−"] --> GND["base-board GND pad<br/>buck VIN−<br/>RK900 GND<br/>K1 GND"]
 
-    subgraph B5802["RAK5802 — the wiring hub"]
-        direction TB
-        CBAT["BAT — empty"]
-        CGND["<b>GND</b>"]
-        CA["<b>A/RX</b>"]
-        CB["<b>B/TX</b>"]
-        CSCL["<b>SCL</b> = nRF P0.14<br/>→ K1 EN"]
-        CSDA["<b>SDA</b> = nRF P0.13"]
-        C3V3["3V3 — NEVER USE<br/><i>switches off mid-cycle</i>"]
-        CAIN["AIN — empty"]
-    end
+    P35["pack pins 3 + 5  joined"] --> SDA["RAK5802 SDA clip"]
 
-    K1{{"<b>K1</b> Pololu 5426<br/>RK900 duty-cycle switch"}}
+    P4["pack pin 4  3V3_In"] --> VDD["base-board VDD pad"]
+    VDD -->|VIN| K1
+    SCL["RAK5802 SCL clip"] -->|EN| K1
 
-    subgraph RK["RK900-09 weather"]
-        direction TB
-        RKV["12 V"]
-        RKG["GND"]
-        RKA["A"]
-        RKB["B"]
-    end
-
-    subgraph BUCK["Buck 12 V → 5 V"]
-        direction TB
-        BVI["VIN+"]
-        BVG["VIN−"]
-        BUSB["USB-C out → core"]
-    end
-
-    MUON["muon-wx<br/>+ / −"]
-    VDD["<b>VDD</b> pad<br/>base-board header<br/>always on"]
-    GNDPAD["<b>GND</b> pad<br/>base-board header"]
-
-    P1 --> S1
-    S1 --> BVI
-    S1 --> K1
-    K1 --> RKV
-    S1 --> MUON
-    P2 --> BVG
-    P2 --> RKG
-    P2 --> MUON
-    P2 --> CGND
-    P2 -.->|<b>SOLDER</b>| GNDPAD
-    P35 --> CSDA
-    P4 -.->|<b>SOLDER</b>| VDD
-    VDD -.->|<b>SOLDER</b> K1 VIN| K1
-    CSCL --> K1
-    RKA --> CA
-    RKB --> CB
-    BUSB --> CORE["RAK4631 core<br/>USB-C"]
-
-    style P35 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style CSDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
-    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
-    style K1 fill:#e3ecff,stroke:#2a4d9b,stroke-width:3px
-    style VDD fill:#d9ecff,stroke:#1f6feb,stroke-width:3px
-    style P4 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
-    style C3V3 fill:#ffd6d6,stroke:#b22222,stroke-dasharray: 4 3
-    style P1 fill:#fff3cd,stroke:#856404,stroke-width:2px
-    style CBAT fill:#eeeeee,stroke:#bbbbbb
-    style CAIN fill:#eeeeee,stroke:#bbbbbb
+    RKA["RK900 A"] --> A["RAK5802 A/RX"]
+    RKB["RK900 B"] --> B["RAK5802 B/TX"]
 ```
 
 Read it against the failure: on 2026-09-05 pin 1 was feeding the buck and the RK900 while pin 2
@@ -364,7 +293,7 @@ re-proposed; the full text lives in the git history of this file at commit `8b0a
 | 5 V on the `VDD` pad, miswired harness, a slot module holding `IO1`, ESD | Each tested and refuted 2026-08-30. | `EVIDENCE.md` 2026-08-30 |
 | A 1 kΩ series resistor on the data line ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)) | Fitted when `SDA` failed; refuted by our bench and by TI. Not protection. | #101 |
 | A powered-off isolation switch (`SN74CBTLV1G125` [CIT-SN74CBTLV1G125] [CIT-TI-POWERED-OFF-SWITCH]) | Guards the unpowered-node case, not the measured one; ESD-class parts are not rated for 183 ms of reverse conduction [CIT-LRC399-04AT1G]. Not adopted. | ADR-0011 |
-| Two independent ground conductors, a "ground first, break last" mating ritual [CIT-NRF-GNDLIFT] [CIT-NRF-GNDLOSS] | Both grounds come off the same pin 2, which lands last; a ritual cannot reorder contacts inside the plug. Kept as post-mate redundancy only. | § "The ground pin lands last" |
+| A second ground conductor to the RAK5802 `GND` clip, a "ground first, break last" mating ritual [CIT-NRF-GNDLIFT] [CIT-NRF-GNDLOSS] | Both grounds would come off the same pin 2, which lands last; a ritual cannot reorder contacts inside the plug. Never built; not in the plan. | § "The ground pin lands last" |
 | Moving the pad — `IO1` → `A1` → `SDA` | Three pads on three cores died the same way. The pad was never the variable. `SDA` stays because it is a spring clip with the base board's own 4.7 kΩ pull-up [CIT-RAK19007-SCH-SLOTS]. | `EVIDENCE.md` 2026-08-29/30 |
 
 Two habits survive from that period because they are free: **meter every incoming core's `IO1`,

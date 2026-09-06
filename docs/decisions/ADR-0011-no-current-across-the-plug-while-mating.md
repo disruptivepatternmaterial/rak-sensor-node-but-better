@@ -31,7 +31,7 @@ for), or **make sure no current is flowing when the contacts land.**
 ## Decision
 
 1. **A manual load disconnect `S1` on `P+`, inside the enclosure, immediately downstream of the
-   plug.** Everything that draws power — the node's supply, the RK900, the muon-wx — is on the far
+   plug.** Everything that draws power — the node's supply, the RK900 — is on the far
    side of it.
 2. **`S1` is open for every mate and every unmate.** Procedure: `S1` OFF → plug in, tighten the
    nut → `S1` ON. Unplugging: `S1` OFF → unplug. With `S1` open nothing draws through pin 1, node
@@ -45,10 +45,9 @@ for), or **make sure no current is flowing when the contacts land.**
    or rocker switch, or an inline blade-fuse holder with the fuse pulled — the latter also gives the
    harness the overcurrent protection it has never had. **No part is chosen in this ADR**; the one
    chosen gets a `CITATIONS.md` row before it goes on the BOM.
-4. **What is unchanged:** pin 2 `P−` to all load negatives and the base-board `GND` pad, plus a
-   second conductor to the RAK5802 `GND` clip; pins 3+5 joined to the `SDA` clip; pin 4 to the
-   `VDD` pad. The redundant ground and the series resistor stay as belt-and-braces; neither is
-   the fix and neither is credited as one.
+4. **What is unchanged:** pin 2 `P−` to the base-board `GND` pad, common with the buck and the
+   RK900; pins 3+5 joined to the `SDA` clip; pin 4 to the `VDD` pad. No second ground wire and
+   no series resistor — neither was ever built, and neither is credited with anything.
 5. The isolation switch (#101) is **not** adopted, and closes as superseded when this ADR is
    accepted.
 

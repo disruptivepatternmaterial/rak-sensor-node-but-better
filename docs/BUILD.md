@@ -27,64 +27,31 @@ Every wire in the node. Build to this; the numbered steps below are this picture
 
 ```mermaid
 flowchart LR
-    subgraph PACK["RAK9154 — 5-pin plug"]
-        P1["1  P+"]
-        P2["2  P−"]
-        P3["3  TXD"]
-        P4["4  3V3_In"]
-        P5["5  RXD"]
-    end
+    P1["pack pin 1  P+"] --> S1["S1"]
+    S1 --> BUCK["buck VIN+"]
+    S1 -->|load| K1["K1"]
+    K1 -->|load| RK12["RK900 12 V"]
 
-    S1{{"S1<br/>OFF to plug / unplug"}}
-    BUS["terminal block<br/>+ / −"]
+    P2["pack pin 2  P−"] --> GND["base-board GND pad<br/>buck VIN−<br/>RK900 GND<br/>K1 GND"]
 
-    BUCK["buck 12→5 V<br/>→ USB-C"]
-    K1{{"K1  Pololu 5426"}}
-    RK["RK900<br/>V+  GND  A  B"]
-    MUON["muon-wx<br/>+ / −"]
+    P35["pack pins 3 + 5  joined"] --> SDA["RAK5802 SDA clip"]
 
-    subgraph BOARD["RAK19007 + RAK4631"]
-        GNDPAD["GND pad"]
-        VDDPAD["VDD pad"]
-        subgraph R5802["RAK5802 clips"]
-            GNDC["GND"]
-            SDAC["SDA"]
-            SCLC["SCL"]
-            AC["A/RX"]
-            BC["B/TX"]
-        end
-    end
+    P4["pack pin 4  3V3_In"] --> VDD["base-board VDD pad"]
+    VDD -->|VIN| K1
+    SCL["RAK5802 SCL clip"] -->|EN| K1
 
-    P1 --> S1 --> BUS
-    P2 --> BUS
-    P2 --> GNDC
-    BUS --> BUCK
-    BUS --> K1 --> RK
-    BUS --> MUON
-    BUS --> GNDPAD
-    RK --> AC
-    RK --> BC
-
-    P3 & P5 --> SDAC
-    P4 --> VDDPAD
-
-    VDDPAD -. VIN .-> K1
-    SCLC -. EN .-> K1
-    BUS -. GND .-> K1
-
-    style S1 fill:#fff3b0,stroke:#b8860b,stroke-width:3px
-    style K1 fill:#e3ecff,stroke:#2a4d9b,stroke-width:3px
-    style SDAC fill:#ffd6d6,stroke:#b22222,stroke-width:3px
+    RKA["RK900 A"] --> A["RAK5802 A/RX"]
+    RKB["RK900 B"] --> B["RAK5802 B/TX"]
 ```
 
 | | Rule |
 |---|---|
 | `S1` | OFF before the plug moves, every time. It is the only thing between a late-landing pin 2 and a dead pad. |
-| `K1` | High-side in the RK900 branch only. Control: `VIN` from the `VDD` pad, `GND` to the `−` bus, `EN` from the `SCL` clip. Firmware for it does not exist yet ([#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)). |
+| `K1` | High-side in the RK900 branch only. Control: `VIN` from the `VDD` pad, `GND` to node ground, `EN` from the `SCL` clip. Firmware for it does not exist yet ([#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)). |
 | `SDA` and `VDD` (red / pin 4) | **Not landed until step 24 exists.** Core stays out of the board until then. |
 | `VDD` pad | Two wires: pack pin 4 and `K1 VIN`. Never the RAK5802 `3V3` clip. |
-| Buses | `+` bus: buck `VIN+`, `K1` load A, muon `+`. `−` bus: buck `VIN−`, RK900 `−`, muon `−`, `GND` pad, `K1 GND`. |
-| Not connected | 4-pin Gateway Load socket; RAK5802 `BAT`, `3V3`, `AIN` clips; enclosure lid panel. |
+| Ground | One common ground: pack pin 2 → base-board `GND` pad, buck `VIN−`, RK900 `GND`, `K1 GND`. |
+| Not connected | 4-pin Gateway Load socket; RAK5802 `BAT`, `GND`, `3V3`, `AIN` clips; enclosure lid panel. |
 
 ## Required equipment
 
@@ -95,7 +62,7 @@ flowchart LR
   (`SP1110/P5`) [CIT-RAK-WX-MANUAL]
 - **`S1`** — a toggle/rocker switch or an inline blade-fuse holder, rated ≥ 2 A at 13.2 V DC,
   with a label reading `OFF before plugging or unplugging the pack`
-- a terminal block for the `P+`/`P−` fan-out inside the enclosure
+- Pololu 5426 (`K1`) — in hand for 002/003
 - 12 V-to-5 V buck converter
 - multimeter
 - Saleae Logic Pro 8 for any unqualified signal
@@ -116,22 +83,18 @@ passes.
 
 **Ground.**
 
-7. Wire pack pin 2 (`P−`) to the terminal block's `−` bus. From that bus, one conductor each to:
-   - buck input negative;
-   - RK900 negative;
-   - muon-wx negative;
-   - `GROUND A` → the base-board `GND` pad.
-8. From pack pin 2, a **second** conductor, `GROUND B` → the RAK5802 `GND` spring terminal. Make
-   the pin-2 junction soldered and heat-shrunk.
+7. Wire pack pin 2 (`P−`) to the base-board `GND` pad, and from that same node ground to the
+   buck input negative, the RK900 `GND`, and `K1 GND`. Solder and heat-shrink the pin-2 junction.
 
-**Power, through `S1`.**
+**Power, through `S1` and `K1`.**
 
-9. Wire pack pin 1 (`P+`) to one terminal of `S1`. Nothing else connects to pin 1.
-10. Wire the other terminal of `S1` to the terminal block's `+` bus. From that bus, one conductor
-    each to:
-    - buck input positive;
-    - RK900 12 V positive;
-    - muon-wx positive.
+8. Wire pack pin 1 (`P+`) to one terminal of `S1`. Nothing else connects to pin 1.
+9. Wire the other terminal of `S1` to the buck input positive and to one `K1` load slot. The other
+   `K1` load slot goes to the RK900 12 V. `K1 VIN` → the base-board `VDD` pad (the pad pack pin 4 will
+   share when step 24 exists); `K1 EN` → the RAK5802 `SCL` clip
+   ([#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)).
+10. Do not jumper `K1 EN` to `K1 VIN`; do not take `K1 VIN` from the RAK5802 `3V3` clip; do not
+    switch the RK900 ground.
 11. Set `S1` **OFF** and fit its label. Mount it where it can be operated with the lid open and
     nothing unplugged.
 
@@ -147,8 +110,8 @@ passes.
 15. Measure pack pin 2 to the base-board `GND` pad. Record the resistance. It must remain stable
     while the harness and each termination are moved gently; an overload/open or changing reading
     fails this step.
-16. Measure pack pin 2 to the RAK5802 `GND` terminal in the same way. Record the resistance.
-17. With `S1` OFF, measure pack pin 1 to the terminal block's `+` bus: **must read open.** Switch
+16. Measure pack pin 2 to the RK900 `GND` and to the buck input negative in the same way.
+17. With `S1` OFF, measure pack pin 1 to the buck input positive: **must read open.** Switch
     `S1` ON, repeat: must read the lead resistance from step 14. Switch `S1` **OFF** again and
     record both readings.
 18. Connect RK900 `A` to RAK5802 `A/RX` and RK900 `B` to RAK5802 `B/TX`.
@@ -238,9 +201,9 @@ Base board identifier (or NOT IDENTIFIED):
 Pack/harness identifier (or NOT IDENTIFIED):
 Meter lead resistance:
 Pack pin 2 -> base-board GND:
-Pack pin 2 -> RAK5802 GND:
-Pack pin 1 -> + bus, S1 OFF (must be open):
-Pack pin 1 -> + bus, S1 ON:
+Pack pin 2 -> RK900 GND / buck VIN-:
+Pack pin 1 -> buck VIN+, S1 OFF (must be open):
+Pack pin 1 -> buck VIN+, S1 ON:
 S1 left OFF and labelled? (must be YES):
 BAT -> IO1:
 BAT -> A1:
