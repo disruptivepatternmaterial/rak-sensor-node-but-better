@@ -4,6 +4,30 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-09-06 — `0.4.6` compiles on all four environments; nothing observed on hardware
+
+**Host:** Heliotrope Ridge, PlatformIO Core 6.1.19. **Commit:** `ea119ac`, version `0.4.6`.
+
+`scripts/build.sh -e stage1 -e stage2 -e stage3 -e rak4631` → `=== BUILD OK ===`, 4 succeeded
+in 21.6 s. `env:rak4631` links at RAM 10.1 % (25,052 / 248,832 B) and Flash 26.1 %
+(212,524 / 815,104 B); `env:stage3` at Flash 26.0 % (212,012 B). `scripts/preflight.sh` reports
+`=== PREFLIGHT OK ===` at the same commit.
+
+No new compiler warnings. Three remain on the bench environments and all three predate this
+commit: `config.cpp` `previous` unused under `FEATURE_BENCH_INTERVAL`, and the two/three
+`main.cpp` file-static callbacks unused when `FEATURE_BATTERY`/`FEATURE_RADIO` are 0. The
+vendored `SdFat`, `SX126x-Arduino` library warnings are upstream and unchanged.
+
+**What this establishes:** the `0.4.6` sources compile for every environment CI builds, including
+the `FEATURE_RADIO=0` stub added for `session::permit_join_escape()`.
+
+**What it does not establish:** anything about behavior. The keepalive join escape, the preserved
+brownout bit, the `pending_interval` correction, the downlink critical section and the RK900 sign
+fix are **all unobserved** — no board was flashed and none was asked for. The off-target tests
+that would have exercised the payload encoder and the frame codec were removed in `5a9d584`, so
+`pio test -e native` is skipped rather than passing. H1–H8 remain open and status stays
+**🚧 NOT YET DEPLOYED**.
+
 ## 2026-09-05 — node 002 resets and reports weather, but the battery remains absent
 
 **TTN query host:** Heliotrope Ridge. **Resident image:** commit `33c0cdd`, version `0.4.4`,
