@@ -18,6 +18,7 @@ Assembly procedure: [`docs/BUILD.md`](docs/BUILD.md). Bring-up mechanics:
 | Numbered hardware assembly | [`docs/BUILD.md`](docs/BUILD.md) |
 | First flash / bring-up | [`docs/FIRST_FLASH.md`](docs/FIRST_FLASH.md) |
 | Deployment procedure | [`docs/DEPLOY.md`](docs/DEPLOY.md) |
+| Reflashing a sealed node (BLE OTA DFU) | [`docs/FIELD_UPDATE.md`](docs/FIELD_UPDATE.md) |
 | Hardware research / wiring rationale | [`docs/HARDWARE.md`](docs/HARDWARE.md) |
 | Libraries & examples | [`docs/LIBRARIES.md`](docs/LIBRARIES.md) |
 | Decisions (ADRs) | [`docs/decisions/`](docs/decisions/) |

@@ -23,6 +23,12 @@ Documentation only; no firmware change. **🚧 NOT YET DEPLOYED.**
   ADR-0011's coreless mating test instead of the #101 isolation switch, which is dropped: it
   guards a different mechanism and an ESD-class part cannot absorb 183 ms of reverse conduction.
   `S1`'s part is not yet chosen and gets a `CITATIONS.md` row when it is.
+- **`docs/HARDWARE.md` cut from 1263 lines to ~390.** Everything written before the 2026-09-05
+  measurement that still called the cause "not established", proposed a third-plus hypothesis,
+  or kept the 1 kΩ resistor / isolation switch / historical topologies alive as build paths is
+  gone; one table lists what was tried and why each was dropped (full text at `8b0ae85`). The
+  qualification procedure lives only in `BUILD.md` § B, the mating procedure only in ADR-0011,
+  and the sealed-node reflash research moved verbatim to `docs/FIELD_UPDATE.md`.
 - **RAK19010 (SKU 110086) + RAK19016 evaluated as a field base and not adopted; the hardware
   stays as built** (ADR-0011 appendix, `CIT-RAK19010-RAW`, `CIT-RAK19016-*`). Cleaner power front
   end on the drawings, no effect on the pad problem, and it costs the USB port. Kept on record so

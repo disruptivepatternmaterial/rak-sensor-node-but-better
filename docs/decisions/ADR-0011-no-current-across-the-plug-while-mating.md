@@ -96,7 +96,7 @@ drawings, yes, with one real cost.
 
 **Not adopted.** If it is ever revisited: the workable shape is RAK19010 + RAK19016 in the field
 with a RAK19007 kept on the bench as the programming/soak fixture, the core moving between them;
-the field node is reflashed over BLE OTA (`HARDWARE.md` § "Reflashing a sealed field node").
+the field node is reflashed over BLE OTA (`FIELD_UPDATE.md`).
 RAK19012 (USB + LiPo + solar) would gain nothing — it is the RAK19007 power topology on a card.
 `S1`, the plug rule, `3V3_In` on the `VDD` pad, and the `SDA` landing are the same on either base
 (`CIT-RAK19010-RAW`).
