@@ -12,21 +12,20 @@ Documentation only; no firmware change. **🚧 NOT YET DEPLOYED.**
 
 ### Changed
 
-- **A load disconnect `S1` on `P+`, open whenever the pack plug is mated or unmated**
-  ([ADR-0011](docs/decisions/ADR-0011-no-current-across-the-plug-while-mating.md)). The
-  2026-09-05 capture showed the 5-pin plug's `P−` landing ~180 ms after `P+` and the data pin,
-  putting the data wire at −8.1 V with the node's supply current returning through it. The
-  connector and the pack cannot change and the 4-pin socket is not in play, so the one variable
-  left is how much current flows when the contacts land: with `S1` open, none. `docs/HARDWARE.md`
-  § "The wiring plan" carries the harness and diagram; `docs/BUILD.md`
-  section A builds it (one plug, `S1`, label), and the pre-Core gate is
-  ADR-0011's coreless mating test instead of the #101 isolation switch, which is dropped: it
-  guards a different mechanism and an ESD-class part cannot absorb 183 ms of reverse conduction.
-  `S1`'s part is not yet chosen and gets a `CITATIONS.md` row when it is.
+- **The pack plug is mated before the core is fitted and never moved with a core in the board**
+  ([ADR-0011](docs/decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md)). The 2026-09-05
+  capture showed the 5-pin plug's `P−` landing ~180 ms after `P+` and the data pin, putting the
+  data wire at −8.1 V with the node's supply current returning through it — on every mating, two
+  packs, core removed. That harms nothing unless a pad is on the wire, so the fix is build order,
+  not a part: harness → mate → qualify → core → seal; a field pack swap is a bench trip. The
+  first version of ADR-0011 specified a load-disconnect switch `S1` inside the enclosure; the
+  enclosure is sealed in the field, so it was withdrawn the same evening. The #101 isolation
+  switch is dropped: it guards a different mechanism and an ESD-class part cannot absorb 183 ms
+  of reverse conduction.
 - **The wiring picture and build steps match the harness as built**: one common ground to the
   base-board `GND` pad, no terminal block, no second ground wire, no series resistor, no muon-wx
-  — those were agent additions (`5c394ac`, `7cce1b9`) that were never on the bench. `S1` and `K1`
-  (#117) are the only additions to the as-built harness.
+  — those were agent additions (`5c394ac`, `7cce1b9`) that were never on the bench. the Pololu relay
+  (#117) is the only addition to the as-built harness.
 - **`docs/HARDWARE.md` cut from 1263 lines to ~470.** Everything written before the 2026-09-05
   measurement that still called the cause "not established", proposed a third-plus hypothesis,
   or kept the 1 kΩ resistor / isolation switch / historical topologies alive as build paths is

@@ -7,7 +7,7 @@ Numbered assembly procedure: [`BUILD.md`](BUILD.md).
 
 This file holds the electrical rationale: what each connection is, why, and what was measured.
 The one build diagram and the numbered steps are in `BUILD.md`; the reasoning behind the
-2026-09-05 wiring decision is [ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md).
+2026-09-05 wiring decision is [ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md).
 
 ## Mission
 
@@ -25,7 +25,6 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | Buck | 12 V → 5 V | (separate) |
 | RK900 duty-cycle switch `K1` | Pololu Isolated Solid State Relay/Switch, SPST, 100 V, 4.5 A [CIT-POLOLU-5426] — in hand for 002/003; wiring agreed in [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117), **firmware not yet written** | Pololu **5426** |
 | Pack cable | one SP11 plug mating `SP1110/P5` [CIT-RAK-WX-MANUAL] | — |
-| Load disconnect `S1` | switch or inline fuse holder on `P+`, ≥ 2 A at 13.2 V DC — **part not yet chosen**, gets a `CITATIONS.md` row when it is | — |
 | Power source | RAK9154 Solar Battery Lite, **large-panel variant** | — |
 
 **Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, AS923 kit **119012**.
@@ -85,7 +84,7 @@ undocumented part.
 
 | Pin | Signal | This node |
 |---|---|---|
-| 1 | P+ (12 V boost) | → **`S1` load disconnect** → every load (node supply, RK900). `S1` is open whenever this plug is being mated or unmated — § "The wiring plan" |
+| 1 | P+ (12 V boost) | → buck `VIN+` and, through the Pololu relay, RK900 12 V |
 | 2 | P− | → base-board `GND` pad; common with buck `VIN−`, RK900 `GND`, `K1 GND` |
 | 3 | TXD | joined to pin 5 → the one-wire wire → RAK5802 `SDA` clip |
 | 4 | 3V3_In | → base-board `VDD` pad (the always-on `3V3`, ADR-0010) — **never 5 V**, never the RAK5802 `3V3` clip |
@@ -122,77 +121,35 @@ Wiring from 4800 costs a bench session debugging a bus that is silent by configu
 Per [ADR-0004](decisions/ADR-0004-bms-one-wire-path.md). The two sensors are on **separate
 buses**, so neither can interfere with or block the other.
 
-### The wiring plan — 2026-09-05 ([ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md))
+### The wiring plan — 2026-09-05 ([ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md))
 
-Everything crosses the one 5-pin plug; the 4-pin socket is not used. The hardware is as built —
-RAK19007, buck, USB-C. The plug's contacts do not
-land together and `P−` lands last — measured, ~25 times, two packs, core removed. The connector
-cannot be changed and the pack cannot be changed, so the one variable left is **how much current
-is flowing at the instant the contacts land: none.** A manual load disconnect (`S1`) sits on `P+`
-inside the enclosure and is **open for every mate and every unmate**. With `S1` open nothing draws
-through pin 1, node ground cannot be pulled toward `P+`, and the data wire has no current to carry
-— in whatever order the five contacts touch.
+The harness as built, plus the Pololu relay in the RK900 12 V line
+([#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)).
+Everything crosses the one 5-pin plug; the 4-pin socket is not used.
 
-| From pack 5-pin | To | Notes |
-|---|---|---|
-| Pin 1 `P+` (12 V boost) | **`S1` load disconnect**, then buck `VIN+` and `K1` load slot A | `S1` is the fix. Buck `VOUT` 5 V → the board's USB-C, as built |
-| `K1` load slot B | RK900 12 V | high-side, RK900 branch only; the two load slots are symmetric [CIT-POLOLU-5426] [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117) |
-| `K1` `VIN` | base-board `VDD` pad | the same always-on `3V3` that feeds pack pin 4 — the `VDD` pad carries **two** conductors. Never the RAK5802 `3V3` clip (`3V3_S`) |
-| `K1` `GND` | node ground | |
-| `K1` `EN` | RAK5802 `SCL` clip (nRF P0.14) | control input, 2.7–40 V = on. **Nothing drives `SCL` yet** — see the note below the table |
-| Pin 2 `P−` | base-board `GND` pad; buck `VIN−`; RK900 `GND`; `K1 GND` | one common ground, as built |
-| Pins 3 + 5 joined | RAK5802 `SDA` clip (nRF P0.13) | the one-wire line. The base board already pulls it up with 4.7 kΩ to `VDD` (`R10`, [CIT-RAK19007-SCH-SLOTS]); no external pull-up needed on this landing |
-| Pin 4 `3V3_In` | base-board `VDD` pad | the always-on `3V3` looped through the core (ADR-0010). Never the RAK5802 `3V3` clip (`3V3_S`, switched by `IO2`), never 5 V |
-
-The `VDD` pad carries two wires: pack pin 4 and `K1 VIN`.
-
-**`K1` before its firmware exists — a hypothesis to meter, not a claim.** #117 says "until
-firmware drives `SCL`, the switch stays open and the head is dark." The schematic says the base
-board pulls `I2C1_SCL` to `VDD` through `R11` 4.7 kΩ [CIT-RAK19007-SCH-SLOTS], so an undriven
-`SCL` clip sits at ~3.3 V, inside `K1`'s 2.7–40 V on-range. Whether 4.7 kΩ can source enough
-current to light the optocoupler's LED is not on Pololu's page (`EN` input current is not
-specified). So the default state of an unfirmwared `K1` is **unknown**: meter `K1`'s load side with
-the board powered, no core, `SCL` undriven, and record it. If it reads on, the RK900 simply runs
-continuously as it does today until the firmware lands; nothing is damaged either way. The
-firmware (drive `SCL` HIGH → settle → poll → LOW) is [#117](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/117)
-and is **not** in any image yet. `FEATURE_BATTERY_PIN_SCL` and `K1` cannot both be on.
-
-**`S1` requirements.** Breaks `P+` only — never `P−`. Rated for the plug's ceiling, 2 A at 13.2 V
-DC [CIT-RAK-WX-MANUAL]. Reachable with the lid open and nothing unplugged. Either a toggle/rocker
-switch or an inline blade-fuse holder with the fuse pulled — the fuse holder also gives the
-harness the overcurrent protection it has never had. **No part is chosen here**; the one the
-operator picks gets a `CITATIONS.md` row before it goes on the BOM. It is labelled at the switch:
-**`OFF before plugging or unplugging the pack`**.
-
-**Procedure and the node's state while `S1` is open** are in ADR-0011 § "Decision": `S1` OFF → mate
-→ `S1` ON; `S1` OFF → unplug. No wait is needed; node-side capacitors discharge into node-side loads.
-
-**Every wire in the node.** The build-sequence version is
-[`BUILD.md`](BUILD.md) § "The build, in one picture".
+**Every wire in the node.**
 
 | # | From | To |
 |---|---|---|
-| 1 | pack pin 1 `P+` | power switch |
-| 2 | power switch | buck `VIN+` |
-| 3 | power switch | Pololu relay, one big terminal |
-| 4 | Pololu relay, other big terminal | RK900 12 V |
-| 5 | pack pin 2 `P−` | base-board `GND` pad |
-| 6 | pack pin 2 `P−` | buck `VIN−` |
-| 7 | pack pin 2 `P−` | RK900 GND |
-| 8 | pack pin 2 `P−` | Pololu relay `GND` |
-| 9 | pack pins 3 + 5, joined | RAK5802 `SDA` clip |
-| 10 | pack pin 4 `3V3_In` | base-board `VDD` pad |
-| 11 | base-board `VDD` pad | Pololu relay `VIN` |
-| 12 | RAK5802 `SCL` clip | Pololu relay `EN` |
-| 13 | RK900 A | RAK5802 `A/RX` |
-| 14 | RK900 B | RAK5802 `B/TX` |
-| 15 | buck output | board USB-C |
+| 1 | pack pin 1 `P+` | buck `VIN+` |
+| 2 | pack pin 1 `P+` | Pololu relay, one big terminal |
+| 3 | Pololu relay, other big terminal | RK900 12 V |
+| 4 | pack pin 2 `P−` | base-board `GND` pad |
+| 5 | pack pin 2 `P−` | buck `VIN−` |
+| 6 | pack pin 2 `P−` | RK900 GND |
+| 7 | pack pin 2 `P−` | Pololu relay `GND` |
+| 8 | pack pins 3 + 5, joined | RAK5802 `SDA` clip |
+| 9 | pack pin 4 `3V3_In` | base-board `VDD` pad |
+| 10 | base-board `VDD` pad | Pololu relay `VIN` |
+| 11 | RAK5802 `SCL` clip | Pololu relay `EN` |
+| 12 | RK900 A | RAK5802 `A/RX` |
+| 13 | RK900 B | RAK5802 `B/TX` |
+| 14 | buck output | board USB-C |
 
 ```mermaid
 flowchart TB
-    P1["pin 1  P+"] --> SW["power switch"]
-    SW --> BUCK["buck"]
-    SW --> RELAY["Pololu relay"]
+    P1["pin 1  P+"] --> BUCK["buck"]
+    P1 --> RELAY["Pololu relay"]
     RELAY --> RK["RK900 12 V"]
 
     P2["pin 2  P−"] --> GND["GND pad · buck VIN− · RK900 GND · relay GND"]
@@ -204,24 +161,35 @@ flowchart TB
     SCL["SCL clip"] --> RELAY
 ```
 
-Read it against the failure: on 2026-09-05 pin 1 was feeding the buck and the RK900 while pin 2
-was still in the air, and the only way back to the pack for that current was pins 3/5 → `SDA` →
-the pad. With `S1` open at that moment pin 1 feeds nothing.
+**The one rule.** The plug's contacts do not land together: `P−` lands ~180 ms after `P+` and
+the data pin, and in that window the node's supply current returns through the data wire at
+−8 V — measured ~25 times, two packs, core removed (§ "The ground pin lands last"). That harms
+nothing unless a core is in the board. So the **plug is mated before the core is fitted, and is
+never moved with a core in the board**. The enclosure is sealed in the field and the plug is never
+touched there; a pack swap is a bench trip, core out first. No switch, no extra part — the first
+version of ADR-0011 specified one inside the box, and was withdrawn the same day because the box
+cannot be opened.
 
-**What `S1` does not do.** It depends on a hand. Mate with `S1` on and today's fault is back,
-unchanged. The label and the procedure are the whole guard; there is no interlock. That is the
-cost of a one-plug design, and it is stated here rather than hidden.
+**Relay before its firmware exists — a hypothesis to meter, not a claim.** #117 says "until
+firmware drives `SCL`, the switch stays open and the head is dark." The schematic says the base
+board pulls `I2C1_SCL` to `VDD` through `R11` 4.7 kΩ [CIT-RAK19007-SCH-SLOTS], so an undriven
+`SCL` clip sits at ~3.3 V, inside the relay's 2.7–40 V on-range [CIT-POLOLU-5426]. Whether 4.7 kΩ
+can source enough current to light the optocoupler's LED is not on Pololu's page. So the default
+state of the relay without firmware is **unknown**: meter its RK900 side with the board powered,
+no core, `SCL` undriven, and record it. If it reads on, the RK900 runs continuously as it does
+today until the firmware lands; nothing is damaged either way. `FEATURE_BATTERY_PIN_SCL` and the
+relay cannot both be on. The `VDD` pad carries two wires: pack pin 4 and relay `VIN`. Never the
+RAK5802 `3V3` clip (`3V3_S`).
 
-**What has to be measured before a core goes near it** — ADR-0011 § "Exit criteria": the harness
-on a coreless board with `S1` fitted, analyzer on the pins 3+5 wire against node ground,
-≥ 10 mate/unmate cycles by the ADR-0011 procedure, **no excursion below −0.3 V**. Runs 6 and 7
-(same harness, no `S1`, every mating below −0.3 V) are the control; this is that test with one
-variable changed. Then a meter-checked core, one cycle, pad still megohms to ground.
+**What has to be measured before a core goes near it** — ADR-0011 § "Exit criteria": plug mated,
+node running from the pack, analyzer on the pins 3+5 wire against node ground, ≥ 10 minutes with
+the RK900 active, wire within −0.3 … +3.6 V. Then a meter-checked core fitted with the plug
+already mated, 24 h, pad re-metered.
 
 ### The two data rules, stated plainly
 
 > **Pack pins 3 and 5 (TXD and RXD) are joined. The resulting data line does not reach `SDA`
-> until the harness with `S1` above has passed its mating test with no core fitted.**
+> until the plug is mated and ADR-0011's steady-state capture is in `EVIDENCE.md`.**
 >
 > **Pack pin 4 (`3V3_In`) goes to the `VDD` pad on the base board. Not to the RAK5802's `3V3`
 > terminal, and never to 5 V.**
@@ -255,17 +223,16 @@ RK900 and/or the buck, which stay wired whether or not the node is powered. **Th
 handling sequence on the node side that prevents it.** Why node 001 has survived many matings is
 unmeasured and stays that way until its harness is on a bench.
 
-> **Rule: no nRF pad is connected to the pins 3+5 wire unless no supply current crosses the
-> 5-pin connector while it is being mated or unmated.** Adopted 2026-09-05 as
-> [ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md): a load disconnect
-> `S1` on `P+` inside the enclosure, open for every mate and unmate — see § "The wiring plan"
-> above. The 4-pin socket is not in play. The powered-off isolation switch
+> **Rule: the pack plug is mated before the core is fitted and never moved with a core in the
+> board.** Adopted 2026-09-05 as
+> [ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md). The excursion still
+> happens on every mating; it just finds no pad to kill. The 4-pin socket is not in play. The
+> powered-off isolation switch
 > ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101))
 > is not adopted: it addresses a different mechanism and an ESD-class part cannot absorb 183 ms
 > of reverse conduction.
 >
-> Until the harness with `S1` has passed its mating test, a fresh core on the pins 3+5 wire is
-> expected to lose that pad on a mating.
+> A core on the pins 3+5 wire while the plug is mated or unmated is expected to lose that pad.
 
 CITE(bench): [`EVIDENCE.md`](EVIDENCE.md) 2026-09-05 (later) — capture
 `20260905_002_events.sal`, Logic Pro 8 `AF11F852CEC20A9`, Heliotrope Ridge.
@@ -389,7 +356,7 @@ Consequences, each one a thing this repo had wrong or unknown:
 
 **The RAK19010 (SKU 110086) + RAK19016 alternative — evaluated 2026-09-05, not adopted; the
 hardware stays as built.** Record in
-[ADR-0011](decisions/ADR-0011-no-current-across-the-plug-while-mating.md) § "Base board" and the
+[ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md) § "Base board" and the
 `CIT-RAK19010-RAW` / `CIT-RAK19016-*` registry rows, so the question does not have to be
 researched twice. Short form: a cleaner power front end (12 V straight onto a screw terminal,
 reverse-polarity gate, `SGM61230`, same `SGM6036` 3.3 V stage, no USB in the power path) that

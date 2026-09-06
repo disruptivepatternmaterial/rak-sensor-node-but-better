@@ -84,6 +84,10 @@ needed. Any power-budget arithmetic written against the 50 s figure is stale —
 
 ## Then
 
+- **The pack plug does not move once a core is in the board** — not at the bench, not in the
+  field. Mating or unmating it puts −8 V on the data wire and kills the `SDA` pad
+  ([ADR-0011](decisions/ADR-0011-plug-moves-only-with-no-core-fitted.md)). A pack swap means
+  the node comes back, the core comes out, then the plug moves.
 - 24 h bench soak: both sensors live, TTN uplinks arriving, no watchdog resets.
 - 7 d field shadow: node in its enclosure, outdoors, before anything is trusted.
 
