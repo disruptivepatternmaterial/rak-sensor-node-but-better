@@ -23,6 +23,7 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | Enclosure | Unify **solar** variant — the no-solar 910406 was out of stock | **910421** (confirm) |
 | Buck | 12 V → 5 V | (separate) |
 | Power source | RAK9154 Solar Battery Lite, **large-panel variant** | — |
+| Pack data front end `K2` | Panasonic `AQY212EH` PhotoMOS on a Preci-Dip `110-87-304-41-001101` socket, plus a 470 Ω resistor — see "The data-line front end" below | `AQY212EH` |
 
 **Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, AS923 kit **119012**.
 
@@ -488,247 +489,76 @@ Ground first, ground last. No exceptions, no shortcuts, and never two power sour
   [CIT-NRF-UNPOWERED-PIN].
 - Never move the data wire to a fresh pad without running the census in step 9 first.
 
-### Powered-off isolation candidate — researched, not yet cleared to build
+### The data-line front end — decided 2026-09-06
 
-The direct `SDA` passthrough does not satisfy the powered-off-pad limit: the nRF52840 GPIO maximum
-is 0.3 V when its `VDD` is 0 V [CIT-NRF-BACKPOWER]. TI's powered-off-protection guidance requires
-a switch whose own datasheet specifies I/O isolation with its supply at 0 V
-[CIT-TI-POWERED-OFF-SWITCH].
+The pack data wire does not reach a GPIO directly. It reaches it through a normally-open
+optically-isolated relay that firmware closes only for the battery read.
 
-`SN74CBTLV1G125` is the current candidate [CIT-SN74CBTLV1G125]:
+**Why, in one measurement.** Mating the pack drives the data conductor to **−7.84 V** with the node
+unpowered and **−2.62 V** with it powered, against an nRF52840 I/O absolute maximum of **−0.3 V**
+[CIT-NRF-GPIO]. Events last 1.6–10.6 ms and recur tens of times per plugging session
+([`EVIDENCE.md`](EVIDENCE.md) 2026-09-06, captures 7 and 11). The violation is on the lower rail,
+which is the direction every dead pad failed.
 
-- one bidirectional 1:1 FET switch; no fixed TX/RX direction;
-- `Ioff` maximum 10 µA with `VCC = 0 V` and either data terminal from 0 V to 3.6 V;
-- 5 Ω typical on-resistance and 10 µA maximum supply current at 3.6 V;
-- active-low output enable; TI requires a pull-up from `OE` to `VCC` so the path stays
-  high-impedance during power-up and power-down.
+**Why a switch, and not a resistor or a clamp.** Asked what series resistor protects a pin driven
+while `VDD = 0`, Nordic answered that there is no safe value and that the alternative is an
+external normally-off switch
+[CITE(prior-art): Nordic DevZone 91161 — protection-diode clamping current, and the normally-off switch recommendation](https://devzone.nordicsemi.com/f/nordic-q-a/91161/protection-diodes-on-nrf52840-clamping-current).
+Passive termination is separately ruled out by arithmetic: holding −7.84 V above −0.3 V through the
+measured 8.6 kΩ source needs R < 340 Ω, while preserving a valid HIGH through the pack's measured
+4.5 kΩ driver needs tens of kΩ. No single value satisfies both.
 
-The candidate topology powers the switch from the Core-side `VDD`, places its bidirectional data
-path between the pack and `SDA`, and defaults `OE` to disabled. This is a **candidate**, not a
-wiring instruction. It solves one established hazard—voltage reaching an unpowered pad—but its
-low on-resistance does not limit two powered transmitters fighting.
+#### Parts
 
-It becomes an approved design only after all of these exist:
-
-1. an exact schematic naming the `OE` control source and pull-up value;
-2. a contention-current limit that still meets the measured HIGH/LOW thresholds at 9600 baud;
-3. a no-Core test showing the Core-side switch terminal remains isolated while the pack side is
-   active and switch `VCC` is 0 V;
-4. powered captures on both sides of the current-limiting element during the production exchange;
-5. sleep-current accounting for the finished circuit.
-
-`TMUX1101` was considered and rejected: its datasheet provides fail-safe protection for the
-control input, not powered-off isolation on the signal path. `TMUX1511` does provide signal-path
-powered-off protection, but it is a four-channel, 70 µA-maximum part where this node needs one
-channel. Neither rejection is a claim that the part is defective; it is a fit decision from the
-manufacturers' specifications.
-
-### The one-wire series resistor — mitigation only
-
-**This section used to be titled "REQUIRED — the one-wire protection network" and claimed the
-series resistor "actually saves the pin". A 1 kΩ resistor was inline when `SDA`/P0.13 died, so
-that claim is refuted by measurement and has been removed
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).**
-
-The reasoning was: Nordic's damage mode is **current** through the ESD diode rather than voltage
-across it [CIT-NRF-BACKPOWER], a bare wire limits that current only by the diode's own resistance,
-and 1 kΩ bounds it to roughly 3 mA. That arithmetic is still correct. What it evidently does not
-cover is whatever actually killed these pads — which is consistent with the failures being short
-to ground rather than the back-powering the arithmetic was aimed at.
-
-Retain 1 kΩ in any test fixture because it bounds current relative to a bare wire. It is not the
-approved value for a finished node: the two-sided capture needed to select that value has not
-been run. A fitted resistor does not close the pre-Core gate.
-
-| Ref | What | Value | Suggested part |
-|---|---|---|---|
-| **R1** | resistor | 1 kΩ, ¼ W | any through-hole 1 kΩ |
-
-#### Unvalidated companion parts
-
-These parts appeared in an earlier proposed network. Neither closes powered-off isolation or
-contention, and neither is authorization to connect a Core.
-
-| Ref | What | Value | Suggested part | What it adds |
-|---|---|---|---|---|
-| **R2** | resistor | 2.2 kΩ, ¼ W | any through-hole 2.2 kΩ | pulls the idle level clear of the 1.7 V grey zone the pack's 15 kΩ pull-down creates. **Must reference the board's own `VDD` pad, never an external rail** — a pull-up to an external supply back-powers the nRF through the pin when the board is off [CIT-PARTICLE-BACKPOWER] |
-| **D1** | 3.3 V bidirectional TVS / ESD diode | 3.3 V working voltage | Nexperia `PESD3V3L1BA`, Littelfuse `PESD3V3S1UB`, any 3.3 V TVS | clamps a spike faster than R1 alone can bleed it |
-
-A **bidirectional** TVS has no polarity, so it cannot be fitted backwards — that is why it beats a
-`BAT54S` here. Check the part's own datasheet for its **working** voltage, not its breakdown
-voltage, before fitting.
-
-#### Where it lands — use the RAK5802 spring terminals, not the soldered pad
-
-`WB_I2C1_SDA` is P0.13, and `variant.h` marks it `SENSOR_SLOT IO_SLOT` — so it appears **both** on
-the base-board edge header **and** on the RAK5802's second spring terminal block, silkscreened
-`SCL SDA 3V3 AIN`. RAKwireless documents that block as a "reserved I2C expansion interface", a
-direct passthrough with no buffer or isolation; the module's 18 kV ESD protection is on the RS485
-side only [CIT-RAK5802].
-
-**Land the pack's data wire in the RAK5802's `SDA` spring terminal.** It is the same net as the
-pad, and it is better in three ways: no soldering, trivial rework, and it keeps you entirely off
-the 2.54 mm header row where all seven dead pads have been.
-
-> **Trap — do not use the RAK5802's `3V3` terminal for anything.** That terminal sits on the
-> switched `3V3_S` rail, and `src/sensors/rk900.cpp` deliberately drops `WB_IO2` LOW after each
-> weather read. A pull-up or a reference taken from there vanishes partway through every cycle,
-> and the symptom is a battery that reads intermittently — very easy to misread as a protocol
-> fault. R2 and pack pin 4 both come from the always-on **`VDD` pad** on the edge header.
-
-`GND` on the same terminal block is common ground and is fine for D1 and for the harness ground
-wire.
-
-#### Historical unisolated topology — do not build
-
-The diagrams below document the topology used for the measurements and failures. They omit the
-powered-off isolation switch and are **not** current build instructions.
-
-```mermaid
-flowchart LR
-    subgraph PACK["RAK9154 pack — SP11 connector"]
-        P35["pins 3 + 5 joined<br/>TXD + RXD"]
-        P2["pin 2<br/>P-minus"]
-        P4["pin 4<br/>3V3_In"]
-    end
-
-    R1["R1 — 1 kohm<br/>inline in the wire<br/>heat-shrunk"]
-
-    subgraph T["RAK5802 spring terminals<br/>SCL SDA 3V3 AIN"]
-        TSDA["SDA clip<br/>= nRF P0.13"]
-        TGND["GND clip"]
-        T3V3["3V3 clip<br/>SWITCHED — DO NOT USE"]
-    end
-
-    subgraph H["RAK19007 edge header — always on"]
-        HVDD["VDD pad<br/>3.3 V always on"]
-    end
-
-    D1["D1 — 3.3 V TVS<br/>clamp"]
-    R2["R2 — 2.2 kohm<br/>pull-up"]
-
-    P35 --> R1
-    R1 --> TSDA
-    TSDA --- D1
-    D1 --- TGND
-    TSDA --- R2
-    R2 --- HVDD
-    P2 --> TGND
-    P4 --> HVDD
-
-    style R1 fill:#ffe9b3,stroke:#b8860b,stroke-width:2px
-    style D1 fill:#ffd6d6,stroke:#b22222,stroke-width:2px
-    style R2 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
-    style TSDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style T3V3 fill:#eeeeee,stroke:#999999,stroke-dasharray: 4 3
-```
-
-The same thing as a plain schematic, because the boxes above hide the topology:
-
-```
- pack pin 3 ─┐
-             ├─ (joined) ── R1 1 kohm ──┬────────── RAK5802 "SDA" spring clip  (nRF P0.13)
- pack pin 5 ─┘                          │
-                                        ├── R2 2.2 kohm ──── VDD pad  (edge header, always on)
-                                        │
-                                        └── D1 TVS ───────── RAK5802 "GND" spring clip
-
- pack pin 2 (P-minus) ───────────────────────────────────── RAK5802 "GND" spring clip
- pack pin 4 (3V3_In)  ───────────────────────────────────── VDD pad  (edge header)
-
- RAK5802 "3V3" clip ── UNUSED. Switched rail, dies mid-cycle.
-```
-
-**R1 is the only thing between the pack and everything else.** D1 and R2 both attach on the
-board side of R1. That ordering is the design: R1 limits the current, then D1 and R2 protect and
-bias a node R1 has already made safe.
-
-#### Historical whole-node picture — do not build
-
-Solid lines are spring clips. The single dashed line is the one solder joint.
-
-```mermaid
-flowchart LR
-    subgraph PACK["RAK9154 pack — SP11 connector"]
-        direction TB
-        P1["pin 1<br/><b>P+</b> 12 V"]
-        P2["pin 2<br/><b>P−</b> ground"]
-        P35["pins 3 + 5<br/><b>joined</b> = data"]
-        P4["pin 4<br/><b>3V3_In</b> reference"]
-    end
-
-    R1(["R1 1 kΩ<br/><i>optional</i>"])
-
-    subgraph B5802["RAK5802 — the wiring hub"]
-        direction TB
-        CBAT["BAT — empty"]
-        CGND["<b>GND</b>"]
-        CA["<b>A/RX</b>"]
-        CB["<b>B/TX</b>"]
-        CSCL["SCL — empty"]
-        CSDA["<b>SDA</b> = nRF P0.13"]
-        C3V3["3V3 — NEVER USE<br/><i>switches off mid-cycle</i>"]
-        CAIN["AIN — empty"]
-    end
-
-    subgraph RK["RK900-09 weather"]
-        direction TB
-        RKV["12 V"]
-        RKG["GND"]
-        RKA["A"]
-        RKB["B"]
-    end
-
-    subgraph BUCK["Buck 12 V → 5 V"]
-        direction TB
-        BVI["VIN+"]
-        BVG["VIN−"]
-        BUSB["USB-C out → core"]
-    end
-
-    VDD["<b>VDD</b> pad<br/>base-board header<br/>always on"]
-
-    P1 --> BVI
-    P1 --> RKV
-    P2 --> BVG
-    P2 --> RKG
-    P2 --> CGND
-    P35 --> R1
-    R1 --> CSDA
-    P4 -.->|<b>SOLDER</b>| VDD
-    RKA --> CA
-    RKB --> CB
-    BUSB --> CORE["RAK4631 core<br/>USB-C"]
-
-    style P35 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style CSDA fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
-    style R1 fill:#ffe9b3,stroke:#b8860b,stroke-width:2px
-    style VDD fill:#d9ecff,stroke:#1f6feb,stroke-width:3px
-    style P4 fill:#d9ecff,stroke:#1f6feb,stroke-width:2px
-    style C3V3 fill:#ffd6d6,stroke:#b22222,stroke-dasharray: 4 3
-    style P1 fill:#fff3cd,stroke:#856404,stroke-width:2px
-    style CBAT fill:#eeeeee,stroke:#bbbbbb
-    style CSCL fill:#eeeeee,stroke:#bbbbbb
-    style CAIN fill:#eeeeee,stroke:#bbbbbb
-```
-
-Read it as five wires out of the pack:
-
-| Pack pin | Goes to | How |
+| Ref | Part | Why this one |
 |---|---|---|
-| 1 `P+` 12 V | buck `VIN+` **and** RK900 12 V | never touches the RAK5802 |
-| 2 `P−` | buck `VIN−`, RK900 `GND`, and the `GND` clip | junction at the connector, one wire to the clip |
-| 3 + 5 joined | `SDA` clip, through R1 if fitted | **the one-wire link** |
-| 4 `3V3_In` | `VDD` pad | **the only solder joint** |
+| `K2` | Panasonic `AQY212EH` PhotoMOS, 1 Form A, DIP-4 | AC/DC type, so it blocks **both** polarities. 60 V / 550 mA contacts against a −7.84 V worst case; 2.5 Ω max on-resistance; 1 µA max off-state leakage; 4 ms max turn-on [CITE(datasheet): Panasonic AQY212EH product data](https://industry.panasonic.com/global/en/products/control/relay/photomos/number/aqy212eh) |
+| — | Preci-Dip `110-87-304-41-001101` | 4-pin machined DIP socket. Keeps soldering heat off the relay and makes it replaceable |
+| `R3` | 470 Ω, ¼ W | LED current limit — 4.6 mA, against a **3.0 mA maximum guaranteed operate current** |
+| — | perfboard offcut | carries the socket and `R3` |
 
-Plus the RK900's own two data wires, `A` → `A/RX` and `B` → `B/TX`.
+Pinout: **1** LED anode, **2** LED cathode, **3** and **4** the switch. Pins 3 and 4 are
+interchangeable, because the output is bidirectional.
 
-#### Build steps
+#### Wiring — five connections, all on RAK5802 spring terminals
 
-There is no complete-node build sequence while the pre-Core gate is open. The earlier sequence
-was removed because it contradicted the redundant-ground requirement and authorized a direct,
-unisolated GPIO connection. Current work stops after the no-Core measurements and candidate
-interface validation listed above.
+Nothing below is soldered to the base board.
+
+```
+                                ┌────────────────────┐
+  RAK5802 SCL clip ───[470 Ω]───┤ 1   AQY212EH    3  ├─── pack data wire, pins 3+5 joined
+  = nRF P0.14                   │                    │
+  RAK5802 GND clip ─────────────┤ 2               4  ├─── RAK5802 SDA clip
+                                └────────────────────┘    = nRF P0.13
+```
+
+| # | From | To |
+|---|---|---|
+| 1 | RAK5802 `SCL` clip (nRF P0.14) | `R3` 470 Ω |
+| 2 | `R3`, other end | `K2` pin 1 |
+| 3 | `K2` pin 2 | RAK5802 `GND` clip |
+| 4 | pack pins 3+5, joined | `K2` pin 3 |
+| 5 | `K2` pin 4 | RAK5802 `SDA` clip (nRF P0.13) |
+
+Everything else in the harness is unchanged: pack pin 1 to the buck and the RK900, pack pin 2 to
+`GND`, pack pin 4 to the base-board `VDD` pad.
+
+#### Firmware contract
+
+- P0.14 configured for **high drive**. Standard drive tops out near 4 mA and the LED needs 4.6 mA.
+- P0.14 **LOW by default** — so `K2` is open at boot, throughout sleep, and whenever the node has
+  no power at all.
+- Driven HIGH at least 10 ms before the battery read, since `K2` turn-on is 4 ms maximum, then LOW
+  immediately after.
+
+The point of all of it: the pack connector is only ever mated or unmated while `K2` is open, so
+the measured transient arrives at an open switch instead of a pad.
+
+#### What this does not cover
+
+An unmate landing inside an active read still exposes the pad — roughly a 10 ms window per
+15-minute cycle. That is not closed by this design, and no measurement of it exists.
+
 
 ### Open measurement detail
 
@@ -798,7 +628,7 @@ before/after electrical measurements and captures named in the pre-Core gate.
 |---|---|---|
 | Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
 | Pin 2 `P−` | buck negative **and** RK900 negative **and** the base board `GND` pad | all three |
-| Pins 3 + 5 joined | isolation/current-limiting network **not yet finalized**, then `SDA` (`WB_I2C1_SDA`, nRF P0.13) | one-wire half-duplex; blocked by the pre-Core gate |
+| Pins 3 + 5 joined | `K2` pin 3; `K2` pin 4 to the `SDA` clip (`WB_I2C1_SDA`, nRF P0.13) | one-wire half-duplex, behind the normally-open relay — see "The data-line front end" |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
 
 `IO1` was the original one-wire pad and `A1` replaced it. `SDA`/P0.13 is the intended firmware
