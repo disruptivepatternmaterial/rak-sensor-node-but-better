@@ -4,6 +4,33 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-09-07 — `0.4.7` compiles on both pin environments; the audit pass is unobserved on hardware
+
+**Host:** Heliotrope Ridge, PlatformIO Core 6.1.19. **Commit:** `8cc149f`, version `0.4.7`.
+
+`pio run -e rak4631_sda -e rak4631` → 2 succeeded in 11.9 s. `env:rak4631_sda`, now the default
+per `platformio.ini`, links at RAM 10.1 % (25,052 / 248,832 B) and Flash 26.1 %
+(212,844 / 815,104 B). `scripts/preflight.sh` reports `=== PREFLIGHT OK ===` at the same commit,
+with the two standing formatter call-outs and the `no test/ directory` warning.
+
+**What this establishes:** the audit-pass sources compile, and the build default now names the
+pad the harness lands on, so `pio run` with no `-e` no longer produces an image listening on a
+pin with no wire on it.
+
+**What it does not establish:** anything about behavior. The three code fixes in this pass — the
+raw battery log printing `null` for absent readings, the inner frame-length gate, and the
+corrected transport comments — are **unobserved on hardware**; no board was flashed and none was
+asked for. The inner-length gate was checked on the host against the two recorded frames only,
+which is a decode check, not a bench result. The `test/` directory deleted in `5a9d584` is still
+absent, so `pio test -e native` skips rather than passes and `src/session.cpp` remains uncovered.
+H1–H8 remain open and status stays **🚧 NOT YET DEPLOYED**.
+
+The five 2026-09-06 captures plus the two from 2026-08-30 are held at `~/rak-captures/` on the
+build host, verified present 2026-09-07 with the SHA-256 prefixes cited in the sections below.
+The pin-3/pin-5 separation capture (`docs/HARDWARE.md` § "Qualifying the pack harness") has
+**not** been taken — the operator deferred it — so every conclusion below still rests on the two
+conductors joined, and the clamp design that depends on it stays unbuilt.
+
 ## 2026-09-06 — `0.4.6` compiles on all four environments; nothing observed on hardware
 
 **Host:** Heliotrope Ridge, PlatformIO Core 6.1.19. **Commit:** `ea119ac`, version `0.4.6`.
