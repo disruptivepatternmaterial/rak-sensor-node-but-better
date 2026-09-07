@@ -65,22 +65,31 @@ counter resets as soon as any field is read. Implemented in `src/main.cpp`
 
 ### 2.2 RAK9154 (battery) — implemented path
 
-**Implemented protocol; physical layer changing:** 5-pin Sensor Hub Load one-wire (TXD+RXD
-bridged, 9600 half-duplex, IPSO TLV), chosen in
-ADR-0004 and proven end to end on a direct GPIO.
+**Implemented protocol; physical layer changing:** 5-pin Sensor Hub Load one-wire (9600
+half-duplex, IPSO TLV), chosen in ADR-0004 and proven end to end on a direct GPIO. The wire
+lands on pack **pin 5 only**; pin 3 is left unconnected
+([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)), superseding the TXD+RXD-bridged
+harness this section used to describe.
 Direct GPIO wiring is now rejected: ordinary unplug/replug puts the wire outside both nRF52840
 rails [CITE(bench): `EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT](EVIDENCE.md).
 
-ADR-0012 puts one
-`XR33052` ±60 V RS-485 transceiver on the wire, powered from `3V3_S`. The firmware consequence
-is a **two-pin** half-duplex driver: RX on `RO` (default `IO1`), TX on `DE` (default `A1`) with
-inverted polarity, so a data 0 pulls the wire LOW and a data 1 releases it. The node never drives
-the wire HIGH. `SwitchedRailHold` is engaged for every battery read. Protocol, frame layer, and
-`kTurnaroundMs` are unchanged. That firmware lands in its own PR after `BUILD.md` gates G1–G4
-pass with no Core; the current image is for direct-GPIO nodes (001) only.
+**The front end is a switch, not a transceiver, and the firmware side of it does not exist
+yet.** This section previously specified an `XR33052` RS-485 transceiver "per ADR-0012" and a
+two-pin driver to go with it — RX on `RO`, TX on `DE` with inverted polarity. **ADR-0012 was
+never written** ([`decisions/README.md`](decisions/README.md)); the transceiver was an
+uncommitted draft that survived a merge conflict in `5a9d584`, and the two-pin contract
+specified firmware for a part nobody selected. Both are deleted here.
+
+What replaces it is `K2`, a normally-open `AQY212EH` PhotoMOS relay in series with the data
+conductor ([`HARDWARE.md`](HARDWARE.md) § "The data-line front end"). It costs the firmware one
+output — P0.14 driven low to close the relay around the read — and changes nothing about the
+protocol, the frame layer, or `kTurnaroundMs`; the driver stays single-pin. 🚧 **NOT YET
+DEPLOYED:** no code drives P0.14 today, and `K2` has not been built or bench-qualified
+([`BUILD.md`](BUILD.md) § "What must be added before step 23 can exist", items 3–5). The current
+image is for direct-GPIO nodes only.
 [CITE(prior-art): Meshtastic `RAK9154Sensor`, `beegee-tokyo/RAK-OneWireSerial`, `forest-weather-machines/rak-4-5-wire/firmware/nanoc6-onewire-poll`](CITATIONS.md)
 [CITE(bench): pack latches pid `0x01` and reports 12.23 V / 98 % / 23.0 °C, `1a203d3`](EVIDENCE.md)
-[CITE(datasheet): XR33052 bus-pin ratings, driver enable, receiver output — CIT-XR33052](CITATIONS.md)
+[CITE(datasheet): AQY212EH contact ratings, off-state leakage and operate current — CIT-AQY212EH](CITATIONS.md)
 
 **Not used — held in reserve:** 4-pin **Gateway Load** SP11/P4 Modbus (same map as field Hub /
 `rak-4-5-wire`). Raw Modbus at slave `0x6E` over the one-wire line was proven dead (0 bytes every

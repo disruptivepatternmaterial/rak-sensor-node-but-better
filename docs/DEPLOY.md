@@ -84,12 +84,13 @@ needed. Any power-budget arithmetic written against the 50 s figure is stale —
 
 ## Then
 
-- **The pack data wire lands on the XR33052 transceiver, never a GPIO**
-  (ADR-0012). Ordinary
-  unplug/replug crosses both nRF rails (`EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT); the plug
-  is hot-plugged in the field, so the Core-removal rule is rejected
-  (ADR-0011). `BUILD.md` gates
-  G1–G4 pass with no Core before `RO`/`DE` reach one.
+- **The pack data wire lands on `K2`, the normally-open `AQY212EH` PhotoMOS relay, never a
+  GPIO** ([`HARDWARE.md`](HARDWARE.md) § "The data-line front end"). Ordinary unplug/replug
+  crosses both nRF rails (`EVIDENCE.md` 2026-09-06 09:24 and 09:51 PDT); the plug is hot-plugged
+  in the field, so the Core-removal rule is rejected. `BUILD.md` § "What must be added before
+  step 23 can exist" items 3–5 close before a Core is fitted. (This bullet previously named an
+  `XR33052` transceiver "per ADR-0012" and a Core-removal rejection "per ADR-0011"; **neither ADR
+  was ever written** — see [`decisions/README.md`](decisions/README.md).)
 - 24 h bench soak: both sensors live, TTN uplinks arriving, no watchdog resets.
 - 7 d field shadow: node in its enclosure, outdoors, before anything is trusted.
 
@@ -100,7 +101,9 @@ Only after both does the status in [`README.md`](../README.md) change. See
 
 Three open items block deployment and are **not** firmware:
 
-- **ADR-0012 transceiver** — `BUILD.md` gates G1–G4 with no Core, then the two-pin firmware.
+- **The `K2` front end** — build it on its socket, bench-qualify it with the analyzer on both
+  sides across mate and unmate, then write the firmware that drives it: no code touches P0.14
+  today ([`BUILD.md`](BUILD.md) § "What must be added before step 23 can exist", items 3–5).
 - **Buck converter selection** — must be chosen on no-load quiescent current, since it is a
   24/7 parallel load. See [`HARDWARE.md`](HARDWARE.md) and [`POWER_BUDGET.md`](POWER_BUDGET.md).
 - **TTN device registration** for additional nodes, with MSB-order keys. Now scripted —

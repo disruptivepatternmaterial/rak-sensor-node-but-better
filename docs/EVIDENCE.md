@@ -31,7 +31,13 @@ that would have exercised the payload encoder and the frame codec were removed i
 ## 2026-09-06 — mating the pack drives the data wire to −7.84 V unloaded and −2.62 V powered
 
 **Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8 `AF11F852CEC20A9`, captures 4–11,
-Logic 2 v2.4.46 driven over its MCP server. **Repo commit at time of measurement:** `2db8ab4`
+Logic 2 v2.4.46 driven over its MCP server.
+
+> **Capture numbers restart every bench session — always cite them with their date.** The
+> 2026-08-30 (later) entry in this file also has a "capture 9" and a "capture 11", and they are
+> different measurements entirely: its capture 11 is an unplugged harness reading flat 0 V, while
+> the one below is the powered mate that measured −2.62 V. A bare "capture 11" in a commit
+> message or an issue resolves to both. **Repo commit at time of measurement:** `2db8ab4`
 (`chore/realign-gates-after-clear`). **No firmware was built or flashed.** The Core's resident
 image was never identified — no banner was read — so nothing here is attributable to a build.
 
@@ -58,7 +64,7 @@ that conductor; the attribution does not. Re-run with the pins separated.
 | `CH3` | RAK5802 `GND` clip | 1.5625 MS/s analog |
 | `CH4` | pack pin 1 (`P+`) | 6.25 MS/s digital, 3.3 V threshold |
 
-### Capture 7 — unpowered mate/unmate cycles, 120 s
+### Capture 7 (2026-09-06) — unpowered mate/unmate cycles, 120 s
 
 | Channel | min | max |
 |---|---|---|
@@ -75,7 +81,7 @@ floating 2 MΩ input and is excluded from the count.
 −7.84 V is inside the analyzer's ±10 V analog range, so it is a measured value and not a clipped
 floor [CIT-SALEAE-LOGICPRO8].
 
-### Capture 8 — same cycles, 1 kΩ shunt from the data wire to node `GND`, 120 s
+### Capture 8 (2026-09-06) — same cycles, 1 kΩ shunt from the data wire to node `GND`, 120 s
 
 `CH0` min **−0.8191 V**, max +0.2779 V. Fifteen events past −0.5 V, **none past −1.0 V**, event
 durations collapsed to 3–4 µs.
@@ -83,7 +89,7 @@ durations collapsed to 3–4 µs.
 Derived, treating capture 7's −7.8396 V as the open-circuit value: source impedance
 **≈ 8.6 kΩ**, available current **≈ 0.9 mA**.
 
-### Captures 9 and 10 — board powered, pack mated, signalling check, 30 s each
+### Captures 9 and 10 (2026-09-06) — board powered, pack mated, signalling check, 30 s each
 
 | Condition | `CH0` idle | Edges in 30 s |
 |---|---|---|
@@ -98,7 +104,7 @@ source impedance.
 −0.3 V limit through an 8.6 kΩ source requires R < 340 Ω; preserving a valid HIGH through a 4.5 kΩ
 driver requires R in the tens of kΩ. No single resistor satisfies both.
 
-### Capture 11 — powered mate, the real field sequence, 60 s
+### Capture 11 (2026-09-06) — powered mate, the real field sequence, 60 s
 
 Unmating the pack removes the buck's input, so the board is dark before the mate and boots as it
 completes. `CH2` rising from −0.0017 V to +3.3756 V records that boot.
@@ -135,11 +141,16 @@ this wire is convicted by measurement.
 - **Nothing about why the pack went silent** in captures 9 and 10 after sitting mated with the
   1 kΩ load, then resumed on a fresh mate. Observed, not explained.
 
-CITE(bench): capture 7 preserved on the build host at `/tmp/rak-connector/20260906_connector_mating.sal`, exports in `/tmp/rak-connector/event/`.
-CITE(bench): capture 8 at `/tmp/rak-connector/20260906_connector_mating_1k_shunt.sal`, exports in `/tmp/rak-connector/shunt1k/`.
-CITE(bench): capture 9 at `/tmp/rak-connector/20260906_signalling_1k_shunt.sal`, exports in `/tmp/rak-connector/signal1k/`.
-CITE(bench): capture 10 at `/tmp/rak-connector/20260906_signalling_noshunt.sal`, exports in `/tmp/rak-connector/signal_open/`.
-CITE(bench): capture 11 at `/tmp/rak-connector/20260906_powered_mate.sal`, exports in `/tmp/rak-connector/powered_mate/`.
+All five `.sal` files were moved off `/tmp` — which macOS purges — to `~/rak-captures/` on the
+build host on 2026-09-07, verified by matching SHA-256 either side of the copy. They are the only
+copy of these measurements; the binary export directories are regenerable from them and were left
+in `/tmp` to expire.
+
+CITE(bench): capture 7 preserved on the build host at `~/rak-captures/20260906_connector_mating.sal` (`876fdbcb…`).
+CITE(bench): capture 8 at `~/rak-captures/20260906_connector_mating_1k_shunt.sal` (`fab2b373…`).
+CITE(bench): capture 9 at `~/rak-captures/20260906_signalling_1k_shunt.sal` (`32861795…`).
+CITE(bench): capture 10 at `~/rak-captures/20260906_signalling_noshunt.sal` (`5c2b7305…`).
+CITE(bench): capture 11 at `~/rak-captures/20260906_powered_mate.sal` (`1bee93ce…`).
 CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification §5, Absolute maximum ratings —
 I/O pin voltage −0.3 V to VDD+0.3 V for VDD ≤ 3.6 V.
 CITE(datasheet): [CIT-SALEAE-LOGICPRO8] Logic Pro 8 analog range −10 V to +10 V, so −7.84 V is
@@ -530,6 +541,21 @@ switched off at the end of the run. All figures below are from the stable window
 
 ### Five conclusions
 
+> **SCOPE NOTE ADDED 2026-09-07 — conclusion 1 and conclusion 3 below are narrower than they
+> read, and conclusion 1 was quoted for a week as "the pack is safe".**
+>
+> This capture was referenced to the **pack**, taken on the **joined 3+5 conductor**, with the
+> link **mated and quiescent**. It says nothing about the mating event, which is the thing that
+> kills pads: grounding at the **node** and capturing mate/unmate measured **−7.84 V** unpowered
+> and **−2.62 V** powered, 1.6–10.6 ms per event (2026-09-06 entry, captures 7 and 11). Under
+> [ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) it is not even established which of the
+> two joined pins carried any of it.
+>
+> Read conclusion 1 as: *a mated, quiescent pack, measured against its own ground, does not
+> overdrive the line.* It is **not** a clearance for connecting a pad, and the overvoltage
+> question it declared closed is reopened. Nothing measured here is withdrawn — the levels, the
+> edge count and the driver characterisation all stand.
+
 1. **The pack does not overdrive the pin. Overvoltage from the pack is RULED OUT.** Peak on the
    data line is +3.318 V against the nRF52840's `VDD + 0.3 V` = 3.600 V absolute maximum
    [CIT-NRF-GPIO] — **282 mV of headroom**. Not 5 V, not 12 V.
@@ -637,15 +663,15 @@ false all-clear.**
 
 | Capture | Setup | Samples | Span | min | max | median | stdev |
 |---|---|---|---|---|---|---|---|
-| 9 | nothing connected (instrument baseline) | 1,639 | 2.097 s | −0.192 V | +0.220 V | −0.009 V | **78.43 mV** |
-| 11 | pack powered, harness unplugged from the node, ch0 on joined data wire (pins 3+5), GND on pack pin 2 | 786,429 | 20.133 s | −0.025 V | +0.001 V | −0.009 V | **0.74 mV** |
+| 9 (2026-08-30) | nothing connected (instrument baseline) | 1,639 | 2.097 s | −0.192 V | +0.220 V | −0.009 V | **78.43 mV** |
+| 11 (2026-08-30) | pack powered, harness unplugged from the node, ch0 on joined data wire (pins 3+5), GND on pack pin 2 | 786,429 | 20.133 s | −0.025 V | +0.001 V | −0.009 V | **0.74 mV** |
 
-Capture 11 is **0.000 V, flat, for the full 20 seconds** — 775,463 of 786,429 samples (98.6 %) on
+Capture 11 of 2026-08-30 — not the 2026-09-06 powered mate of the same number — is **0.000 V, flat, for the full 20 seconds** — 775,463 of 786,429 samples (98.6 %) on
 a single ADC code, six distinct codes in the whole file.
 
 ### Why that is a real reading and not a bad clip
 
-Capture 11 is **105× quieter** than capture 9. A 2 MΩ input with nothing on it acts as an antenna
+It is **105× quieter** than capture 9 of the same session. A 2 MΩ input with nothing on it acts as an antenna
 and wanders across 77 codes; a low-impedance tie to ground does not. So the probe was genuinely
 on the wire and the wire was genuinely at ground.
 
@@ -1031,9 +1057,22 @@ host cable would stop being mutually exclusive.
 ### Consequence for the build
 
 Connector sequencing is now a documented rule in [`HARDWARE.md`](HARDWARE.md): the pack connector is
-mated **last** and unmated **first**, always. The 1 kΩ series resistor is retained and now justified
-by mechanism — it bounds the ESD-diode current to about 3 mA, converting a sequencing mistake from
-fatal to harmless.
+mated **last** and unmated **first**, always. ~~The 1 kΩ series resistor is retained and now
+justified by mechanism — it bounds the ESD-diode current to about 3 mA, converting a sequencing
+mistake from fatal to harmless.~~
+
+> **RETRACTED 2026-09-07 — the struck sentence above is wrong and was the most dangerous sentence
+> in this file.** Series resistance is **refuted as sufficient protection**, 320 lines earlier in
+> this same day's log (see the `:713` entry) and again by the 2026-09-06 captures: a 1 kΩ shunt
+> left the mating excursion at −2.62 V, and the resistor's node-side end is *shorted to the pad*,
+> so it bounds current without bounding voltage. Nothing "converts a sequencing mistake from fatal
+> to harmless". Offering a series resistor as protection is forbidden outright by
+> [rule 05](../.cursor/rules/05-never-instruct-an-unmeasured-connection.mdc), and TI's own
+> powered-off-protection note ([CIT-TI-POWERED-OFF-SWITCH]) says the same. What replaces it is
+> `K2`, a normally-open switch that removes the connection entirely
+> ([`HARDWARE.md`](HARDWARE.md) § "The data-line front end"). The retraction block above this
+> entry covered only the direction and the count of the failures, so this sentence survived it
+> reading as current guidance.
 
 
 ## What counts as evidence

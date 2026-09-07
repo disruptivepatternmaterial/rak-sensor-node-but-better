@@ -1,9 +1,28 @@
 # nRF52840 GPIO pads failing short-to-ground on a battery-pack data line
 
-**External brief, 2026-09-06.** Written to be shared outside the project. Self-contained: it
-assumes no knowledge of this repo. The underlying measurements and their raw capture paths are in
-[`../EVIDENCE.md`](../EVIDENCE.md); the resulting design is in
+**External brief, 2026-09-06; scope note added 2026-09-07.** Written to be shared outside the
+project. Self-contained: it assumes no knowledge of this repo. The underlying measurements and
+their raw capture paths are in [`../EVIDENCE.md`](../EVIDENCE.md); the resulting design is in
 [`../HARDWARE.md`](../HARDWARE.md) § "The data-line front end".
+
+> ### Read the numbers below with these three limits
+>
+> **1. Every capture was taken on two pins joined together.** The pack's connector has a `TXD`
+> (pin 3) and an `RXD` (pin 5); this harness bridges them, and the probe was on the bridge. So
+> **−7.84 V, +4.33 V, 8.6 kΩ and 0.9 mA describe the pair, not a conductor.** The source impedance
+> in particular may be two different sources in parallel — the mating transient measured ≈ 8.6 kΩ
+> while the pack's own HIGH driver measured ≈ 4.5 kΩ on what was assumed to be one net. RAK's
+> master-side datasheet defines pin 3 as `Reserved / Not defined` and specifies the one-wire link
+> on pin 5 alone, so the bridge appears to be a build error. **The capture that separates the two
+> pins has not been run yet**, and it may move every impedance figure here.
+>
+> **2. "This destroys a pad" is not claimed and is not supported by this data.** Nine pads died;
+> this is the only out-of-spec condition anyone has found; the two have not been causally linked.
+> The § "Where this is stuck" section below is the honest state of it — the measured energy looks
+> far too small for the damage observed.
+>
+> **3. The proposed fix is not built.** No relay has been fitted, bench-qualified, or driven by
+> firmware; the parts are on order. Nothing here is a report on a working circuit.
 
 ## System
 
@@ -75,8 +94,12 @@ Its LED is sunk by a GPIO rather than sourced, so the switch is open at boot, th
 whenever the node has no power at all — which covers every connector mating.
 
 A Schottky from the MCU side of the relay to ground backs it up, because the relay's off-state
-**output** capacitance is tens to hundreds of pF (not the 1.5 pF LED-isolation figure) and will
-pass a fast edge straight through an open switch.
+**output** capacitance is not the tabulated LED-to-output isolation figure — that is I/O
+capacitance, a different parameter. Output capacitance appears only as a curve against applied
+voltage in the characteristics graphs and reads at roughly **80 pF** near 0 V, which will pass a
+fast edge straight through an open switch. Two `BAT85S` in parallel rather than one, because a
+single diode at the measured 0.9 mA clamps near −320 mV against a −300 mV limit; the cold-weather
+forward-voltage rise is unresolved, since the datasheet characterises VF at 25 °C only.
 
 This is a structural response to an unproven mechanism: it removes the pad from a whole class of
 unknown insults. It is not a diagnosis, and fitting it does not clear the harness.
@@ -91,6 +114,10 @@ unknown insults. It is not a diagnosis, and fitting it does not clear the harnes
    diode over dozens of cycles, or is this the wrong signal to be chasing?
 3. Is a normally-open switch the right answer while the mechanism is unproven, or is the effort
    better spent establishing the mechanism first?
+4. The backup clamp has almost no margin: two paralleled `BAT85S` sit near −280 mV against a
+   −300 mV limit at room temperature, and Schottky forward voltage rises as it cools — this node
+   overwinters outdoors. Is there a better clamp for a −300 mV budget at −20 °C, or is the right
+   move to stop treating the clamp as a backstop and rely on the open switch alone?
 
 CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification §5, Absolute maximum ratings —
 I/O pin voltage −0.3 V to VDD+0.3 V for VDD ≤ 3.6 V.

@@ -23,7 +23,7 @@ Class A LoRaWAN US915 end node: poll **RK900-09** + **RAK9154**, uplink on downl
 | Enclosure | Unify **solar** variant — the no-solar 910406 was out of stock | **910421** (confirm) |
 | Buck | 12 V → 5 V | (separate) |
 | Power source | RAK9154 Solar Battery Lite, **large-panel variant** | — |
-| Pack data front end `K2` | Panasonic `AQY212EH` PhotoMOS on a Preci-Dip `110-87-304-41-001101` socket, plus a 470 Ω resistor — see "The data-line front end" below | `AQY212EH` |
+| Pack data front end `K2` | Panasonic `AQY212EH` PhotoMOS on a Preci-Dip `110-87-304-41-001101` socket, plus a 220 Ω 1% resistor and two `BAT85S` diodes — see "The data-line front end" below | `AQY212EH` |
 
 **Not used:** RAK13002 (conflicts with 5802 IO slot), GNSS, RTC, AS923 kit **119012**.
 
@@ -312,7 +312,7 @@ topology or candidate mitigations; they are not permission to install a Core.
 
 | Gate | Evidence now | State |
 |---|---|---|
-| Pack-side voltage with its reference energised and no Core present | Capture 13: +0.014 V to +3.318 V over 57.11 s | **PASS for captured pack-side overvoltage only** |
+| Pack-side voltage with its reference energised and no Core present | Capture 13 (2026-08-30): +0.014 V to +3.318 V over 57.11 s | **SUPERSEDED — reopened 2026-09-06.** That capture was referenced to the **pack**, taken on the **joined** 3+5 conductor, and covered a mated, quiescent link. Grounding at the **node** and capturing the mate itself measured **−7.84 V** unpowered and **−2.62 V** powered (`EVIDENCE.md` 2026-09-06, captures 7 and 11), and [ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) means it is not even established which pin those volts were on. It never was a pass for connecting a pad; it is now not a pass for anything but "a quiescent mated link, pack-referenced, stays inside the rails" |
 | Base-board `BAT` isolation from `IO1`, `A1`, and `SDA`, Core removed | Operator meter: open/overload; recovered in `EVIDENCE.md`; base board not identified | **OBSERVED; identity/raw meter record incomplete** |
 | Two independent ground paths from pack pin 2 to the node | Required mitigation below; no completed-node continuity record | **OPEN** |
 | Powered-off isolation between pack data and the nRF52840 pad | Candidate part researched below; no circuit built or measured | **OPEN** |
@@ -522,7 +522,7 @@ measured 8.6 kΩ source needs R < 340 Ω, while preserving a valid HIGH through 
 | `K2` | Panasonic `AQY212EH` PhotoMOS, 1 Form A, DIP-4 | AC/DC type, so it blocks **both** polarities. 60 V / 550 mA contacts against a −7.84 V worst case; 2.5 Ω max on-resistance; 1 µA max off-state leakage; 4 ms max turn-on [CITE(datasheet): Panasonic AQY212EH product data](https://industry.panasonic.com/global/en/products/control/relay/photomos/number/aqy212eh) |
 | — | Preci-Dip `110-87-304-41-001101` | 4-pin machined DIP socket. Bench use only — keeps soldering heat off the relay and makes it replaceable. **Solder the relay directly for the deployed build**: Panasonic's temperature rating carries "avoid icing and condensation" and they disclaim condensation failures outright, so four extra contact interfaces in a sealed forest enclosure are a liability |
 | `R3` | **220 Ω, 1%** | LED current limit. Gives 6.4 mA worst case — above Panasonic's **5 mA recommended minimum**, which is also the current their 4 ms turn-on time is specified at. 470 Ω lands at 2.8–3.0 mA worst case once `VOL`, `Vf` max and tolerance are counted, at or below the guaranteed operate current |
-| `D1`, `D2` | 2 × Vishay `BAT85S`, DO-35 | Negative clamp on the Core side. Required, not optional: Panasonic never tabulates the **output** capacitance across the open switch — the 1.5 pF figure is LED-to-output isolation — so off-state coupling can only be clamped, never calculated |
+| `D1`, `D2` | 2 × Vishay `BAT85S`, DO-35 | Negative clamp on the Core side. Required, not optional: the capacitance in Panasonic's **table** is I/O isolation, LED-to-output, which says nothing about coupling across the open switch. The open-switch **output** capacitance appears only as a curve against applied voltage in the characteristics graphs, reading roughly **80 pF** near 0 V — two orders of magnitude above the isolation figure, and a graph reading rather than a guaranteed maximum. A transient can couple through that; the clamp is what bounds it [CITE(datasheet): AQY212EH — CIT-AQY212EH](CITATIONS.md), [CITE(datasheet): BAT85S forward voltage — CIT-BAT85S](CITATIONS.md) |
 | — | BusBoard `PR1593Q` | perfboard, plated through-hole. Conformal-coat after test; it ships with no solder mask |
 
 Pinout: **1** LED anode, **2** LED cathode, **3** and **4** the switch. Pins 3 and 4 are
@@ -576,6 +576,13 @@ measured source can deliver 0.9 mA, so one diode would clamp at about −320 mV 
 
 #### Firmware contract
 
+🚧 **NOT YET DEPLOYED.** No code in `src/` touches P0.14; there is no relay feature flag and no
+build that drives one (`grep -rn 'P0\.14\|RELAY' src/` returns only the pad note in
+`src/build_features.h`). This section is the contract a future change has to meet, not a
+description of the running image — a node flashed today and fitted with `K2` leaves the relay
+open and reads no pack at all. Tracked as item 4 in [`BUILD.md`](BUILD.md) § "What must be added
+before step 23 can exist".
+
 - P0.14 **input/disconnect by default** — its reset state. Both LED terminals then sit at `VDD`,
   so `K2` is open at boot, in reset, throughout sleep, and whenever the node has no power.
 - To close `K2`: configure P0.14 as an output with **high drive** and drive it **LOW**. Sink is
@@ -589,10 +596,18 @@ the measured transient arrives at an open switch instead of a pad.
 
 #### What this does not cover
 
-An unmate landing inside an active read still exposes the pad. `Battery::read()` runs against
-second-scale timeouts, not milliseconds, so that window is far larger than a single frame — size
-it from the code, not from the bit period. It is not closed by this design and no measurement of
-it exists.
+An unmate landing inside an active read still exposes the pad, and the window is **seconds, not
+milliseconds**. `Battery::read()` is bounded at roughly **26 s** worst case — a ~0.5 s direct
+probe, the 5 s provisioning window, two ~0.5 s poll attempts and the 20 s push listen
+(`src/sensors/battery.cpp`, the `kProvWindowMs` note; sized against the 120 s watchdog). Against
+a 900 s cycle that is **~2.9% of wall-clock time with `K2` closed**; the provisioned steady state
+pays only the ~0.5 s direct probe, so the common case is nearer 0.06%.
+
+Both numbers are the exposure this design does not remove. Whether the pack is unmated during
+that window is a question about how the node is handled, not about firmware: it is why the
+procedure is mate and unmate only with the node unpowered
+([`BUILD.md`](BUILD.md)). No measurement of a transient arriving mid-read exists, and none is
+proposed — it would mean driving a pad with a live pack against a known −7.84 V.
 
 
 ### Open measurement detail
@@ -706,8 +721,18 @@ Two rules that follow, both cheap:
   mate simultaneously.
 
 That 15 kohm pack pull-down also means the idle line sits near 1.7 V against the nRF52840's ~13
-kohm internal pull-up, inside the undefined band between V_IL and V_IH. An external 2.2-4.7 kohm
-pull-up to 3V3 puts idle near 2.9 V and is worth fitting.
+kohm internal pull-up, inside the undefined band between V_IL and V_IH.
+
+**Do not fit an external pull-up for it — the base board already has one.** `R10`–`R13` are
+4.7 kΩ from the rail to both I²C clips, so the `SDA` and `SCL` pads the data wire now lands on
+carry a pull-up whether or not firmware asks for one
+[CITE(datasheet): RAK19007 schematic sheet 2, slots and edge headers — CIT-RAK19007-SCH-SLOTS](CITATIONS.md).
+Adding the 2.2–4.7 kΩ this paragraph used to recommend lands the pair near 2.35 kΩ, which is
+double-counting, not margin. It also interacts with `K2`: the same pull-up is why the relay LED
+is **sunk** rather than sourced ([§ "The data-line front end"](#the-data-line-front-end)). The
+15 kΩ figure itself is an operator meter reading taken on the **joined** conductor, so under
+[ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) it may describe pin 3, pin 5, or the
+pair — H1 resolves it.
 
 Do not substitute `IO2`: it controls the RAK19007 `3V3_S` switch that powers the RAK5802.
 Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 baud.
