@@ -36,6 +36,12 @@ Exit status:
     0  line is within what a powered pad tolerates
     2  line is out of spec -- keep it isolated from every GPIO
     1  the capture could not be read, or is not evidence of anything
+
+Exit 0 is a claim about a wire, so three-channel mode will not issue one unless the capture could
+have shown a fault: three distinct files, at least one second, a plausible measured rail, and the
+data line observed both HIGH and LOW. Exit 2 is checked first and is unconditional -- a capture
+with no rail and no traffic still convicts if the line left the pad's limits. Guards verified by
+scripts/tests/test_owprobe_guards.py.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from array import array
 import csv
 from dataclasses import dataclass
 import math
+import os
 import statistics
 import struct
 import sys
@@ -95,6 +102,39 @@ FLOATING_NOISE_STDEV_V = 0.020
 # A negative excursion this far below node ground forward-biases the pad's LOWER clamp, matching
 # the direction in which all nine dead pads failed. No historical pad death was instrumented.
 NEGATIVE_ALARM_V = -0.30
+
+# ---------------------------------------------------------------------------------------
+# Three-channel qualification floors.
+#
+# Until 2026-09-07 the three-channel path would print its pass banner for a capture in which
+# data, VDD and GND were all flat 0 V, and for the same file passed three times: its only exits
+# were a duration check defaulting to zero seconds, a saturation check, and a rail-violation
+# check, none of which a dead capture trips. "I saw nothing" was reported as "within the GPIO's
+# instantaneous rail limits" — from the one tool whose job is to keep the next measurement off a
+# pad. The single-ended path already had a floating-probe check and an explicit de-energised
+# verdict; these are the same bar.
+#
+# All four floors gate the PASS only. A rail violation is still reported first and still exits 2,
+# so a de-energised capture that nonetheless caught a negative excursion — which is exactly the
+# unpowered-mate capture — convicts rather than being dismissed as inconclusive.
+# ---------------------------------------------------------------------------------------
+
+# A capture shorter than this cannot have watched anything happen. Applied as a floor under
+# --require-seconds rather than as its default, so the flag can only ever make it stricter.
+THREE_CHANNEL_MIN_SPAN_S = 1.0
+
+# CITE(datasheet): [CIT-NRF-GPIO] the rail-relative limits are meaningless without a rail. A
+#   median VDD-to-GND outside this band means the board was not powered, the VDD clip was not on
+#   VDD, or the two probes were on the same node — none of which the verdict can survive. The
+#   band is deliberately wide: 3.3 V nominal with room for a sagging supply at the bottom and
+#   the pad's own absolute maximum at the top.
+RAIL_PLAUSIBLE_MIN_V = 2.5
+RAIL_PLAUSIBLE_MAX_V = PAD_ABS_MAX_V
+
+# CITE(datasheet): [CIT-NRF-GPIO-TOTAL] VIL(max) is 0.3 * VDD and VIH(min) is 0.7 * VDD. A
+#   capture that never reaches both has not seen the line driven, so it establishes nothing
+#   about what the line does when it is.
+VIH_MIN_VDD_RATIO = 0.7
 
 
 def read_analog_csv(path: str) -> tuple[list[float], list[float], str]:
@@ -317,6 +357,20 @@ def analyze_three_channel(
     label: str,
 ) -> int:
     """Check data against simultaneous, independently captured VDD and local ground."""
+    # Three exports, three distinct files. Passing one file three times produces a perfectly
+    # aligned capture in which every difference is identically zero, which sails through every
+    # check below it — so it is refused here rather than diagnosed later.
+    resolved = {
+        "data": os.path.realpath(data_path),
+        "VDD": os.path.realpath(vdd_path),
+        "GND": os.path.realpath(gnd_path),
+    }
+    if len(set(resolved.values())) != 3:
+        raise SystemExit(
+            "ERROR the three channels must be three different files; got "
+            + ", ".join(f"{name}={path}" for name, path in resolved.items())
+        )
+
     data = read_analog_binary(data_path)
     vdd = read_analog_binary(vdd_path)
     gnd = read_analog_binary(gnd_path)
@@ -374,6 +428,7 @@ def analyze_three_channel(
     lower_violations = upper_violations = rail_inversions = 0
     lower_run = upper_run = longest_lower_run = longest_upper_run = 0
     saturation_samples = 0
+    vdd_gnd_sum = 0.0
 
     for index in range(first, last):
         data_value = data.samples[index]
@@ -396,6 +451,7 @@ def analyze_three_channel(
             data_gnd_max, data_gnd_max_index = data_gnd, index
         vdd_gnd_min = min(vdd_gnd_min, vdd_gnd)
         vdd_gnd_max = max(vdd_gnd_max, vdd_gnd)
+        vdd_gnd_sum += vdd_gnd
         if data_vdd < data_vdd_min:
             data_vdd_min, data_vdd_min_index = data_vdd, index
         if data_vdd > data_vdd_max:
@@ -417,6 +473,11 @@ def analyze_three_channel(
             rail_inversions += 1
 
     span_s = (pair_count - 1) * sample_period
+    rail_mean = vdd_gnd_sum / pair_count
+    required_span_s = max(require_seconds, THREE_CHANNEL_MIN_SPAN_S)
+    rail_plausible = RAIL_PLAUSIBLE_MIN_V <= rail_mean <= RAIL_PLAUSIBLE_MAX_V
+    saw_high = data_gnd_max >= VIH_MIN_VDD_RATIO * rail_mean
+    saw_low = data_gnd_min <= VIL_MAX_VDD_RATIO * rail_mean
 
     def relative_time(index: int) -> float:
         return (index - first) * sample_period
@@ -443,23 +504,53 @@ def analyze_three_channel(
     print(f"   data > VDD+0.3   : {upper_violations}; longest "
           f"{longest_upper_run * sample_period:.9f} s")
     print(f"   VDD < GND-0.3    : {rail_inversions}")
+    print(f"   mean VDD-GND     : {rail_mean:+.6f} V")
+    print(f"   data reached HIGH: {'yes' if saw_high else 'NO'} "
+          f"(>= {VIH_MIN_VDD_RATIO * rail_mean:+.3f} V)")
+    print(f"   data reached LOW : {'yes' if saw_low else 'NO'} "
+          f"(<= {VIL_MAX_VDD_RATIO * rail_mean:+.3f} V)")
     print()
 
-    if span_s < require_seconds:
+    if span_s < required_span_s:
         print("=== NOT EVIDENCE -- CAPTURE TOO SHORT ===")
-        print(f"   Required {require_seconds:.3f} s; captured {span_s:.3f} s.")
+        print(f"   Required {required_span_s:.3f} s; captured {span_s:.3f} s.")
         return 1
     if saturation_samples:
         print("=== OUT OF RANGE ===")
         print(f"   {saturation_samples} raw channel sample(s) reached the analyzer range margin.")
         return 2
+
+    # Convict before qualifying. An excursion past a pad's limits is decisive whatever else the
+    # capture is missing — the unpowered-mate capture has no rail and no traffic, and it is the
+    # most important measurement in this project.
     if lower_violations or upper_violations:
         print("=== OUTSIDE THE GPIO'S INSTANTANEOUS RAIL LIMITS ===")
         print("   Required: data >= GND-0.300 V and data <= VDD+0.300 V.")
         return 2
 
+    # Everything below decides whether a clean capture is allowed to mean anything. A pass here
+    # is read as "this wire may touch a pad", so silence must not reach it.
+    if not rail_plausible:
+        print("=== NOT EVIDENCE -- NO PLAUSIBLE RAIL ===")
+        print(f"   Mean VDD-GND is {rail_mean:+.3f} V; a verdict against VDD+0.3 V needs "
+              f"{RAIL_PLAUSIBLE_MIN_V:.1f}..{RAIL_PLAUSIBLE_MAX_V:.1f} V.")
+        print("   The board was not powered, the VDD clip was not on VDD, or two probes were")
+        print("   on the same node. This clears nothing: no violation was seen because there")
+        print("   was nothing to violate.")
+        return 1
+    if not (saw_high and saw_low):
+        print("=== NOT EVIDENCE -- LINE NEVER SEEN DRIVEN ===")
+        missing = " and ".join(
+            part for part, seen in (("a HIGH", saw_high), ("a LOW", saw_low)) if not seen
+        )
+        print(f"   The data channel never reached {missing} against the measured "
+              f"{rail_mean:.3f} V rail.")
+        print("   An idle or disconnected line stays inside every bound by doing nothing.")
+        return 1
+
     print("=== WITHIN THE GPIO'S INSTANTANEOUS RAIL LIMITS ===")
-    print(f"   All {pair_count} aligned triples passed both bounds.")
+    print(f"   All {pair_count} aligned triples passed both bounds, over {span_s:.3f} s")
+    print(f"   against a {rail_mean:.3f} V rail, with the line observed both HIGH and LOW.")
     return 0
 
 

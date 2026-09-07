@@ -76,6 +76,31 @@ def magic_in_code(line: str) -> bool:
     code = line.split("//", 1)[0]   # a trailing comment is prose too
     return bool(MAGIC_RE.search(code)) and bool(BIND_RE.search(code))
 
+
+# The release version string. A bump is a release chore, not a claim about hardware, and there is
+# nothing to cite for it.
+VERSION_DEFINE_RE = re.compile(r'^\s*#\s*define\s+FIRMWARE_VERSION\b')
+
+
+def is_substantive_code(line: str) -> bool:
+    """True when an added line is code, as opposed to comment, blank, or a version bump.
+
+    Rule 20 sets its minimums for a *firmware behavior change*, and exempts pure refactors,
+    typos and formatting. Without this distinction the gate fails on changes it was never meant
+    to govern -- a corrected comment, a reflowed line, `FIRMWARE_VERSION "0.4.7"` -- and the fix
+    every one of those invites is a decorative citation pasted in to clear a check, which is
+    worse than the check not running. Conservative by construction: the minimums are skipped only
+    when EVERY added line across every code file is non-code.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if COMMENT_ONLY_RE.match(line) or stripped.startswith("*/"):
+        return False
+    if VERSION_DEFINE_RE.match(line):
+        return False
+    return True
+
 GREEN, RED, YELLOW, BLUE, DIM, RESET = (
     ("\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\033[0m")
     if sys.stdout.isatty() else ("", "", "", "", "", "")
@@ -232,23 +257,54 @@ def main() -> int:
 
     # --- 4: per-change minimums
     if args.diff:
-        changed = [
-            p for p in git("diff", "--name-only", f"{args.diff}...HEAD").splitlines() if p
+        # Against the MERGE BASE and including the working tree, not `BASE...HEAD`.
+        #
+        # The three-dot form reads committed history only, and the workflow in rule 30 runs
+        # preflight at step 4 and commits at step 10 — so at the moment this gate is meant to
+        # inform a change, that change is uncommitted and the gate saw an empty diff and passed.
+        # Verified 2026-09-07 by adding an unsourced `4800` to a source file: the gate reported
+        # "no added code lines" until the edit was committed.
+        #
+        # `git diff <merge-base>` covers committed, staged and unstaged in one pass, and using
+        # the merge base rather than the branch tip keeps commits that landed on main since the
+        # branch point from being read as this change's own work.
+        base = git("merge-base", args.diff, "HEAD").strip() or args.diff
+        changed = [p for p in git("diff", "--name-only", base).splitlines() if p]
+        # A brand-new file is invisible to `git diff` until it is added, and a new source file is
+        # exactly where a whole register map arrives at once.
+        untracked = [
+            p for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p
         ]
         code_changed = [
             p for p in changed
             if Path(p).suffix.lower() in CODE_EXT and not is_vendored(p)
         ]
-        if code_changed:
+        code_new = [
+            p for p in untracked
+            if Path(p).suffix.lower() in CODE_EXT and not is_vendored(p)
+        ]
+        if code_changed or code_new:
             # -U2, not -U0: the adjacency rule says a citation may sit on an adjacent
             # line, and that line is often UNCHANGED -- with no context the checker
             # failed correctly-cited constants. The window also must not cross file or
             # hunk boundaries, which the old flattened added-lines list did in both
             # directions: a citation ending one file could clear a constant opening the
             # next (#108 finding 5, same family as #106).
-            diff = git("diff", "-U2", f"{args.diff}...HEAD", "--", *code_changed)
+            diff = git("diff", "-U2", base, "--", *code_changed) if code_changed else ""
+            for path in code_new:
+                # Rendered as an all-added hunk so the scanner below treats a new file exactly
+                # like an edited one. Not `git diff --no-index`: that exits 1 when the files
+                # differ, which is always here, and git() returns "" on a non-zero exit — so the
+                # first attempt at this silently scanned nothing.
+                try:
+                    text = (REPO_ROOT / path).read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                diff += f"+++ b/{path}\n@@ new file @@\n"
+                diff += "".join(f"+{line}\n" for line in text.splitlines())
             cats: set[str] = set()
             n_cites = 0
+            substantive = 0
             cur_file = ""
             hunk: list[tuple[str, str]] = []   # (prefix, text); '+' added, ' ' context
 
@@ -273,6 +329,8 @@ def main() -> int:
                     hunk = []
                 elif ln.startswith("+"):
                     hunk.append(("+", ln[1:]))
+                    if is_substantive_code(ln[1:]):
+                        substantive += 1
                     m = CITE_RE.search(ln[1:])
                     if m:
                         n_cites += 1
@@ -281,14 +339,17 @@ def main() -> int:
                     hunk.append((" ", ln[1:]))
             scan_hunk()
 
-            if n_cites < MIN_CITATIONS or len(cats) < MIN_CATEGORIES:
+            if not substantive:
+                print(f"{DIM}   {len(code_changed)} code file(s) changed, no added code lines "
+                      f"(comments, formatting, or a version bump) — minimums not applied{RESET}")
+            elif n_cites < MIN_CITATIONS or len(cats) < MIN_CATEGORIES:
                 failures.append(
                     f"firmware change carries {n_cites} citation(s) across "
                     f"{len(cats)} categor{'y' if len(cats) == 1 else 'ies'}; "
                     f"minimum is {MIN_CITATIONS} across {MIN_CATEGORIES} "
                     f"(.cursor/rules/20-citation-discipline.mdc)"
                 )
-            if cats and cats <= WEAK_ALONE:
+            if substantive and cats and cats <= WEAK_ALONE:
                 failures.append(
                     "change is justified by prior-art alone. Prior art shows something "
                     "works; it does not establish correctness. Pair it with a datasheet "

@@ -116,11 +116,62 @@ if python3 scripts/check_decoder_parity.py; then :; else bad "decoder parity"; f
 # one. This runs real encoder output through the real decoder instead of comparing claims.
 # Skips itself where node is unavailable, which is the workstation.
 step "golden vectors"
-if python3 scripts/check_golden_vectors.py; then :; else bad "golden vectors"; fi
+if [[ "$STRICT" -eq 1 ]]; then
+  if python3 scripts/check_golden_vectors.py --strict; then :; else bad "golden vectors"; fi
+else
+  if python3 scripts/check_golden_vectors.py; then :; else bad "golden vectors"; fi
+fi
+
+# --------------------------------------------------------------- unit tests
+# Not a test runner -- a check that there is something to run. 5a9d584 deleted test/ entirely,
+# 1,083 lines of tests and fixtures, and every gate that would have noticed returns success when
+# its inputs are absent. So preflight printed OK while session.cpp's six-flag replay state machine
+# had zero coverage, and "preflight green" got quoted as if it meant the logic had been checked.
+step "unit tests"
+if [[ -d test ]] && compgen -G "test/**/*.cpp" >/dev/null 2>&1; then
+  if command -v pio >/dev/null 2>&1; then
+    if pio test -e native; then ok "off-target tests"; else bad "off-target tests"; fi
+  else
+    warn "test/ present but no pio here -- the build host and CI run them"
+  fi
+else
+  warn "no test/ directory: nothing off-target is verified (deleted in 5a9d584). PREFLIGHT OK below means the gates passed, NOT that the logic is covered"
+  [[ "$STRICT" -eq 1 ]] && bad "--strict: no unit tests exist"
+fi
+
+# --------------------------------------------------------------- owprobe guards
+# The tool that decides whether a wire may touch a pad used to pass a capture of three flat 0 V
+# channels. Cheap, hardware-free, and it runs the exact banner logic the bench session depends on.
+step "owprobe guards"
+if python3 scripts/tests/test_owprobe_guards.py >/dev/null; then
+  ok "owprobe three-channel guards"
+else
+  bad "owprobe three-channel guards"
+fi
 
 # --------------------------------------------------------------- citations
+# --diff is the half of this gate that enforces the per-change minimums -- three citations across
+# two categories on a firmware change, and a datasheet or spec beside a new magic number. Without
+# it only the format and registry checks run, which is what "citation discipline PASS" meant for
+# most of this project's life while six documents specified a part no ADR ever chose.
+#
+# The base is resolved rather than assumed: origin/main when it is fetched, main when it is not,
+# and skipped entirely on a repo with neither, because a wrong base reports every file as changed.
 step "citations"
-if python3 scripts/check_citations.py; then :; else bad "citation discipline"; fi
+CITE_BASE=""
+for base in origin/main main; do
+  if git rev-parse --verify --quiet "$base" >/dev/null; then
+    CITE_BASE="$base"
+    echo "${DIM}   per-change minimums against $base${NC}"
+    break
+  fi
+done
+if [[ -n "$CITE_BASE" ]]; then
+  if python3 scripts/check_citations.py --diff "$CITE_BASE"; then :; else bad "citation discipline"; fi
+else
+  warn "no main/origin-main to diff against -- format and registry checks only"
+  if python3 scripts/check_citations.py; then :; else bad "citation discipline"; fi
+fi
 
 # --------------------------------------------------------------- conflict markers
 # 5a9d584 committed 44 of these across five docs, twelve of them in BUILD.md -- the file

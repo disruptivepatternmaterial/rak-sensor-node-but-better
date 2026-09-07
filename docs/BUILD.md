@@ -31,7 +31,9 @@ built or bench-qualified
 - RAK9154 solar battery pack and its 5-pin Sensor Hub Load harness
 - 12 V-to-5 V buck converter
 - `K2`: one Panasonic `AQY212EH` PhotoMOS, one Preci-Dip `110-87-304-41-001101` 4-pin socket,
-  one 470 Ω ¼ W resistor, and a perfboard offcut
+  one **220 Ω 1% ¼ W** resistor, two Vishay `BAT85S` diodes, and a perfboard offcut
+  ([`HARDWARE.md`](HARDWARE.md) § "Parts" sizes the resistor: 470 Ω lands at or below the
+  relay's guaranteed operate current, so it is the wrong part, not a substitute)
 - multimeter
 - Saleae Logic Pro 8 for any unqualified signal
 - current-limited 3.3 V bench supply
@@ -191,10 +193,10 @@ Two of these closed on 2026-09-06. Three remain.
 
 | # | Requirement | State |
 |---|---|---|
-| 1 | A decided front-end part with powered-off isolation on the signal path | **CLOSED** — `K2`, `AQY212EH`: 60 V bidirectional contacts, 1 µA maximum off-state leakage, open whenever P0.14 is low or the node has no power |
+| 1 | A decided front-end part with powered-off isolation on the signal path | **CLOSED** — `K2`, `AQY212EH`: 60 V bidirectional contacts, 1 µA maximum off-state leakage, open whenever P0.14 is **not driven low** — its reset state, and its state through sleep and with the node unpowered |
 | 2 | The measured voltage that front end has to survive | **CLOSED** — −7.84 V unpowered, −2.62 V powered, events 1.6–10.6 ms (`EVIDENCE.md` 2026-09-06, captures 7 and 11) |
 | 3 | `K2` built on its socket and bench-qualified, analyzer on both sides, across mate and unmate | **OPEN** |
-| 4 | Firmware holding P0.14 low by default, configured for high drive, raised only around the battery read | **OPEN** |
+| 4 | Firmware leaving P0.14 in its reset state (input/disconnect) by default, and driving it **low** with high drive only around the battery read — the LED is sunk, not sourced, so low closes `K2` | **OPEN** — no code in `src/` drives P0.14 today; the contract is in [`HARDWARE.md`](HARDWARE.md) § "Firmware contract" and nothing implements it |
 | 5 | Sleep-current accounting for the finished circuit | **OPEN** |
 
 Until items 3–5 are recorded in `EVIDENCE.md`, there is no step that says to install the donor

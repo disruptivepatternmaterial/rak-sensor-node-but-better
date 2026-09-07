@@ -15,11 +15,18 @@ behavior in tools/golden_vectors.json.
 Requires g++ and node. Both are present on the build host and in CI; the workstation has
 no node, so there the gate skips rather than failing (see .cursor/rules/10-environments.mdc).
 
-Exit codes: 0 = the chain holds or the gate could not run, 1 = the chain is broken.
+Two different absences, deliberately treated differently. A missing *toolchain* is a property
+of the machine and always skips. Missing *fixtures* are a property of the repo — tools/ went
+with 5a9d584 — and under --strict that fails, because a gate that returns success when its
+inputs are gone is how preflight came to print OK having checked nothing.
+
+Exit codes: 0 = the chain holds or the gate could not run, 1 = the chain is broken, or the
+fixtures are absent under --strict.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -126,6 +133,14 @@ def compare(name: str, expected: dict, actual: dict) -> list[str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="golden vectors through the live decoder")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="treat absent fixtures as a failure rather than a skip",
+    )
+    args = parser.parse_args()
+
     print(f"{BLUE}== golden vectors through the live decoder =={RESET}")
 
     for tool in ("g++", "node"):
@@ -141,6 +156,10 @@ def main() -> int:
     for fixture in (EMITTER_SRC, EXPECTED_PATH):
         if not fixture.exists():
             rel = fixture.relative_to(REPO_ROOT)
+            if args.strict:
+                print(f"{RED}FAIL{RESET} {rel} is absent (removed in 5a9d584) — --strict will "
+                      f"not call an unrun gate a pass; restore the fixture or drop the gate")
+                return 1
             print(f"{YELLOW}SKIP{RESET} {rel} is absent (removed in 5a9d584) — the encoder is "
                   f"not being checked against the live decoder")
             return 0

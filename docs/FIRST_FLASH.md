@@ -240,9 +240,13 @@ and #5 respectively:
 - **Voltage plausibility.** A 10.8 V nominal pack should read somewhere between roughly
   9 and 12.6 V. Anything outside that means the scaling is wrong.
 
-**If the battery does not answer at all**, the one-wire bridge between TXD and RXD is the
-first thing to check. The 4-pin socket remains a documented fallback — see
-ADR-0004.
+**If the battery does not answer at all**, check that the data wire is on the pad the image was
+built for — `platformio.ini` picks one, and an image listening on the wrong clip reports a silent
+pack. **Do not bridge pack pins 3 and 5**: the harness carries pin 5 only, because RAK's own
+RAK2560 Hub datasheet defines pin 3 as `Reserved | IO | Not defined`
+([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)). Earlier revisions of this file told
+you to check that bridge; that instruction is withdrawn. The 4-pin socket remains a documented
+fallback — see ADR-0004.
 
 ## Stage 3 — add the radio
 

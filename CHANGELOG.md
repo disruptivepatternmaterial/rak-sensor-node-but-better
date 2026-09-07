@@ -8,6 +8,72 @@ Versioning per [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## [Unreleased]
 
+## [0.4.7] — 2026-09-07
+
+A full-repo audit, implemented. Nothing here is a new capability: it is one firmware defect that
+fabricated data, one missing protocol check, one build default that pointed at the wrong pad,
+three gates that reported success for checks they never ran, and eleven documents that told a
+reader to do something the hardware would not survive or the parts list did not contain.
+**🚧 NOT YET DEPLOYED:** both images compile on the build host at `7377520`; nothing here has
+been observed on hardware, and H1–H8 remain open.
+
+### Fixed
+
+- **The battery log printed fabricated zeros for readings that were never taken.** An invalid
+  `Maybe` carries value 0, and the raw line printed all four fields unconditionally — so a silent
+  pack logged as `v=0 i=0 soc=0 t=0`, character-for-character what a pack reading a real zero
+  produces. The payload encoder was always correct; this was the line the operator reads to decide
+  whether a node needs rescuing. Each field now prints `null`.
+- **The frame codec trusted one of the two length fields in every frame.** Upstream runs
+  `verify_snhublen()` between `verify_rui3type()` and its program dispatch and refuses any frame
+  whose RUI3 and SensorHub lengths disagree; we walked records from the RUI3 length alone, so a
+  checksum-clean frame with a wrong inner length decoded at offsets the sender never intended.
+  Both of upstream's accepted forms are honoured — this pack uses the legacy one, so requiring
+  only the exact form would have rejected every frame it sends. Checked on the host against the
+  two recorded frames.
+- **`pio run` with no `-e` built an image that listened on a pad with no wire on it.**
+  `default_envs = rak4631` sets no pin flag and falls through to WB_IO1/P0.17, while the wiring
+  table lands the data conductor on the RAK5802 `SDA` clip. It compiled clean and reported a
+  silent pack. Default is now `rak4631_sda`, and CI builds it.
+- **`scripts/owprobe.py` passed a capture of three flat 0 V channels.** The tool that exists to
+  keep the next measurement off a GPIO pad printed "WITHIN THE GPIO'S INSTANTANEOUS RAIL LIMITS"
+  for a dead capture, and for one file passed three times. A pass now requires three distinct
+  files, a minimum span, a plausible measured rail, and the line observed both HIGH and LOW;
+  rail violations are still checked first, so an unpowered mate with no rail still convicts.
+- **`preflight.sh` never ran the per-change citation minimums, and printed OK having run no unit
+  tests.** `check_citations.py` was invoked without `--diff`, so only format and registry checks
+  ran — which is what "citation discipline PASS" meant while six documents specified a part no ADR
+  ever chose. The absent test suite is now a warning that says what OK does not cover, and a
+  failure under `--strict`.
+- **The citation minimums read committed history only, so they were blind at the moment they were
+  meant to inform a change.** Wiring `--diff` back into preflight exposed a second defect behind
+  the first: the gate diffed `BASE...HEAD`, while rule 30 runs preflight at step 4 and commits at
+  step 10 — so the diff was empty exactly when an author would consult it. An unsourced `4800`
+  added to `src/config.cpp` was reported as "no added code lines" until it was committed. The gate
+  now diffs the merge base including the working tree, and renders untracked source files as
+  all-added, since a new file is where a whole register map arrives at once. A version-string bump
+  or a comment-only correction no longer trips the minimums, which is what surfaced this.
+- **Six documents specified an `XR33052` transceiver "per ADR-0012", and one of them defined a
+  two-pin firmware contract for it.** ADR-0012 was never written. Replaced throughout by `K2`,
+  the `AQY212EH` relay actually chosen, with the firmware side tagged `🚧 NOT YET DEPLOYED`
+  because no code drives P0.14.
+- **Two assembly documents contradicted each other on the two things that matter when following
+  them:** the resistor value (470 Ω against a sized 220 Ω) and the relay's polarity (open when
+  P0.14 is low — the inverse of the sinking design).
+- **A pack-referenced capture of a quiescent link was being quoted as "overvoltage ruled out".**
+  Scope-noted, and the gate-table PASS resting on it marked superseded; the mating event measured
+  −7.84 V. The sentence calling a 1 kΩ series resistor protective is retracted outright.
+
+### Changed
+
+- Capture references in `docs/EVIDENCE.md` are date-qualified — two bench sessions each had a
+  "capture 9" and a "capture 11" — and the five `.sal` files are cited at `~/rak-captures/` on the
+  build host rather than `/tmp`, which macOS purges.
+- ADR-0013 is reworded to what its datasheet supports, and gains the bench outcome that would
+  supersede it: protocol traffic on pin 3 would leave the harness deaf.
+- The exposure window is sized: ~26 s worst case, ~2.9% of a 900 s cycle.
+- The docs gate no longer filters by tool name, and records the gap it still has.
+
 ## [0.4.6] — 2026-09-06
 
 `0.4.6` closes a hold that could leave the node permanently mute, plus five defects found in

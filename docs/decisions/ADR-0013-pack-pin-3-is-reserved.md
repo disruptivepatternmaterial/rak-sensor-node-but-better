@@ -33,8 +33,16 @@ power and be read by:
 [CITE(datasheet): RAK2560 Sensor Hub, "Pin Definition" — CIT-RAK2560](../CITATIONS.md)
 
 `TXD` and `RXD` on the pack side read like a full-duplex UART, which is why joining them for a
-half-duplex link looked correct. But no shipping master drives pin 3. The Hub leaves it
-unconnected and uses **pin 5 alone**.
+half-duplex link looked correct.
+
+**What the master-side datasheet actually says is narrower than "nobody drives pin 3".** It
+defines pin 3 as `Reserved | IO | Not defined` and names pin 5 alone as the one-wire UART. That is
+a statement about the published interface, not about the Hub's internal connection: RAK does not
+say what pin 3 is wired to inside the hub, only that it is not defined for use. An earlier
+revision of this ADR wrote "no shipping master drives pin 3", which the source does not support —
+what it supports is that **no shipping master is documented to use pin 3, and the one-wire link is
+specified on pin 5 alone**. The decision below rests on that weaker, sourced claim, which is
+sufficient for it: a pin the interface leaves undefined is not a pin to bridge a signal onto.
 
 The two documents agree on everything else, including the direction of pin 4: the master **sources**
 the probe rail and the pack **sinks** it (`Vcc_Probe` is `PO`; the Probe-IO datasheet lists the same
@@ -80,7 +88,15 @@ Core pad in the loop, across at least ten mate/unmate cycles:
 - **Pin 3 carries the excursion and pin 5 is clean** — the bridge was the fault. Record it, and
   re-evaluate whether the relay is still needed or is now belt-and-braces.
 - **Pin 5 carries it too** — pin 3 is exonerated as the source and the relay stands on its own.
-- Either way the decision above is unchanged, because it rests on the interface definition rather
-  than on the electrical result.
+- **The 9600-baud traffic is on pin 3, not pin 5** — the outcome that would make this decision
+  expensive, and the reason the capture probes both pins rather than only the suspect one. The
+  pack datasheet labels pin 3 `TXD`, so "the pack transmits on 3 and listens on 5" is consistent
+  with its own naming; a harness built to this ADR would then be **deaf**, and the symptom would
+  be a silent pack that looks exactly like a dead one. If the capture shows protocol edges on
+  pin 3, stop and supersede this ADR before rebuilding any harness — do not bridge the pins back
+  together as a workaround, because that restores the configuration nine pads died on.
+
+The first two outcomes leave the decision unchanged, because it rests on the interface definition
+rather than on the electrical result. The third replaces it.
 
 Record the numbers in [`../EVIDENCE.md`](../EVIDENCE.md) with date, host, and raw capture paths.

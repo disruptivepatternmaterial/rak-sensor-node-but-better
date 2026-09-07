@@ -132,7 +132,7 @@ runtime_hours = usable_pack_capacity_mAh / I_avg_mA
 | MCU wake + init | TBD | TBD | measured | ⬜ |
 | RS-485 enabled, RK900 poll | ≤ 1 s per txn, ≤ 2 retries (`FIRMWARE_SPEC.md` §2.1) | TBD — includes RAK5802 transceiver | [CIT-RAK5802] + measured | ⬜ |
 | BMS poll | ≤ 1 s per txn | TBD | measured | ⬜ |
-| ADR-0012 `XR33052` on `3V3_S` | battery transaction only | ≤ 4 mA supply + 0.165 mA reference divider while `3V3_S` is up; **0** between reads (unpowered). Also on for the RK900 read, since it shares the rail. | [CIT-XR33052] + measured | datasheet ceiling; measure on the bench |
+| `K2` relay LED, battery transaction only | the battery read plus ≥ 10 ms of lead-in for the 4 ms maximum turn-on — **up to ~26 s worst case**, ~2.9% of a 900 s cycle (`src/sensors/battery.cpp:405`), not the milliseconds a single frame suggests | **6.4 mA worst case, 8.9 mA typical** through the 220 Ω resistor while the relay is closed; **0** the rest of the cycle, because the pad is input/disconnect and both LED terminals sit at `VDD`. The switch side draws ≤ 1 µA leakage when open. | [CIT-AQY212EH] + measured | datasheet ceiling; measure on the bench. Replaces an `XR33052` row that claimed ≤ 4 mA continuous on `3V3_S` "per ADR-0012" — an ADR that was never written, for a part never selected |
 | LoRa TX | depends on DR/SF and payload | TBD at US915 TX power — datasheet reference **92 mA @ 17 dBm**, **125 mA @ 20 dBm** | [CIT-SX1262] + [CIT-RAK4631-RAW] | ⬜ |
 | Whole board, peak over one 900 s cycle | burst | **~40 mA ± 10 mA observed** — coarse; the meter likely missed the TX burst | bench meter, 2026-08-13 ([EVIDENCE.md](EVIDENCE.md)) | coarse |
 | RX1 + RX2 windows | per Class A | TBD | [CIT-LW-LINK] + [CIT-SX1262] | ⬜ |
