@@ -136,4 +136,4 @@ jobs:
       # Heliotrope Ridge build host, and only bench evidence closes H1-H8.
       - name: Build every stage
         if: steps.check.outputs.present == 'true'
-        run: pio run -e stage1 -e stage2 -e stage3 -e rak4631
+        run: pio run -e stage1 -e stage2 -e stage3 -e rak4631 -e rak4631_sda
