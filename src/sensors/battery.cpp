@@ -168,8 +168,18 @@ constexpr size_t kSnsrNodeBytes     = 4;
 // kIpsoBitValues16 status word) live in battery_frame.h alongside the record walker that is the
 // only thing that reads them.
 
-// 8N1 on a single open-drain wire shared between both directions — a hardware UART would
-// need external direction control that is not there, so the bit timing is done in software.
+// 8N1 on a single wire shared between both directions — a hardware UART would need external
+// direction control that is not there, so the bit timing is done in software.
+//
+// The wire is not open-drain at our end, and nothing in the wiring makes an overlap harmless.
+// CITE(prior-art): [CIT-ONEWIRE-SERIAL] RAK-OneWireSerial @ c58c0f0, SoftwareHalfSerial.cpp:336
+//   — TX is `pinMode(OUTPUT)` and both levels are written to the port register, so a HIGH is
+//   sourced by the pad rather than released to a pull-up.
+// CITE(bench): docs/EVIDENCE.md 2026-08-30 (fourth) — the pack's end drives LOW to +0.0867 V,
+//   an active low-side driver, not a passive pull-down.
+// So if both ends transmit at once the pad sources into a driven low: that is contention, and
+// a series switch sits inside the current path rather than bounding it. What keeps the two
+// apart is the turnaround gap, nothing else.
 //
 // It is NOT done here, though, and that distinction is the whole point of this revision.
 // The previous implementation drove the line with digitalWrite() and delayMicroseconds(104)
@@ -792,11 +802,12 @@ bool Battery::provision(uint8_t *buf, size_t len, uint8_t &announced_provid)
         // The guard gap. Everything above is arithmetic on a buffer; this is the first thing
         // that touches the wire, so the delay belongs here and nowhere earlier.
         //
-        // The pack has just finished driving this open-drain line. The reference master pays
-        // about 2 ms before it can answer, purely as a side effect of its drain loop's per-byte
-        // delay(2), and it is the implementation this pack is known to accept. Our early-exit
-        // drain answers in under one bit time, which is the one timing difference left between
-        // the two once framing was ruled out.
+        // The pack has just finished driving this line, and both ends drive it actively (see
+        // the transport note above), so answering early is contention, not a wired-OR. The
+        // reference master pays about 2 ms before it can answer, purely as a side effect of its
+        // drain loop's per-byte delay(2), and it is the implementation this pack is known to
+        // accept. Our early-exit drain answers in under one bit time, which is the one timing
+        // difference left between the two once framing was ruled out.
         //
         // Measured either side so this stops being an argument by analogy: the elapsed
         // microseconds from entering this function to the first transmitted byte, and the
@@ -1111,6 +1122,12 @@ BatteryResult Battery::parse(const uint8_t *buf, size_t len, BatteryReading &out
         // with what arrived. The whole frame is rejected — see issue #37.
         LOGF("   battery : record type %u truncated — %u byte(s) left, needs 4; frame rejected\n",
              notes.truncated_record_type, (unsigned)notes.truncated_record_left);
+    }
+    if (notes.hub_len_mismatch) {
+        // Rejected before any record was read: the two length fields in the same frame did not
+        // agree, so there is no trustworthy place for the records to start or end.
+        LOGF("   battery : length mismatch — RUI3 says %u, SensorHub says %u; frame rejected\n",
+             (unsigned)notes.hub_len_outer, (unsigned)notes.hub_len_inner);
     }
     if (notes.unknown_record) {
         // Worth logging: it means the pack sends something this build does not know about, and
@@ -1734,8 +1751,32 @@ BatteryReading Battery::read()
     //   0.1 degC units, which matches the pack's tenths and makes the decoder's /10 correct.
     // CITE(bench): docs/EVIDENCE.md 2026-08-05 — raw t=220 from a pack reporting 22.0 C
     //   confirmed tenths; see also battery_frame.cpp where the value is decoded.
-    LOGF("   battery : raw v=%d i=%d soc=%d t=%d (tenths)\n", (int)out.voltage.value,
-         (int)out.current.value, (int)out.soc.value, (int)out.temperature.value);
+    //
+    // An invalid Maybe carries value 0, so each field prints null rather than its storage:
+    // "v=0" from a silent pack and "v=0" from a pack actually reading zero must not look the
+    // same in the log the operator reads to diagnose the pack.
+    LOG(F("   battery : raw "));
+    if (out.voltage.valid) {
+        LOGF("v=%d ", (int)out.voltage.value);
+    } else {
+        LOG(F("v=null "));
+    }
+    if (out.current.valid) {
+        LOGF("i=%d ", (int)out.current.value);
+    } else {
+        LOG(F("i=null "));
+    }
+    if (out.soc.valid) {
+        LOGF("soc=%d ", (int)out.soc.value);
+    } else {
+        LOG(F("soc=null "));
+    }
+    if (out.temperature.valid) {
+        LOGF("t=%d ", (int)out.temperature.value);
+    } else {
+        LOG(F("t=null "));
+    }
+    LOGLN(F("(tenths)"));
 
     return out;
 }

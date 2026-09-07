@@ -99,6 +99,11 @@ struct ScanNotes {
     bool   saw_provision = false; // a verified PROVISION frame was present
     size_t declared      = 0;     // bytes the truncated candidate said it had, from the delimiter
     size_t arrived       = 0;     // bytes actually in the buffer
+
+    // The RUI3 length and the SensorHub length disagreed — see next_frame().
+    bool    bad_hub_len   = false;
+    uint8_t hub_len       = 0; // what the SensorHub header declared
+    size_t  hub_len_outer = 0; // what the RUI3 length field declared
 };
 
 // A located, checksum-verified frame inside a receive buffer.
@@ -212,6 +217,11 @@ struct BatteryFrameNotes {
     bool   truncated_frame = false;
     size_t declared        = 0;
     size_t arrived         = 0;
+
+    // A candidate's RUI3 and SensorHub lengths disagreed, so it was rejected unread.
+    bool    hub_len_mismatch = false;
+    uint8_t hub_len_inner    = 0;
+    size_t  hub_len_outer    = 0;
 
     // A SENDAT frame was present but did not answer the outstanding request (issue #36).
     bool    unmatched          = false;

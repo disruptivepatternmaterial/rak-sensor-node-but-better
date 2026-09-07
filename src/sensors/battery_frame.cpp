@@ -57,6 +57,35 @@ bool next_frame(const uint8_t *buf, size_t len, size_t from, SnHubFrame &f, Scan
             notes.bad_cksum = true;
             continue;
         }
+
+        // The two lengths have to agree. The RUI3 header declares how many bytes the frame
+        // carries; the SensorHub header inside it declares its own payload length, and the
+        // record walk below derives its end from the RUI3 one alone. A frame where they
+        // disagree is not a frame this protocol produced, and walking it means reading record
+        // bytes at offsets the sender did not intend — which yields a checksum-clean,
+        // entirely wrong voltage rather than an error.
+        //
+        // Both of upstream's accepted forms are honoured, including the legacy one that is a
+        // byte short; this pack uses the legacy form (outer 0x15 against inner 0x10 on the
+        // SENDAT reply, outer 0x55 against inner 0x50 on the announcement), so requiring only
+        // the exact form would reject every frame it sends.
+        //
+        // CITE(prior-art): [CIT-ONEWIRE-SERIAL] @ c58c0f0 onewire_master_protocol.c
+        //   verify_snhublen(): accepts `rui3_api_len == hub_api_len + sizeof(SNHub_Api_t)` and
+        //   `== ... - 1` ("old version will add crc byte"), and api_process() runs it after
+        //   verify_checksum() and verify_rui3type() — the order followed here. SNHub_Api_t is
+        //   the six packed bytes dest/source/sequence/type/payload_length/payload_type.
+        // CITE(bench): docs/EVIDENCE.md — SENDAT reply `FF 7E 00 15 02 01 00 01 04 03 10 02 …`
+        //   and the 92-byte announcement `FF 7E 00 55 02 00 00 FF 00 01 50 03 …`; both satisfy
+        //   the legacy form, so this gate accepts every frame the pack has been seen to send.
+        const size_t hub_len = buf[payload + 4];
+        if (payload_len != hub_len + kHubHeaderBytes &&
+            payload_len != hub_len + kHubHeaderBytes - 1) {
+            notes.bad_hub_len   = true;
+            notes.hub_len       = (uint8_t)hub_len;
+            notes.hub_len_outer = payload_len;
+            continue;
+        }
         if (buf[payload + 3] == kHubTypeProvision) {
             notes.saw_provision = true;
         }
@@ -153,9 +182,12 @@ BatteryResult battery_decode_frame(const uint8_t *buf, size_t len, BatteryReadin
         break;
     }
 
-    notes.truncated_frame = scan.truncated;
-    notes.declared        = scan.declared;
-    notes.arrived         = scan.arrived;
+    notes.truncated_frame  = scan.truncated;
+    notes.declared         = scan.declared;
+    notes.arrived          = scan.arrived;
+    notes.hub_len_mismatch = scan.bad_hub_len;
+    notes.hub_len_inner    = scan.hub_len;
+    notes.hub_len_outer    = scan.hub_len_outer;
 
     // Classify the failure instead of flattening it. Order matters: a truncated read is the
     // most specific and most actionable diagnosis, and it must not be masked by the checksum

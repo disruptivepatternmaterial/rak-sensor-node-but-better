@@ -2,7 +2,8 @@
  * RAK9154 Solar Battery Lite — pack voltage, current, charge, and temperature.
  *
  * Talks the RAK Sensor Hub single-wire protocol on the 5-pin socket: a half-duplex 9600
- * 8N1 UART on one open-drain line, carrying IPSO type-length-value records. This is the
+ * 8N1 UART on one shared line — driven actively at both ends, not open-drain; see the
+ * transport note in battery.cpp — carrying IPSO type-length-value records. This is the
  * link the RAK2560 Sensor Hub normally uses to read the pack, and the cable for it ships
  * in the box.
  *

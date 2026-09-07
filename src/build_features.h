@@ -130,8 +130,9 @@
 // The reference master cannot reply faster than about 2 ms: its drain is
 // `while (available()) { read(); delay(2); }`, so the last iteration always pays one 2 ms delay
 // after the final byte. Our early-exit drain returns the instant the checksum byte lands and
-// transmits under one bit time later — so on an open-drain line the pack has just finished
-// driving, we may be answering before it has re-armed its receiver.
+// transmits under one bit time later — so on a line the pack has just finished driving, we may
+// be answering before it has re-armed its receiver. Both ends drive actively, so an overlap is
+// contention rather than a wired-OR (transport note in battery.cpp).
 //
 // Swept from the build rather than hard-coded because the value is the experiment: 2 ms matches
 // the reference, and 5/10 ms test whether more is needed. Defaults to the reference's 2.
