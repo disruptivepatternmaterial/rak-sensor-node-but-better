@@ -25,6 +25,13 @@ which is a decode check, not a bench result. The `test/` directory deleted in `5
 absent, so `pio test -e native` skips rather than passes and `src/session.cpp` remains uncovered.
 H1–H8 remain open and status stays **🚧 NOT YET DEPLOYED**.
 
+**Released artifact.** Tagged `v0.4.7` at `0ebb902` and built at that tag on the build host, so
+the image names the tag rather than a nearby commit: the ELF carries `0.4.7` and `0ebb902` with
+no `-dirty` marker. `rak4631_sda-v0.4.7-0ebb902.zip`, SHA-256
+`9fa83a04c81f6075…`, 213,647 B, is attached to the release along with the `.hex`. Nothing has
+been flashed from it — this records what a node could be traced *to*, not what any node is
+running.
+
 The five 2026-09-06 captures plus the two from 2026-08-30 are held at `~/rak-captures/` on the
 build host, verified present 2026-09-07 with the SHA-256 prefixes cited in the sections below.
 The pin-3/pin-5 separation capture (`docs/HARDWARE.md` § "Qualifying the pack harness") has
