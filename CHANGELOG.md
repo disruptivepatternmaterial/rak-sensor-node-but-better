@@ -45,6 +45,14 @@ been observed on hardware, and H1–H8 remain open.
   ran — which is what "citation discipline PASS" meant while six documents specified a part no ADR
   ever chose. The absent test suite is now a warning that says what OK does not cover, and a
   failure under `--strict`.
+- **The citation minimums read committed history only, so they were blind at the moment they were
+  meant to inform a change.** Wiring `--diff` back into preflight exposed a second defect behind
+  the first: the gate diffed `BASE...HEAD`, while rule 30 runs preflight at step 4 and commits at
+  step 10 — so the diff was empty exactly when an author would consult it. An unsourced `4800`
+  added to `src/config.cpp` was reported as "no added code lines" until it was committed. The gate
+  now diffs the merge base including the working tree, and renders untracked source files as
+  all-added, since a new file is where a whole register map arrives at once. A version-string bump
+  or a comment-only correction no longer trips the minimums, which is what surfaced this.
 - **Six documents specified an `XR33052` transceiver "per ADR-0012", and one of them defined a
   two-pin firmware contract for it.** ADR-0012 was never written. Replaced throughout by `K2`,
   the `AQY212EH` relay actually chosen, with the firmware side tagged `🚧 NOT YET DEPLOYED`
