@@ -4,6 +4,73 @@
 where that evidence lives. **If it is not written down here, it did not happen** — and the
 project status stays `🚧 NOT YET DEPLOYED`.
 
+## 2026-09-07 — pins 3 and 5 captured separately: **both** carry the mating transient, −9.47 V and −8.89 V
+
+**Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8, USB serial `AF11F852CEC20A9`
+(reported by the Logic 2 automation API, not assumed). **Analysis commit:** `7313560`.
+**Capture:** `~/rak-captures/20260907_pin3_pin5_separated.sal`, SHA-256 `36fc2ad422e1b0cb…`,
+186,114,176 B; raw analog exports alongside it in `20260907_pin3_pin5_bin/`.
+
+This is the measurement [ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) and the audit's
+`h1` asked for: the two pack data pins probed **separately and simultaneously**, with the
+analyzer referenced so a ground offset would be visible rather than silently subtracted.
+
+### Setup
+
+Four analog channels at 1.5625 MS/s for 120.06 s, 187,596,667 aligned triples; ten mate/unmate
+cycles performed by hand during the window. Channel 0 on pack pin 5, channel 3 on pack pin 3,
+channel 2 on node `VDD`, channel 1 on the base-board `GND` pad, single ground lead on pack pin 2
+(`P−`). Probing node ground as a **channel** rather than clipping to it is the correction for the
+withdrawn −8.1 V reading: a reference the clip touches reads a flat zero by construction and
+cannot show motion.
+
+### Observation
+
+| Channel | min vs node GND | max vs node GND | `owprobe` |
+|---|---|---|---|
+| Pack **pin 3** | **−9.468613 V** at 15.155015 s | +6.595578 V at 26.425164 s | exit 2 |
+| Pack **pin 5** | **−8.885036 V** at 15.157248 s | +6.571577 V at 16.717208 s | exit 2 |
+
+Node `GND` held **−0.020 V to +0.126 V** across the whole capture, and `VDD − GND` never went
+below `GND − 0.3 V`. Node `VDD` sat at 0 V, rose to ~3.34 V while mated, and returned to 0 V —
+and the −9.47 V minimum falls in a window where **the rail was down**.
+
+### What this establishes
+
+- **Both conductors carry it, within 0.58 V of each other, at the same instant** (15.155 s and
+ 15.157 s — 2.2 ms apart, one event seen twice). Pin 3 is not the quiet one, and pin 5 is not
+ the quiet one. **A front end that isolates a single pin does not address this.**
+- **The excursion is real, not a reference artifact.** Node ground is flat to within 146 mV
+ peak-to-peak, so nothing here rests on where the clip sat — which is exactly what could not be
+ said of the 2026-08-30 captures or of the withdrawn −8.1 V figure.
+- **It happens with the node unpowered**, where the nRF52840 pad limit is **0.3 V**
+ ([CIT-NRF-BACKPOWER]), not 3.6 V. −9.47 V against a 0.3 V limit is a factor of 31.
+- The earlier joined-conductor figure of −7.84 V was **not** an artifact of joining, and was if
+ anything an under-read: separated, both pins go lower.
+
+### What this does NOT establish
+
+- **The mechanism.** Ten hand-performed cycles show the event is repeatable; nothing here says
+ whether it is contact bounce, an inductive kick from the pack's output stage, or stored charge
+ dumping into an unloaded harness. The capture is timestamped, so the waveform shape is
+ available to answer this without re-running the bench.
+- **That this is what killed the nine pads.** It remains the only out-of-spec condition found,
+ and it is now measured on both conductors with a valid reference — but no pad death was
+ instrumented, and correlation is not the mechanism.
+- **Anything about the clamp design.** `D1`/`D2` were sized against −0.9 mA through a single
+ conductor. Two conductors, both active, at nearly −9.5 V is a different problem, and the
+ source impedance behind each was not measured here. `h2` is unblocked but not answered.
+- **The +6.6 V side.** Both pins also exceed `VDD + 0.3 V` by a wide margin. That gets no
+ analysis in this entry beyond the number.
+
+CITE(datasheet): [CIT-SALEAE-LOGICPRO8] — ±25 V absolute maximum with a −10 V to +10 V analog
+range, which is why a −9.47 V sample is a value and not a saturated floor; had it pinned at
+−10 V this entry could only have claimed "at least 10 V".
+CITE(prior-art): [CIT-NRF-BACKPOWER] — 0.3 V maximum on an unpowered GPIO, the limit that applies
+in the window this event occupies.
+CITE(bench): `scripts/owprobe.py` three-channel mode, guards verified 6/6 by
+`scripts/tests/test_owprobe_guards.py` — exit 2 is unconditional and is checked before any pass.
+
 ## 2026-09-07 — `0.4.7` compiles on both pin environments; the audit pass is unobserved on hardware
 
 **Host:** Heliotrope Ridge, PlatformIO Core 6.1.19. **Commit:** `8cc149f`, version `0.4.7`.
