@@ -10,6 +10,27 @@ in order: what changed, what it means for the hardware in the woods, what the op
 do — say "nothing" when that's true. Do not reproduce what is already recorded: commits,
 ADRs, and the changelog hold the reasoning; cite a file path instead of quoting its content.
 
+# Never make the operator decode a label
+
+Say the thing, not its filing code. `h1`, `C5`, `D11`, `P0.14`, `ADR-0013`, `#102`, `H1–H8`,
+`0c` — these are indexes into documents the operator is not holding, and a sentence built from
+them is unreadable at the moment it is read. This is the single most common way a reply becomes
+"never going to read all that".
+
+| Don't | Do |
+|---|---|
+| "h1 is measured, h2 unblocked" | "The pin 3 / pin 5 capture is done. The clamp design can start." |
+| "C5 changed default_envs" | "`pio run` was building for the wrong pin; it isn't now." |
+| "ADR-0013 is superseded" | "The decision to reserve pin 3 no longer holds — both pins carry the fault." |
+| "H1–H8 remain open" | "None of the eight hardening gates has been met." |
+
+The identifier may follow the plain words when it helps someone find the record — "the decision
+reserving pin 3 (`ADR-0013`)" — but it never stands alone, and never leads. Same for a bare
+commit SHA or issue number: name what it is first.
+
+Inside `docs/`, commit messages, and code comments the identifiers are the record and stay as
+they are. This rule governs what is said **to the operator**.
+
 # Never explain the operator's own hardware back to them
 
 They built these nodes and have stated the wiring repeatedly; it is settled in
