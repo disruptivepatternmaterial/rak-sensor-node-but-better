@@ -132,7 +132,7 @@ library wants them reversed — so reversed examples are the easy thing to find.
 describes a device that does not exist, and an unrecognised join request is neither answered nor
 logged: the console shows no join attempt, no error and nothing to bisect, while the node
 transmits perfectly and forever. It cost a debugging session on 2026-07-31
-([#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23)).
+(#23).
 
 `verify` exists because that failure is invisible from the network side. It reports
 byte-reversal **as byte-reversal, by name**, separating it from "wrong device" — which is the
@@ -147,5 +147,5 @@ the console does not.
 The checker is itself gated: `scripts/register_device.sh selftest` runs ten cases including a
 deliberate reversal, and `scripts/preflight.sh` runs it on every commit. A check that cannot
 fail is worse than no check
-([#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76) was
+(#76 was
 exactly that), and this one gets trusted immediately before a device goes in the woods.

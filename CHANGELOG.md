@@ -138,7 +138,7 @@ a battery-bearing uplink.
   sleep. Node 002 then produced weather-only uplinks on `33c0cdd` despite passing its static SDA
   checks. The bounded follow-up plan again tries both possible addresses once, preserving the
   delayed `0x01` retry without reopening an unbounded loop. Tracked in
-  [#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108).
+  #108.
 - **The hardware guide contained two contradictory assembly sequences and one electrically false
   no-Core test.** The earlier sequence required two independent grounds while the later sequence
   specified one; both still led to a bare GPIO despite the STOP notice. The pack qualification
@@ -201,16 +201,16 @@ a battery-bearing uplink.
   `src/sensors/battery.h` carried a **dangling half-sentence** left by an incomplete edit
   (`"BOOT once, then keep answering…"`) directly contradicting the line below it, which says the
   window deliberately transmits nothing — the exact confusion behind
-  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62);
+  #62;
   `platformio.ini` **contradicted itself**, pointing readers at `env:owcensus` as the replacement
   for the deleted scans ~60 lines before explaining that `env:owcensus` was deleted too; and
   [`README.md`](README.md) still **advertised `owscan` as a runnable diagnostic environment**, so
   the one user-facing list of environments named a target that no longer exists and must never
   exist. All 449 `CITE` markers still resolve and `scripts/preflight.sh` is green. The remaining
   bloat is structural, not textual — `src/sensors/battery.cpp` is 1,901 lines at 64% comment and
-  needs splitting, filed as [#103](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/103);
+  needs splitting, filed as #103;
   six behaviour-preserving code dedups that need a build-host compile are
-  [#104](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/104).
+  #104.
 
 ### Fixed
 
@@ -243,10 +243,10 @@ a battery-bearing uplink.
   established** and the deletion does not rest on it.
   `src/diagnostics/owscan.{h,cpp}`, `FEATURE_ONEWIRE_SCAN`, `OWSCAN_CENSUS_ONLY`, `OWSCAN_PIN`
   and the five `owscan*`/`owcensus` environments are gone. Seven GPIO pads across two RAK4631
-  cores, every one the pad carrying the pack's data line ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)). Phase 0 drove 192 bytes per
+  cores, every one the pad carrying the pack's data line (#102). Phase 0 drove 192 bytes per
   cycle — 64 × `0x55` at three baud rates, cycling in seconds — against ~14 bytes per 900 s from
   the production read, and `0x55` toggles every bit, the worst case for the contention path in
-  [#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99). **The operator never invoked those environments; agents flashed them over SSH,
+  #99. **The operator never invoked those environments; agents flashed them over SSH,
   repeatedly**, which is why the code is deleted rather than commented — a warning is read by
   exactly the sessions that already ignored one. It was also the weaker instrument: two
   multimeter readings settled in a minute what the firmware census got wrong across several
@@ -277,7 +277,7 @@ a battery-bearing uplink.
   the last good pad before the transmit path is fixed.
 - **`scripts/flash.sh --wait`** sits on the build host polling once a second and starts the upload
   the moment the node attaches, with the poll and the upload in one SSH session so there is no
-  round trip inside the wake window. A sleeping node is absent from the USB bus entirely ([#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)),
+  round trip inside the wake window. A sleeping node is absent from the USB bus entirely (#60),
   and catching that window by hand was previously the operator's problem.
 
 - **The boot banner now names why the node reset.** `RESETREAS` was read and everything except
@@ -327,8 +327,8 @@ a battery-bearing uplink.
   divergence, including the bus-contention theory raised and discarded during the session.
   **The cause is unestablished**, and the remaining untested variables are node 002's pack and
   the bench procedure of attaching a host USB cable while the pack is live.
-  ([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96),
-  [#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102))
+  (#96,
+  #102)
 - **Node 002 works as a wind-only node.** On the SDA field image it reads the RK900
   (`0.00 m/s, 26.3 °C, 43.7 %RH, 1007.8 hPa`), transmits 20 bytes on port 2, and closes the
   cycle on a normal sleep. Battery telemetry on this core is finished — the pads are gone.
@@ -356,7 +356,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   `572bcfa`, the 19.03 h soak. The decision, the options rejected, and the mitigation that
   does address the exposure are recorded in
   ADR-0009; tracking in
-  [#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85).
+  #85.
 - **`scripts/preflight.sh` now also verifies that the irreplaceable evidence commits still
   resolve** — the three banner-asserted SHAs plus `572bcfa` and `4510763`. It is the tripwire
   for ADR-0009: if anyone ever does rewrite history, the broken evidence chain fails the gate
@@ -366,7 +366,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
 
 - **`scripts/register_device.sh` — registering a node is now scripted, and the byte order is
   checked by a machine rather than by a human reading two hex strings.** The three checks in
-  [#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23) were
+  #23 were
   a manual checklist; they are now `verify` (TTN versus `src/secrets.h`), `banner` (the boot
   banner versus `src/secrets.h`, which is the value actually compiled into the running image)
   and `session` (has the Network Server ever accepted a join). `gen` produces MSB-order keys
@@ -389,7 +389,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   *not* be misreported as a mismatch, a truncated header, a missing header, and a banner with no
   DevEUI line — wired into `scripts/preflight.sh`. Verified in both directions: breaking the
   reversal branch turns the run red, restoring it turns it green.
-  [#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76)
+  #76
   shipped a check that could not fail, and this one is trusted immediately before a device goes
   in the woods. Writing the selftest also caught a real bug in the script: `die` inside `$(...)`
   only exits the subshell, so a missing `secrets.h` was reported as "80 hex digits, expected 16"
@@ -406,7 +406,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   cooldown rather than becoming a permanent hold or thrashing every wake. A brownout keepalive
   never formats the whole filesystem: it retries only the small operation until a healthy cycle
   can repair it.
-  ([#90](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/90))
+  (#90)
 - **The filesystem wrappers hid the errors replay protection depends on.** `exists()` returns
   false for both “absent” and I/O error, so `forget()` could clear its RAM ceiling while a stale
   file survived. `File::flush()` and `File::close()` return void and discard commit errors, so
@@ -434,7 +434,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   boot banner. The selftest grows from 10 to 17 cases, including mocked TTN create/get calls;
   preflight requires the exact `17/17` completion sentinel rather than printing an unchecked
   count. Found by the multi-model deployment review.
-  ([#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23))
+  (#23)
 - **A pack oscillating across the 9.60 V inhibit floor could suppress the keepalive forever.**
   Every measured-low cycle disarmed the keepalive and reset its clock; the next in-band cycle
   re-armed it at zero. A 9.5 V / 9.7 V pattern therefore never reached the 24-cycle bound, so
@@ -445,7 +445,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   unreadable cycles change whether the existing clock may transmit without restarting it, so a
   link answering once every five cycles cannot erase elapsed hold time. Found by the
   unattended-year adversarial review.
-  ([#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45))
+  (#45)
 - **The frame-counter ceiling was the one hold in this firmware with no exit at all, and it
   could mute a perfectly healthy node in about 8 hours.** `session::counter_headroom_ok()`
   refuses an uplink when the live counter reaches the stored ceiling and the write that would
@@ -458,8 +458,8 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   failures (a transient must not cost a rejoin), then `session::forget()` — a node with nothing
   stored has nothing to replay, so the check becomes unconditionally true and the node keeps
   transmitting, joining fresh after the next reset.
-  ([#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74),
-  [#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68))
+  (#74,
+  #68)
 - **`session::forget()` cleared its in-RAM state without checking that the file was actually
   removed** — the silent-replay hazard #68 predicted, sitting in the function the escape above
   depends on. Removal is itself a filesystem write, so on the broken filesystem that makes the
@@ -490,7 +490,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   that the copy "matches the pin by construction" and never verified it; on a live run its bytes
   were never read at all, which is why the drift was invisible everywhere it could have been
   caught. Regression-tested by restoring the exact stale file: it now fails locally.
-  ([#81](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/81))
+  (#81)
 - **The preflight null-policy gate emitted six permanent false positives and could not see a
   real violation.** It searched for `= 0` on failure-shaped lines, which matched only counter
   resets (`m_invalid_reads`, `m_failures`) and member initialisers. The null policy is enforced
@@ -503,7 +503,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   draft flagged a comment in `src/sensors/battery.cpp` quoting RUI3 source, which would have
   traded six false positives for one. Six permanent warnings on a gate is how a gate becomes
   furniture ([rule 20](.cursor/rules/20-citation-discipline.mdc)).
-  ([#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72))
+  (#72)
 - **`scripts/soak_ttn.sh` treated a node transmitting far too often as perfectly healthy.**
   Silence was an anomaly and an unexplainable counter burst was an anomaly, but a clean `+1`
   step arriving minutes early was logged as an uplink and left `anomalies=0`. That is the FUP
@@ -517,7 +517,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   and the part #76 showed is easy to get wrong — can be exercised without a board or 24 h;
   three scenarios were run (too-fast, healthy, silence-then-recovery) and the healthy one
   reports zero anomalies.
-  ([#76](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/76))
+  (#76)
 - **`scripts/capture.py` produced logs that could not name the image they captured.** Every
   serial line already landed in the log verbatim, so a boot banner was never missing — but
   nothing surfaced it, and nothing said so when it was absent. A capture taken mid-run without
@@ -531,7 +531,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   against the launch SHA, and `soak_ttn.sh` captures it up front — so this closes the last
   harness that could not attribute its own output. Verified over a FIFO standing in for the
   device, across all three outcomes.
-  ([#73](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/73))
+  (#73)
 - **`scripts/soak.sh` usage text printed four lines of its own source**, including the host
   fallback assignment, because `sed -n '2,28p'` ran past the header block.
 - **`scripts/soak.sh status` printed the anomaly count twice on every healthy run.**
@@ -555,12 +555,12 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   library saves and restores `ChannelsDatarate` around its own call; here that reset is wanted,
   because three consecutive failures are exactly when an ADR-negotiated rate should stop being
   trusted (relevant to
-  [#69](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/69)).
+  #69).
   And it ends in `RegionInitDefaults(INIT_TYPE_APP_DEFAULTS)`, which is precisely what restores
   the 72-channel US915 default — so the adjacent `lmh_setSubBandChannels()` call is *required*,
   not defensive, and the comment that hedged "if it restored the region default" now states the
   mechanism. Comment-only; no behavior change.
-  ([#70](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/70))
+  (#70)
 - **`wx3-harness` is gone.** It was the silent fallback for every remote operation in
   `remote.sh`, `push.sh`, `soak.sh` and `build.sh`, and the operator does not recognize the
   name. With no environment variable set — the state of a fresh shell — the scripts were
@@ -569,7 +569,7 @@ require device fault injection, and H8 still requires a 24 h bench soak plus 7 d
   line of the untracked `~/.rak-build-host`, and with none set the scripts fail by name at
   first remote use. Checked there rather than at parse time, so `soak.sh --local` on the build
   host still starts. Stale `~/.ssh/config` entry tracked in
-  [#86](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/86).
+  #86.
 - **The "unstable address" doctrine is retired.** The build host is a laptop that is not
   always on the same network. `10-environments.mdc`, `AGENTS.md` and `docs/ENVIRONMENTS.md`
   said the address was "not stable", that "two sessions have been burned", and that the host
@@ -635,11 +635,11 @@ TTN formatter change. The one payload-adjacent change is `batt_current` moving f
 already followed rather than altering it.
 
 Open defects this release does **not** fix:
-[#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) (the
+#62 (the
 pack re-latch path is still unproven),
-[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68),
-[#72](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/72) and
-[#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74).
+#68,
+#72 and
+#74.
 
 ### Decided
 
@@ -684,9 +684,9 @@ pack re-latch path is still unproven),
   healthy pack — live in all twenty cycles of a `battdiag` capture — missed exactly one probe and
   answered the push listen in that same cycle with `11.92 V`, and that one miss both sent the
   vendor protocol's reboot verb to a working pack and consumed the deployment's only nudge
-  ([#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75)). The
+  (#75). The
   mirror-image residual was that a pack going mute weeks later had nothing left to nudge it with
-  ([#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71)).
+  (#71).
   Renamed `boot_if_warranted()`, and now three gates must agree: three consecutive cycles with no
   reading of any kind (`kSilentCyclesBeforeBoot`), one BOOT per *failure episode* rather than per
   power cycle — re-armed by the next genuine reading — and a hard rate floor of one BOOT per 96
@@ -694,7 +694,7 @@ pack re-latch path is still unproven),
   at 900 s: a pack answering normally sends zero BOOTs ever; a pack absent since power-on sends
   exactly one, ~45 min in; a pack flapping three-silent-then-one-reading is capped at one per
   24 h. The one-shot behavior from `342d994` that this replaces was there for
-  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) — that
+  #62 — that
   reasoning is kept, not undone: BOOT is still never sent to a pack that is answering, and is now
   rate-limited on top. Both thresholds are **chosen engineering margins sourced to the 20-cycle
   bench capture**, not specified values — nothing in the vendor protocol says how many missed
@@ -755,10 +755,10 @@ battery-current sign is still contradictory between the spec and the live decode
 `payload/schema.yaml` still carries `batt_current` as `BLOCKED`, which is why
 `scripts/preflight.sh` legitimately ends `=== PREFLIGHT BLOCKED ===`. Open defects that this
 release does **not** fix:
-[#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) (the
+#62 (the
 pack re-latch path is still unproven),
-[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68), and
-[#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74) (a
+#68, and
+#74 (a
 permanently failing session write can mute an otherwise healthy node).
 
 Versioned **PATCH**, not MINOR: every change since `0.4.1` is a regression fix, a refactor with
@@ -793,12 +793,12 @@ any image in this repository has identified its own commit on hardware. Later th
 ### Found on hardware, not fixed
 
 - **One transient probe miss spends the power cycle's only BOOT on a healthy pack**
-  ([#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75)).
+  (#75).
   On cycle 10 of 20, phase 0 drew no matched reply — the sendat sequence byte jumps `09` → `0C`,
   so two probes really did go unanswered — printed
   `pack silent at its id — one BOOT this power cycle`, and rebooted a pack that answered the push
   listen in the same cycle with a live reading. This is **not** the defect `e070708` fixed and not
-  the [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62)
+  the #62
   re-latch path; it is the recovery ladder reacting to a single miss instead of a run of them. In
   the field a power cycle lasts months, so the one BOOT is spent long before the failure it exists
   for.
@@ -817,14 +817,14 @@ any image in this repository has identified its own commit on hardware. Later th
   a valid command on the wrong FPort, and two commands queued at once, then checked the node had
   not reset. Every case matched a console line emitted from inside `Radio::take_downlink()`, so
   **`take_downlink()` is observed on hardware for the first time** — the acceptance criterion that
-  kept [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)
+  kept #54
   open. The applied interval is visible changing from 1800 s to 900 s and persisting across a
   reflash and power cycle. Ran on a `stage3` bench image with `FEATURE_SLEEP=0`, so this is
   evidence about the shared downlink path and **not** about the sleep path. Raw log, per-case
   console quotes and the caveats are in
   [`docs/EVIDENCE.md`](docs/EVIDENCE.md). The length-checking fixes shipped in `0.4.1` on compile
-  evidence alone ([#63](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63),
-  [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64)) are
+  evidence alone (#63,
+  #64) are
   now confirmed on hardware.
 - **The field image reaches sleep, and wakes from it.** Two cycles of `env:soak` at `d568574`:
   both sensors read, an uplink went out, and each cycle ended `sleep   : 900 s` rather than
@@ -860,8 +860,8 @@ any image in this repository has identified its own commit on hardware. Later th
   figure was wrong: one write per 32 keepalives at one keepalive per 24 cycles is 768 cycles —
   about **8 days** at the 900 s field cadence, about 32 days at the 3600 s default, against every
   32 cycles on the healthy path. Comment-only; no behavior change. Refs
-  [#38](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/38),
-  [#51](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/51).
+  #38,
+  #51.
 
 - **The downlink matrix harness can no longer record PASS with no answering uplink.** In
   `case_a`, `wait_for` was called for the FPort 2 uplink and its exit status discarded, so a
@@ -893,7 +893,7 @@ any image in this repository has identified its own commit on hardware. Later th
   broken filesystem into a settings-page rewrite on every wake — H3's thrash rule arriving through
   the door opened to fix a different defect. After that the cadence stays applied in RAM and the
   console says exactly that. Refs
-  [#65](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/65).
+  #65.
   **Compile-verified only — unflashed and unobserved.**
 
 - **A second kind of battery failure no longer postpones an already-scheduled recovery
@@ -921,8 +921,8 @@ any image in this repository has identified its own commit on hardware. Later th
   unprovisioned pack answers `0xFF` and returns zero bytes from `0x01`. The push listen, which
   is where the placeholder record actually gets resolved, is gated on `m_last != Ok` and is
   unaffected. Interaction between `342d994` and `955fc01`; bears on
-  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) and
-  [#71](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/71).
+  #62 and
+  #71.
   **Compile-verified only — unflashed and unobserved.**
 
 ### Added

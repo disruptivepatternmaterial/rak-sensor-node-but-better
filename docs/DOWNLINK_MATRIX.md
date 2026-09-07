@@ -71,6 +71,6 @@ a false `TIMEOUT`.
 
 [CIT-TTN-FUP]: CITATIONS.md
 [CIT-LW-LINK]: CITATIONS.md
-[#62]: https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62
-[#63]: https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/63
-[#64]: https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64
+[#62]: #62
+[#63]: #63
+[#64]: #64

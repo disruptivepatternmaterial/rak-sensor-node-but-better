@@ -13,10 +13,10 @@ unmeasured" without checking this list is wrong and wastes the operator's time. 
 | Pack charging sign | **+0.01 A in daylight** — confirms positive = charging | same field window |
 | Pack telemetry resolution | **10 mA/LSB** — cannot resolve sleep-scale questions | 2026-08-12, `4510763` |
 | RK900-09 draw | **0.4 W** (~33 mA at 12 V), continuously powered — not duty-cycled | operator bench measurement, recorded 2026-08-30; exact date/instrument unrecorded |
-| RK900 12 V duty-cycle switch | **on order** — Pololu Isolated SSR #5426 ([CIT-POLOLU-5426](CITATIONS.md)) | operator, 2026-08-31; firmware + GPIO selection wait on arrival ([#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113)) |
+| RK900 12 V duty-cycle switch | **on order** — Pololu Isolated SSR #5426 ([CIT-POLOLU-5426](CITATIONS.md)) | operator, 2026-08-31; firmware + GPIO selection wait on arrival (#113) |
 
 The **one** open number is the sleep-state current at the ~1 mA-and-below scale, where both
-instruments used so far bottom out ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)).
+instruments used so far bottom out (#8).
 That gap matters for the node-alone reserve claim, **not** for station-level questions — even
 the worst documented sleep defect (~6 mA) is a tenth of the measured overnight station draw.
 
@@ -75,7 +75,7 @@ firmware control. Measure it before trusting any winter projection.
 
 ## The station, not the node — the pack feeds three loads
 
-**Added 2026-08-30 ([#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113)).**
+**Added 2026-08-30 (#113).**
 The deployed pack does not power just this node. One RAK9154 feeds **this node, the RK900
 (continuously), and a muon-wx air station** (Particle M-SoM with an SEN55 PM sensor and a
 cellular radio — `particle-devices/muon-weather`), and four such combined stations are
@@ -96,10 +96,10 @@ buck idle, muon duty cycle) owns the 50 mA is unmeasured. The muon self-instrume
 carries an INA228 and publishes measured `current_mA` each cycle, and its duty cycle is
 spec'd (60 min PROD cadence, STOP sleep, 30 s SEN55 warm-up per wake). Per-load
 measurements stay tracked in
-[#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8),
-[#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47),
-[#9](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/9);
-the station roll-up is [#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113).
+#8,
+#47,
+#9;
+the station roll-up is #113.
 
 **Cross-protection gap:** this node inhibits TX from measured pack voltage at 9.60 V; the
 muon's low-battery policy keys off its own PMIC and does not know the pack exists, so it
@@ -200,7 +200,7 @@ burst rather than at a radio drawing less than spec.
 
 Closing this needs µA-capable instrumentation — a Nordic PPK2 (the method behind
 [CIT-RAK-SLEEP]), a shunt on a scope, or coulomb counting over a long window. Tracked in
-issue [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+issue #8.
 
 This leaves the `delay()`-based sleep at `src/power.cpp:134-136` unmeasured, exactly as its
 own comment at `:129-133` states. It parks the task in FreeRTOS and lets the idle task drop

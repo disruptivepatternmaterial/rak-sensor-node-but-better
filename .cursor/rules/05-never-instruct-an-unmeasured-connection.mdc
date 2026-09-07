@@ -6,7 +6,8 @@ alwaysApply: true
 
 **Nine GPIO pads were destroyed, all nine on agents' instructions, all nine running diagnostic
 firmware the operator never authorized**
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+([`docs/EVIDENCE.md`](../../docs/EVIDENCE.md) § 2026-08-30 (seventh); formerly issue #102, whose
+body no longer exists — see the note at the end of `AGENTS.md`).
 Zero were destroyed by the production image. The defect was a reasoning mistake: treating an
 unverified electrical level as known — the data line was assumed 3.3 V for the project's whole
 life because of a silkscreen label, and when finally measured it took minutes and no hardware.
@@ -28,9 +29,9 @@ life because of a silkscreen label, and when finally measured it took minutes an
   them a level.
 - Connect a pad to any rail above 3.3 V, or to a rail not metered under load.
 - Drive the one-wire pad push-pull against a line the pack can pull low
-  ([#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99)).
+  (#99).
 - Offer a series resistor as protection — refuted by our own bench and by TI
-  ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)).
+  (#101).
 - Fit a replacement core into a harness that has not been cleared per #102.
 
 ## The order of operations, every time

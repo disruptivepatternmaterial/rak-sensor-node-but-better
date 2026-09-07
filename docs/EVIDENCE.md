@@ -216,7 +216,7 @@ meter record were captured, so this records the operator's pass/fail observation
 more.
 
 **Not established:** why no usable battery frame reached the payload. The code change now tracked
-on [#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108) is a
+on #108 is a
 candidate regression until a corrected image is explicitly flashed and the pack reading is
 observed. Code review, a build, or this failed payload cannot establish that fix.
 
@@ -356,7 +356,7 @@ hold; the arithmetic does not support that.**
 *What the USB polling does and does not prove.* The port never appeared in this polled span.
 The earlier draft concluded from that observation that USB never re-attaches on wake. That
 conclusion was wrong: `src/power.cpp` calls `TinyUSBDevice.attach()` after sleep, and
-[#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) records
+#40 records
 a 19.03-hour run reattaching across 76 cycles. This span establishes only that none of its
 samples observed the port; it does not overturn that measured re-attachment evidence.
 
@@ -375,7 +375,7 @@ samples observed the port; it does not overturn that measured re-attachment evid
   about the RK900, the RAK9154, the harness, or the antenna — not even that they are absent.
   In particular it is **not** evidence that any pack harness is mated, and it does not lift
   the pre-Core hold in [`HARDWARE.md`](HARDWARE.md) or
-  [`BUILD.md`](BUILD.md) ([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+  [`BUILD.md`](BUILD.md) (#102).
 - **The provenance of the 32 uplinks themselves.** Session resume explains why the counter did
   not reset to 1, but not which images produced those 32 uplinks or when. `FCntUp` must
   increment and may not be reused [CIT-LW-LINK], so the count is cumulative across whatever
@@ -402,7 +402,7 @@ which is the constraint behind the open `last_f_cnt_up` question above.
 ## 2026-08-31 — recovered record: coreless base-board `BAT` isolation was measured open
 
 **Measurement date:** 2026-08-30. **Source:** operator meter readings preserved in
-[#99's bench comment](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99#issuecomment-5471457001).
+[#99's bench comment](#99#issuecomment-5471457001).
 **Core:** removed. **Base board:** identity not captured. **Meter:** model and raw display capture
 not recorded. This entry recovers the numeric/verbal result; it does not improve those missing
 metadata.
@@ -487,7 +487,7 @@ the attribution falls out by subtraction:
 **Consequence:** interval widening on the node or the muon can only ever touch the ~0.2 W
 remainder. The single biggest power lever the station has is duty-cycling the RK900's 12 V
 feed, which is a hardware change (load switch) plus firmware sequencing — operator's call,
-tracked under [#113](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/113).
+tracked under #113.
 
 CITE(bench): docs/EVIDENCE.md this entry — operator-stated 0.4 W, recorded 2026-08-30.
 Instrument and setup unrecorded; treat the third significant figure as unknown.
@@ -681,7 +681,7 @@ FF 7E 00 55 02 00 00 FF 00 01 50 03 44 01 02 09 00 33 09 00
    probe protocol and that [CIT-RAK-ONEWIRESERIAL] / [CIT-MESHTASTIC-9154] are the right
    references.
 4. **Six consecutive IDs carrying six similar values.** Relevant to
-   [#7](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/7), which
+   #7, which
    records the pack's cell count as inferred from the nominal rating and never established. **Not
    concluded** — the unit of those values is unknown and six IDs need not mean six cells.
 
@@ -708,7 +708,7 @@ on its own terms — **not** because it has been shown to be the cause.
 
 The measurement that would settle it: an analyzer channel each side of the 1 kΩ series resistor
 while the node transmits, giving contention current directly. Blocked on a flashable core
-([#95](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/95)).
+(#95).
 
 CITE(prior-art): [CIT-ONEWIRE-SERIAL] `RAK-OneWireSerial` @ `c58c0f0` — the wake-byte lead and
 `cal_chksum()` this frame's first and last bytes are read against.
@@ -783,11 +783,11 @@ switched off at the end of the run. All figures below are from the stable window
    so it constrains the pack, not the assembled system.
 4. **The pack is an ACTIVE low-side driver, not a passive pull-down.** It pulls the line to
    +0.0867 V mean — a real driver, low impedance. **This strengthens
-   [#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99):**
+   #99:**
    our end idles as a push-pull output driven HIGH, so an overlap is two active drivers in
    opposition with nothing between them but their on-resistances. Contention is now confirmed as
    physically available, not hypothetical.
-5. **[#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)'s
+5. **#101's
    premise is confirmed by measurement for the first time.** The line idles at **+3.31 V**, and an
    *unpowered* nRF52840 pad's maximum is **0.3 V** [CIT-NRF-BACKPOWER]. A mated harness on a dark
    core is therefore **11× over** its absolute maximum — previously asserted from the nominal rail
@@ -866,7 +866,7 @@ CITE(bench): capture preserved at `/tmp/rak-owprobe/pins/analog.csv` on the buil
 2.4.46. **Core:** none — no RAK4631 was involved, and none was at risk. **Measured by the
 analyzer**, not by the firmware.
 
-[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102) names
+#102 names
 one discriminating measurement and blocks fitting another core until it passes: *"pack live,
 harness unplugged from the node, meter the joined data wire against pack pin 2. Anything above
 3.3 V is the pin killer."* It was run. **It cannot answer the question, and would have returned a
@@ -955,7 +955,7 @@ requires and the one this ledger recommended after the A1 failure, and it did no
 failure. Series resistance is therefore **refuted as sufficient protection** — which also means
 the "REQUIRED protection network" section of `HARDWARE.md` oversells what it delivers and needs
 revising rather than repeating
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+(#102).
 
 ### No firmware change since 001's image can explain it — established by diff, not argument
 
@@ -1150,7 +1150,7 @@ what they measured; neither supports a claim about this node.
 ### What is therefore still unexplained
 
 **The whole-core USB failure on node 002 has no established cause.** The back-powering mechanism in
-[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96) explains a
+#96 explains a
 single dead pad and predicts the rest of the chip surviving — it does not predict a core that
 vanishes from the host's USB tree entirely. With the buck cleared, no candidate remains that has
 both a mechanism and evidence.
@@ -1191,13 +1191,13 @@ pack's data line is close to the nRF52840's own internal pull range of 11–16 k
 > The mechanism that does match the signature is loss of the ground return, which makes the data
 > pin carry the core's entire supply current [CIT-NRF-GNDLOSS]. That is a candidate too, not a
 > proven cause. Tracking:
-> [#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102).
+> #102.
 
 ## 2026-08-30 — (superseded heading) cause of the dead one-wire pads: back-powering an unpowered core
 
 **Host:** research and analysis on the workstation; failure observations from the Heliotrope Ridge
 bench earlier the same day. **Commit:** documented at the commit carrying this entry.
-**Core:** node 002's third core (die ID never read — [#97](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/97)).
+**Core:** node 002's third core (die ID never read — #97).
 
 ### Observation
 
@@ -1250,7 +1250,7 @@ Back-powering through one pad predicts one dead pad, not a chip that vanishes fr
 The RAK19007's USB-C `VBUS` absolute maximum is **−0.3 to 5.5 V**, feeding a TP4054 charger behind a
 series diode, with **no documented overvoltage clamp** [CIT-RAK19007-DS]. The buck driving that
 connector has never been metered on this project. Filed as
-[#100](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/100). RAK's own
+#100. RAK's own
 recommendation is that a regulated external supply goes to the **P2 "Green Power" connector, not
 USB-C** [CIT-RAK-GREENPOWER] — which would also close the #96 swap window, because the buck and a
 host cable would stop being mutually exclusive.
@@ -1262,7 +1262,7 @@ host cable would stop being mutually exclusive.
   [CIT-RAK-USBDEAD]. Not run at the time of writing. USB silence alone is not evidence of a dead
   chip — every documented RAK4631 no-enumeration case in the forum corpus turned out to be
   bootloader or SoftDevice.
-- The buck's actual output voltage, loaded and unloaded ([#100](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/100)).
+- The buck's actual output voltage, loaded and unloaded (#100).
 - Whether the ground-short *end state* is fully explained. [CIT-NRF-PINSHORT] carries an unresolved
   objection: back-powering through the clamp diode should short the pin to VCC, not to ground.
   Nordic did not close it. The damage attribution stands; the precise end state does not.
@@ -1376,7 +1376,7 @@ it changes nothing about the status above:
 | One good RK900 frame | 2026-08-03, `998dc26` — full five-register read at 9600 |
 | One good BMS frame | 2026-08-05, `1a203d3` / `b6bbf31` — and re-confirmed 2026-08-12 at `b436aa9`, 19 of 20 `battdiag` cycles live |
 | One TTN uplink | 2026-07-31 join + accepted uplink; network-side session confirmed still advancing 2026-08-12 at `f4075c0` |
-| One downlink applied | 2026-08-12 — a `0x03` status request delivered and drained across one uplink. **Half the surface only**: `take_downlink()` has never been observed on the console and malformed-downlink bounds checking is untested ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)) |
+| One downlink applied | 2026-08-12 — a `0x03` status request delivered and drained across one uplink. **Half the surface only**: `take_downlink()` has never been observed on the console and malformed-downlink bounds checking is untested (#54) |
 
 First light is not hardening. H1–H8 above is the gate that governs deployment.
 
@@ -1563,11 +1563,11 @@ discarded by the operator as unreliable and is not the core in node 002.** Its c
 procedure and the mechanisms it established remain valid and are worth keeping
 ([`FIRST_FLASH.md`](FIRST_FLASH.md)); its board-level results describe a part that no longer
 exists. Neither entry captured a die ID, which is exactly why the two could be conflated
-([#97](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/97)).
+(#97).
 
 **Not established here:** whether this core's IO1 is intact — A1 was chosen by decision, not by
 measurement, and the three cores that failed on IO1 were never root-caused
-([#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96)).
+(#96).
 Also not established: any wind reading, sleep current, or a board-asserted banner SHA.
 
 ### 2026-08-30 — A RAK4631-R (RUI3) core is converted to the Arduino bootloader over SWD and runs v0.4.4
@@ -1582,7 +1582,7 @@ RAKDAP1 on SWD. **No RK900 and no RAK9154 attached** — no sensor claim is made
 > it; it is **not** the core in node 002. No die ID was captured here, so nothing in this entry
 > can be matched to a surviving part. The **procedure** below — the SWD conversion and the two
 > mechanisms it establishes — is core-independent and remains valid. The board-level results are
-> history ([#97](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/97)).
+> history (#97).
 
 **What was established:** a board bought as RAK4631-R can be converted to this project's
 bootloader in place, and the converted core runs the field image.
@@ -1644,7 +1644,7 @@ then retry — takes ten seconds.
 **Not established here:** anything about sensors, IO1 continuity on this core, sleep current,
 or a board-asserted banner SHA. `FEATURE_BATTERY_PIN_A1` defaults to 0, so this image drives the
 one-wire link on WB_IO1; whether **this** core's IO1 is intact is untested and remains open in
-[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96).
+#96.
 
 ### 2026-08-28 — Node 002 runs v0.4.4 without sensors: bounded failures, session checkpoint/restore, TTN delivery, sleep
 
@@ -1733,8 +1733,8 @@ session checkpoint/restore and TTN acceptance occurred across reset; both absent
 were bounded; sleep was reached twice. It does **not** exercise measured-low brownout,
 intermittent one-wire validity, failed LittleFS operations, connected sensors, sleep current,
 the 24 h bench soak, or the 7 d field shadow. Those remain open under
-[#55](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/55),
-[#90](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/90), and H8.
+#55,
+#90, and H8.
 
 ### 2026-08-27 — Second node exists: `puma-concolor-002` registered, flashed, and OTAA-joined. Board-side behavior NOT observed
 
@@ -1770,7 +1770,7 @@ RX2 (DR8, 923.3 MHz). Only the DevEUI and the AppKey differ. `001` remains `...F
 (outside the repo, so the tree stays clean for builds).
 
 This closes the `002` half of
-[#23](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/23);
+#23;
 `003` is still unregistered.
 
 #### 2. Upload
@@ -1853,7 +1853,7 @@ still in `WX_TYPES` with matching size, signedness, and divisor.
 once — and the checker fix, the corrections to the now-stale zero-wind notes in
 `payload/schema.yaml` and `.cursor/rules/60-decoder-parity.mdc` (upstream `169e865` removed that
 nulling), and the re-pin are tracked in
-[#83](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/83).
+#83.
 
 #### 7. The device had NO uplink payload formatter. Now it does, and parity is gated again
 
@@ -1893,7 +1893,7 @@ WIND_DIR_OFFSET     : ['var WIND_DIR_OFFSET = 230;']
 the one value in this file that is per-install. It only affects `wind_direction`
 (formatter :219-221), and 002 has no RK900 attached so no heading has been recorded wrong —
 but it must be set before 002 is installed or the heading arrives rotated and plausible.
-Filed as [#84](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/84).
+Filed as #84.
 
 The parity gate that §6 recorded as bypassed is **no longer bypassed**. It was fixed rather
 than re-pinned around, in this order:
@@ -1914,7 +1914,7 @@ than re-pinned around, in this order:
 **The build host had no `forest-weather-machines` clone at all**, which is why its golden-vector
 run reported `source: pinned` and could never have detected upstream drift. Cloned via `gh`
 (not copied between machines) and confirmed byte-identical at `717afceb…`. Closes
-[#83](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/83).
+#83.
 
 **Still NOT observed:** no uplink from `002` has been decoded, because none has been sent —
 see the verdict row below. The formatter is correct by construction and by golden vector, not
@@ -1969,7 +1969,7 @@ node that has been soaked, and none of the H1–H8 gates moved.
 > field silence sitting in this ledger is exactly the kind of false claim `AGENTS.md` warns
 > propagates. The one thing that remains genuinely unexplained is the **earlier** reboot at
 > 2026-08-14T22:54:32Z, which predates any handling and is split out as
-> [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82).
+> #82.
 
 **Host:** Heliotrope Ridge, network side only — `ttn-lw-cli` against `my-app-tobi` /
 `puma-concolor-001`. **Nothing was attached to the node**: it is at the field site and was not
@@ -2030,7 +2030,7 @@ node had restored at 2496 after the 17:50Z press, and its first uplink then wrot
 TTN's storage holds exactly one message at 2528, and frames never sent cannot be stored. So the
 +18 is the counter-margin artifact of one reset, and **what is unexplained is the reset itself and
 why the node took 5539 s — about six 908 s cycles — to reappear** rather than one. Carried forward
-as [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82).
+as #82.
 
 #### 2. Independent TTN record, and the silence — the part the watcher's clean exit hides
 
@@ -2108,8 +2108,8 @@ node having protected itself or failed:
   (32), and `counter_headroom_ok()` only writes when the live counter reaches that ceiling. Ceiling
   writes therefore landed at `f_cnt` **2528, 2560 and 2592**, the last at 15:03:06Z; the next was due
   at **2624**. The node stopped at 2600, **24 frames short of any flash write**, so the permanent-mute
-  paths in [#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74)
-  and [#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68) —
+  paths in #74
+  and #68 —
   both of which require a failing session write — were not reachable at that frame.
 
 The link was also strong right up to the stop: `f_cnt 2600` was heard by `3356-gateway-002` at
@@ -2194,16 +2194,16 @@ inside the repo and ignored, not scattered and not committed.
   deployed.
 - **One thing here remains unexplained and it is not the silence:** the reboot at
   2026-08-14T22:54:32Z. Split out as
-  [#82](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/82) so it
+  #82 so it
   survives the closure of
-  [#80](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/80).
+  #80.
 - **The ≥24 h *bench* half of H8 is NOT met, and this run does not move it.** H8 wants ≥24 h on
   the bench *and* ≥7 d of field shadow. This was in the field, with nothing attached — so of the
   ten bench criteria in [`SOAK.md`](SOAK.md), only B1 (full duration) and part of B5 (frame
   counter continuity) can be evaluated at all. B2 watchdog resets, B3 unexpected reboots, B4
   cycles seen, B6 cycles without battery, B7 pack voltage and brownout, B9 keepalive — **all
   need the console, and there was no console.** B8 sleep current remains unmeasured
-  ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)).
+  (#8).
   The prior bench run reached 19.03 h on `572bcfa`, a **superseded image**, and was stopped
   deliberately; a partial run on one image cannot be topped up by a different run on another.
   **Zero completed bench soak hours exist on `1c2df3c`.** Anyone reading "24 h" off this entry
@@ -2877,7 +2877,7 @@ for the USB CDC device after roughly 40 s regardless of the duration it is asked
 after a DFU flash this board takes about two minutes to re-enumerate and run — so every
 attempt stopped watching before the node woke. That is a tooling gap, not a firmware
 finding. Bounds-checking of a malformed downlink is likewise untested on hardware.
-[#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54)
+#54
 stays open for those two, narrowed from "never run on hardware" to "delivered but not
 observed being handled."
 
@@ -3234,8 +3234,8 @@ unconnected with the buck out of circuit** — 12 V entered the circuit only aft
 That is the largest known delta between the passing rig and today's, and it is physical.
 
 Remaining suspects on both buses are wiring, connectors, and the 12 V introduction — not
-firmware. Tracked as [#49](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/49)
-(RS-485) and [#50](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/50)
+firmware. Tracked as #49
+(RS-485) and #50
 (one-wire).
 
 ### 2026-08-11 — One-wire dead: no edge, no byte, in any mode — and the scan reporting otherwise was lying
@@ -3262,7 +3262,7 @@ firmware. Tracked as [#49](https://github.com/disruptivepatternmaterial/rak-sens
 
 - **Verdict:** FAIL. Nothing pulled the line low across ~1.73 M samples in either pin mode,
   so the pack is not driving the wire — this is below the level where framing or addressing
-  could matter. Tracked as [#50](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/50).
+  could matter. Tracked as #50.
 
 #### The diagnostic lied first, so every earlier `owscan` verdict inherits the doubt
 
@@ -3312,7 +3312,7 @@ never exposed to this; it totals in locals.
 
 - **Verdict:** FAIL for a live RK900 path. Baud, slave ID, and IO2 control are ruled out
   (all rates/slaves silent; HIGH≡LOW). Remaining: pack pin 1 `P+` → RK900 12 V, and A/B on
-  the RAK5802. Tracked as [#49](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/49).
+  the RAK5802. Tracked as #49.
 - **Notes:** Board left on `busscan` for the re-check after wiring. Field image was
   `0.4.0` / Aug 5 before this flash; restore `rak4631` only after `busscan` shows a
   non-zero production frame.
@@ -3371,7 +3371,7 @@ meaningful, but no result from this board may be attributed to `bf5ceb2`.
 - **900 s interval** — not sent. **Persistence across reset** — not tested. **`v0.4.0`** — not
   tagged, correctly, because none of the legs closed.
 
-[#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) stays
+#40 stays
 open on both halves.
 
 ### 2026-08-05 — USB CDC death root-caused in source; verification blocked, board off the bus
@@ -3380,7 +3380,7 @@ open on both halves.
 
 Not a measurement entry — a state entry, so the next session does not misread the board.
 
-**What was established, and how.** The dead-console fault behind [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
+**What was established, and how.** The dead-console fault behind #40
 was root-caused by reading the core source rather than by instrumenting hardware, and it turned
 out to be **two independent defects** in the pre-sleep path, either sufficient alone:
 
@@ -3503,9 +3503,9 @@ has ever observed the pack under a real charge current, and none claims to.
 
 Two High findings are open against this path and are deliberately not fixed in this entry's
 commits:
-[#36](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/36) (the
+#36 (the
 SENDAT response is not matched to the query — flag, dest, source and sequence go unverified) and
-[#37](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/37) (a
+#37 (a
 partial record set can return `Ok` carrying stale values from a previous read).
 
 #### Re-verified after the cleanup — `b6bbf31`, same host, same day
@@ -3609,7 +3609,7 @@ announces at `provId = 0xFF` and waits for the host to assign it an id. We answe
 twenty-two times and it never latches, so every record stays the unsampled template. The prime
 suspects are our reply frame and our handshake sequence. **The root cause is not diagnosed** —
 this entry deliberately does not name one. Tracked in
-[#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+#5.
 
 > **Diagnosed 2026-08-05 on `1a203d3` — see the entry at the top of this log.** The defect was
 > not in the reply frame or the handshake sequence, both of which were correct. It was **reply
@@ -3799,7 +3799,7 @@ is therefore not evidence of a malformed BOOT frame.
   `00 00` is a null, not a 0.00 V reading.
 - **Verdict:** **PASS on "the pack communicates."** Addressing fix and the provisioning
   handshake are the remaining work. Tracked in
-  [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+  #5.
 
 ### 2026-08-04 — RAK9154 refuses provisioning from a bare master: firmware avenue exhausted
 
@@ -3845,7 +3845,7 @@ ours:  FF 7E 00 55 02 01 FF 00 00 01 50 03 ... 01 ... 7C   (provId 01, flag RSP)
   is sufficient *there* — meaning our master role still differs from the real one in some way
   the field-by-field comparison above did not catch.
 - **Verdict:** **FAIL — cause not yet identified.** The pack does not latch the id we assign.
-  Tracked in [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+  Tracked in #5.
 
 > **Retraction (2026-08-05).** This entry originally concluded *"FAIL — not a firmware defect"*
 > and directed the next step to out-of-band configuration through the WisToolBox mobile app over
@@ -3904,7 +3904,7 @@ narrows the remaining suspect list.
 
 - **Verdict:** **FAIL / inconclusive on cause.** Firmware is now reference-equivalent; the
   fault is very likely physical. Next step is measurement, not another code change.
-  Tracked in [#5](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/5).
+  Tracked in #5.
 
 ### 2026-08-04 — First end-to-end real-sensor uplink to TTN (operator-confirmed), Stage 2 join+uplink PASS
 
@@ -4159,7 +4159,7 @@ narrows the remaining suspect list.
   produced no evidence about it whatsoever, in either direction. No read was attempted, so
   nothing here says the wiring, the A/B polarity, the `WB_IO2` switched rail, the 4800 8N1
   framing, the slave ID, or the register map are either right or wrong.
-- **Defect found — [#27](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/27),
+- **Defect found — #27,
   fixed in `420558e` (not yet exercised on hardware):**
   `pio run -t upload` exits **0** and prints `[SUCCESS]` even when `adafruit-nrfutil` fails
   and prints a traceback. The first attempt therefore reported `=== FLASH OK ===` and went on
@@ -4711,14 +4711,14 @@ on it. No background processes were left running.
 - **Notes and what this is *not*:**
   - **Not a soak.** `FEATURE_SLEEP=0`, so the sleep path — the whole point of H8 — is never
     entered. Zero soak hours still exist.
-  - **Not proof of [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62).** The pack was already latched at `0x01` for every cycle, so the
+  - **Not proof of #62.** The pack was already latched at `0x01` for every cycle, so the
     re-latch path was never exercised. Two cycle markers are missing from the capture
     (`[cycle 2]`, and 14 uplink lines against 16 markers); the reader attached after boot, so
     absence here is a gap in the capture, not an observed failure. It is recorded as a gap.
   - **Nothing was flashed and nothing was reset.** The board was left running, the reader left
     attached.
 
-### 2026-08-13 — downlink command matrix: all eight cases PASS on hardware ([#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54))
+### 2026-08-13 — downlink command matrix: all eight cases PASS on hardware (#54)
 
 - **Commit on the board:** **inferred `f15a983`**, not asserted. The banner on this image predates
   the commit stamp added in `033b584`, so it reports only `firmware : 0.4.1` and
@@ -4736,7 +4736,7 @@ on it. No background processes were left running.
   Class A RX window, so the run took 2 h 31 m (07:50:38 → 10:21:30).
 - **Observation:** every PASS rests on a console line emitted from inside
   `Radio::take_downlink()` (`src/radio.cpp:441-498`) — so **`take_downlink()` itself is now
-  observed on hardware, on all five of its branches**, which is the [#54](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/54) acceptance criterion
+  observed on hardware, on all five of its branches**, which is the #54 acceptance criterion
   that had never been seen before. Verbatim, in cycle order:
 
   ```
@@ -4767,7 +4767,7 @@ on it. No background processes were left running.
   trusting the harness grep.
   - **b** is the strongest single result: the applied interval is visible twice — `config  :
     interval now 900 s` in cycle 18 and the `wait` line dropping 1800 s → 900 s in cycle 19.
-  - **c** discriminates exactly what [#64](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/64) was about: a known opcode with a bad length reports
+  - **c** discriminates exactly what #64 was about: a known opcode with a bad length reports
     *wrong length*, not *unknown opcode*.
   - **f** shows the port filter running before any opcode parsing.
   - **g** shows two queued commands drained one per cycle, not merged or dropped.
@@ -4776,8 +4776,8 @@ on it. No background processes were left running.
     the session was restored (`session : restored 0x260CE734, counter 2080`) rather than rejoined.
     No reset occurred during the matrix.
 - **Notes and what this is *not*:**
-  - **Not proof of [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62).** The pack reported `pack answered at 0x01 — skipping provisioning` in
-    every matrix cycle, so the re-latch path was never entered. [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) stays open.
+  - **Not proof of #62.** The pack reported `pack answered at 0x01 — skipping provisioning` in
+    every matrix cycle, so the re-latch path was never entered. #62 stays open.
   - **Not a soak, and not field-image power behaviour.** `FEATURE_SLEEP=0`. Zero soak hours still
     exist.
   - `[cycle 2]` is absent from the capture (the reader attached after boot). Outside the matrix
@@ -4786,7 +4786,7 @@ on it. No background processes were left running.
     (cycle 1) → 11.94 V / 84% (cycle 26), on USB power with no charge source, reported current
     `-0.01 A` throughout. −0.01 A is the 10 mA telemetry LSB, so it is a resolution floor and
     **not** a current measurement. `kTxInhibitCentivolts` is 960 (9.60 V) and remains an
-    unmeasured inference ([#67](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/67)); nothing here was changed.
+    unmeasured inference (#67); nothing here was changed.
 
 ### 2026-08-13 — field image (`env:soak`) flashed at `d568574`; the sleep path is reached
 
@@ -4854,7 +4854,7 @@ on it. No background processes were left running.
     but real evidence for H5.
   - **USB will disappear by design, and that is not a fault.** `Power::sleep()` calls
     `TinyUSBDevice.detach()` before sleeping whenever no host has the CDC open and the 180 s boot
-    grace has expired (`src/power.cpp:182-205`, [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60), `23604cf`). During this capture a reader
+    grace has expired (`src/power.cpp:182-205`, #60, `23604cf`). During this capture a reader
     *was* attached, so `console_in_use` was true, the `power   : USB kept attached …` line never
     printed, and the port stayed up. Once the reader is released the port goes away at the next
     sleep. Press RESET once to get a flashable window back.
@@ -4872,9 +4872,9 @@ on it. No background processes were left running.
     0
     ```
 
-    This is the first hardware observation of the [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)
+    This is the first hardware observation of the #60
     / ADR-0008 detach path on the field image.
-    It is **half** of [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
+    It is **half** of #40
     item 1: the detach is observed, the matching `attach()` and a successful host re-enumeration at
     the next wake are not. Absence from `ioreg` is by design and is not a dead board.
   - **Board left in this state:** running `env:soak` at `d568574`, asleep on a 900 s cycle, session
@@ -4957,12 +4957,12 @@ on it. No background processes were left running.
   pack then answered the push listen in the **same** cycle with a live reading, and cycle 11 was
   clean again. So a single transient miss, roughly 1 cycle in 20, is enough to spend the one BOOT
   the power cycle is allowed and to send the reboot verb to a demonstrably healthy pack. Filed as
-  [#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75).
+  #75.
 
 - **Observation — the pack never appeared unlatched.** `provId 0xFF` does not occur anywhere in the
   capture; every cycle but 10 printed `pack answered at 0x01 — skipping provisioning`. The
   re-latch path in
-  [#62](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/62) was
+  #62 was
   **not exercised** and remains unproven.
 
 - **Observation — `env:soak` (the field image, byte-identical to `env:rak4631`) at `65f8615`, one
@@ -5007,12 +5007,12 @@ on it. No background processes were left running.
   `65f8615` with live values and no reset, and the field image reached `sleep   : 900 s`.
   INCONCLUSIVE on `e070708` and on `da655e9`, neither of which had its defect condition arise.
   One new defect found and filed
-  ([#75](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/75)).
+  (#75).
 
 - **Board left:** running `env:soak` at `65f8615`, asleep on a 900 s cycle, session `0x260CE734`.
   The field image detaches from USB ~180 s after boot by design
   (ADR-0008,
-  [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)), so the
+  #60), so the
   board disappearing from `/dev/cu.usbmodem*` is correct behavior, not a dead board. One RESET
   press restores the console and a flashable window.
 
@@ -5039,8 +5039,8 @@ on it. No background processes were left running.
   `ioreg 32809 = 1` continuously from boot through **past 16 minutes**, far beyond the 180 s grace.
   That is consistent with `b1e59d6` — the field image detaches **when nobody is watching**, and a
   reader holding the port open suppresses it. It is therefore **not** a contradiction of
-  [#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60), and it
-  means item 1 of [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)
+  #60, and it
+  means item 1 of #40
   — re-enumeration on the host after a detach-sleep — is **still untested**, because no detach
   occurred to re-enumerate from. The console surviving a full sleep/wake cycle is new information
   and is the closest thing to it so far.
@@ -5083,7 +5083,7 @@ on it. No background processes were left running.
      better than the pack telemetry for this question. The module's own datasheet sleep figure is
      **2.0 µA** [CIT-RAK4631-RAW] — roughly 5000× below one digit of this display. "Sleep current
      is unmeasured" stays an open blocker in `AGENTS.md` and issue
-     [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+     #8.
   2. **The LoRa TX current has not been measured.** 40 mA is *lower* than the datasheet's
      transmit figures — RAKwireless gives `Tx mode LoRa @17 dBm` **92 mA** and `@20 dBm`
      **125 mA** [CIT-RAK4631-RAW]. The likely explanation is that the meter's slow display
@@ -5098,7 +5098,7 @@ on it. No background processes were left running.
 - **Next:** closing the power gate needs instrumentation with **µA resolution** — a Nordic PPK2
   (the method behind [CIT-RAK-SLEEP]), a current-sense shunt read on a scope, or a
   coulomb-counting integration over a long window. Tracked in
-  [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+  #8.
 
 ### 2026-08-14 — the meter finally caught a transmit-shaped peak: **0.14 A**, stable across many cycles; minimum still `0` at the same **10 mA** floor
 
@@ -5156,7 +5156,7 @@ on it. No background processes were left running.
      single digit of this display, and [`POWER_BUDGET.md`](POWER_BUDGET.md) turns on ~1 mA. A `0`
      on this meter is arithmetically incapable of distinguishing a healthy 2 µA sleep from a
      9 mA defect. "Sleep current is unmeasured" stays an open blocker in `AGENTS.md`, and
-     [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)
+     #8
      **stays open**.
   2. **This is not a measured transmit current either.** 0.14 A is **one digit** of resolution on
      a meter that samples slowly, catching the tail of a ~50 ms burst by luck rather than by
@@ -5186,7 +5186,7 @@ on it. No background processes were left running.
   instrumentation — a Nordic PPK2 (the method behind [CIT-RAK-SLEEP]), a current-sense shunt on a
   scope, or coulomb-counting over a long window. A meter whose LSB is 10 mA cannot answer it no
   matter how many cycles it watches. Tracked in
-  [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8).
+  #8.
 
 ### 2026-08-30 — field telemetry window settles temp scale, charge sign, and two bench checks
 
@@ -5210,18 +5210,18 @@ on it. No background processes were left running.
   1. **`batt_temperature` scale is correct as deployed** — 9 → 5 °C tracking the co-located
      RK900's 9.4 → 6.3 °C with plausible lag. A 10× error in either direction would read 0.9 or
      90 °C. Closes the "inferred from the IPSO type" caveat in `payload/schema.yaml` and
-     [#4](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/4).
+     #4.
   2. **`batt_current` sign convention confirmed under a real charge** — positive (+0.01 A) in
      daylight, negative (−0.02 to −0.05 A) after dark, exactly ADR-0002's positive-is-charging.
      The 2026-08-12 single-LSB reading is superseded by a real day/night transition.
   3. **USB re-enumeration and watchdog ticks across sleeps are no longer open questions** — this
      window plus the 19.03 h soak (76 uplinks, port reattached across every sleep) and `f_cnt`
      3660 of cumulative field cycles with zero watchdog resets answer both halves of
-     [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40).
+     #40.
   4. **Overnight system draw, coarse:** −0.05 A telemetry (5 LSB, a real reading, not a floor)
      and 89 → 85 % capacity in ~4 h. This is the whole system through the pack — node, RK900,
      buck idle — NOT the MCU sleep current, which stays unmeasured
-     ([#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8)
+     (#8
      stays open). It is the first field-measured input for the winter budget in
      [`POWER_BUDGET.md`](POWER_BUDGET.md).
 - **Verdict:** PASS for the temp-scale and sign questions; INFORMATIVE for power. No H-gate

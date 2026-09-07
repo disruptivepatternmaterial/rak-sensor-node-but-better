@@ -20,8 +20,8 @@ further down the same file. Both are removed.
 
 The safe procedure currently ends at step 22. Step 23 does not exist yet because `K2` has not been
 built or bench-qualified
-([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101),
-[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+(#101,
+#102).
 
 ## Required equipment
 

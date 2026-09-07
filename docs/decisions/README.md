@@ -47,7 +47,7 @@ git show 5a9d584^:docs/decisions/            # list them all
 | 0006 | RK900-09 line rate: keep 9600, register map unchanged | Accepted — baud settled by measurement. File removed in `5a9d584` |
 | 0007 | No second voltage source, so the brownout hold is bounded | Accepted — file removed in `5a9d584` |
 | 0008 | The console stays in the field image | Accepted — file removed in `5a9d584` |
-| 0009 | Leaked build host address is rotated and hardened, not erased from history | Accepted — mitigation is operator-side and open ([#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85)). File removed in `5a9d584` |
+| 0009 | Leaked build host address is rotated and hardened, not erased from history | Accepted — mitigation is operator-side and open (#85). File removed in `5a9d584` |
 | [0010](ADR-0010-rak19007-vdd-source-conflict.md) | RAK19007 VDD source conflict | Accepted |
 | [0013](ADR-0013-pack-pin-3-is-reserved.md) | One-wire lands on pack pin 5 only; pins 3 and 5 are not joined | Accepted |
 
@@ -60,7 +60,7 @@ two references describe decisions that exist only in the prose that cites them. 
 
 Tracked as GitHub issues. The BMS path and the framework choice are both closed (ADR-0004,
 ADR-0003); what remains open is enclosure and cable entry
-([#20](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/20),
-[#21](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/21)) and
+(#20,
+#21) and
 the buck choice
-([#2](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/2)).
+(#2).

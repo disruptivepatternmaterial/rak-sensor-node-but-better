@@ -6,11 +6,11 @@ opportunity, not a waiting period.** Several open questions can only be answered
 watching the node run for a long time, and a soak that produces nothing but "it did not
 crash" has spent a day to learn one bit.
 
-Run it instrumented and it settles [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8),
-[#12](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/12),
-[#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40),
-[#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45)
-and [#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47)
+Run it instrumented and it settles #8,
+#12,
+#40,
+#45
+and #47
 — see [Which issues each result closes](#which-issues-each-result-closes).
 
 Status stays **🚧 NOT YET DEPLOYED** until a completed run is recorded in
@@ -59,7 +59,7 @@ Two things worth knowing before you read the output:
 
 This is the one thing the harness cannot do. Software can prove the node *entered*
 sleep; only a meter can prove sleep is actually low-power rather than a busy loop with
-the lights off ([#12](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/12)).
+the lights off (#12).
 
 ### The power path, because it decides the measurement point
 
@@ -79,7 +79,7 @@ Two consequences that a bench setup gets wrong by default:
 These are **two separate numbers**. Do not add them from one reading and do not quote one
 as the other.
 
-### Measurement 1 — buck no-load quiescent ([#2](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/2))
+### Measurement 1 — buck no-load quiescent (#2)
 
 The buck's own idle draw is a parallel load that runs 24/7 and can exceed the node's own
 average, which is why the part gets selected on this figure
@@ -157,15 +157,15 @@ An average hides exactly the defects worth finding.
   is sleep. A step down that creeps back up is a peripheral re-enabling itself.
 - **Is there ~1 kHz ripple on the floor?** That is the FreeRTOS tick still running —
   tickless idle is off and the CPU is waking 1000×/s to do nothing
-  ([#12](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/12),
-  [#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47)).
+  (#12,
+  #47).
   The mean can look acceptable while this is happening.
 - **Does the floor rise after the *first* sleep?** First-sleep-only correctness is a real
   failure mode: something initialised on wake is not being torn down again, so cycle 2
   onward costs more than cycle 1. Compare the floor of sleep #1 against sleep #5.
 - **Do resets land mid-sleep?** A current spike in the middle of a sleep window, with the
   boot banner following it, is the watchdog firing during sleep
-  ([#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40)).
+  (#40).
   The soak log's `watchdog-reset` anomaly and the trace timestamp together tell you
   whether the reset happened while awake or while asleep — which the log alone cannot.
 
@@ -178,7 +178,7 @@ instrument. A number without its window and its measurement point is not a measu
 The serial harness has to hold the port open for the whole run, and that is not free. The
 field image detaches USB about 180 s after boot **when no host is attached**
 (ADR-0008,
-[#60](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/60)). A
+#60). A
 reader that stays attached suppresses the detach, so a 24 h serial soak measures a bench
 variant of the image rather than the one that ships.
 
@@ -222,7 +222,7 @@ Derived from H8. All of these must hold; any one failing is a fail, not a caveat
 B9 needs provoking; it will not happen on its own during a healthy bench run. Pull the
 RS-485 pair and let the node run 24+ cycles with no sensor evidence, then confirm one
 transmission goes out anyway
-([#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45)).
+(#45).
 Do it as a separate short run so the 24 h clean run stays clean.
 
 ## Pass / fail — 7 d field shadow
@@ -249,12 +249,12 @@ it with the serial capture finding nothing and read `ttn_f_cnt_*`.
 
 | Result the soak produces | Issue it settles |
 |---|---|
-| Measured mean sleep current with its window and its measurement point, no host attached | [#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8) |
-| Trace shows a flat floor with no ~1 kHz tick ripple | [#12](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/12) |
-| Sleep floor after cycle 5 equals the floor after cycle 1; residual accounted for | [#47](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/47) |
-| 24 h with zero watchdog resets, and no reset landing inside a sleep window | [#40](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/40) |
-| 24+ deliberately starved cycles followed by one transmission | [#45](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/45) |
-| The full instrumented run, bench and field, recorded in EVIDENCE.md | [#14](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/14) and H8 |
+| Measured mean sleep current with its window and its measurement point, no host attached | #8 |
+| Trace shows a flat floor with no ~1 kHz tick ripple | #12 |
+| Sleep floor after cycle 5 equals the floor after cycle 1; residual accounted for | #47 |
+| 24 h with zero watchdog resets, and no reset landing inside a sleep window | #40 |
+| 24+ deliberately starved cycles followed by one transmission | #45 |
+| The full instrumented run, bench and field, recorded in EVIDENCE.md | #14 and H8 |
 
 A result closes an issue when it is **in [`EVIDENCE.md`](EVIDENCE.md) with a host and a
 commit SHA**. A result in a chat window closes nothing.

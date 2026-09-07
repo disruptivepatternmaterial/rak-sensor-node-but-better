@@ -7,7 +7,8 @@ lives in `docs/` — read it there instead of trusting any summary of it, includ
 
 **Nine GPIO pads are dead. Every one died under diagnostic firmware that agents wrote and
 flashed without authorization; zero died under the production image**
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+([`docs/EVIDENCE.md`](docs/EVIDENCE.md) § 2026-08-30 (seventh) — the surviving record; it was
+issue #102, and the tracker's history is gone, see "Issue numbers" below).
 The consequences are absolute:
 
 - **Never flash a board unless the operator asked for that specific flash.** Wanting data is
@@ -93,6 +94,25 @@ board definition is vendored in [`rakwireless/`](rakwireless/) — do not edit i
 `forest-weather-machines`; a drifted encoder discards the whole uplink (rule 60). Sleep current
 is unmeasured — pack telemetry's 10 mA LSB is a resolution floor, never quote it as a
 measurement ([`docs/POWER_BUDGET.md`](docs/POWER_BUDGET.md)).
+
+## Issue numbers
+
+**`#N` in this repo's docs is a historical token, not a link.** The tracker's history was
+deleted; the API returns `410 This issue was deleted` for every number the docs cite — 59 of
+them, including `#102`, `#99` and `#101`, which the safety rules leaned on as their authority.
+The 174 links were unlinked on 2026-09-07 so nobody clicks into a dead end, and the numbers kept
+for provenance. `#117` and `#118` are the only live issues.
+
+Nothing measured was lost with them: the surviving records are in
+[`docs/EVIDENCE.md`](docs/EVIDENCE.md) and [`CHANGELOG.md`](CHANGELOG.md). But an `#N` you cannot
+read is not a source — **do not cite one as if it were, and do not restate a claim whose only
+support is a deleted issue.** Verify against `docs/` or measure again.
+
+Check before assuming a number is dead:
+
+```bash
+gh api repos/disruptivepatternmaterial/rak-sensor-node-but-better/issues/N -q .state
+```
 
 ## The deployment goal, in one line
 

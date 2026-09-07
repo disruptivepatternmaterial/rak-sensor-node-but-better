@@ -125,7 +125,7 @@ observation, not specified values.
 the bounded recovery sequence must still try both possible addresses once. With no remembered
 latch that sequence is `0xFF`, then `0x01`; the second `0x01` is not suppressed merely because
 the first one missed before the recovery window. `src/sensors/battery_query_schedule.h` implements
-this correction under [#108](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/108).
+this correction under #108.
 [CITE(bench): the retry-bearing SDA revision `7ad5daa` produced live pack readings](EVIDENCE.md)
 [CITE(spec): H7 requires BMS silence not to become a terminal state](FIRMWARE_SPEC.md#7-hardening-requirements-release-blocking)
 
@@ -294,10 +294,10 @@ Exact channel IDs must match decoder expectations; verify against live decoder b
 ### 7.1 Safety holds — every state where the node withholds an action
 
 Three separate defects have had the same shape: a hold taken for a good reason that also
-disabled the only mechanism able to lift it ([#61](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/61),
+disabled the only mechanism able to lift it (#61,
 the brownout keepalive counter-headroom defect, and
-[#74](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/74)/[#68](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/68)).
-Three times is a pattern, so the enumeration stops being implicit ([#66](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/66)).
+#74/#68).
+Three times is a pattern, so the enumeration stops being implicit (#66).
 
 **Class A is what makes this category dangerous.** A downlink can only follow an uplink, so
 any hold that stops transmission also removes the only route by which the hold could be

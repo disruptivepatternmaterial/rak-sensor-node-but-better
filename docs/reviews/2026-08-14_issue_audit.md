@@ -39,7 +39,7 @@ record**." The audit's own point survives intact and sharpens: the defect was th
 entry, and the fix was to write it. **Sleep current remains unmeasured** — the same meter's minimum
 still reads `0` at a 10 mA resolution floor — and the 0.14 A peak is "consistent with the
 datasheet," not a measured transmit figure.
-[#8](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/8) stays open.
+#8 stays open.
 
 ---
 

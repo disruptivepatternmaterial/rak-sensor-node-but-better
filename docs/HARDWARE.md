@@ -216,16 +216,16 @@ or the MCU-side driver.
 
 - The pack is an **active low-side driver** (+0.0867 V, not a passive pull-down), so a transmit
   overlap is two live drivers in opposition, and our end idles push-pull HIGH
-  ([#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99)).
+  (#99).
 - The line idles at **+3.31 V** while an *unpowered* pad's maximum is **0.3 V**
   [CIT-NRF-BACKPOWER] — **11× over** whenever the harness is mated to a dark core. That is the
   connector-sequencing rule below, and it is now measured rather than assumed
-  ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101)).
+  (#101).
 
 **Nine pads remain electrically unexplained — but not unattributed.** Every one of them was running
 diagnostic firmware the operator never authorized, written and flashed by agents over SSH across
 multiple sessions. Zero pads have been destroyed by the production image
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)). What
+(#102). What
 follows is how the above was measured, and how to re-qualify any replacement harness or pack. It
 risks no silicon.
 
@@ -253,7 +253,7 @@ It reads 0 V for a structural reason: **the pack's data-line reference is its ow
 (`3V3_In`), and pin 4 is fed *from the node*.** Unplug the node and the pack's driver has no
 rail, so the line rests at 0 V through the pack's measured 15 kΩ pull-down — whether the harness
 is lethal or benign. So the measurement named in
-[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)
+#102
 cannot convict or clear anything, and a 0 V result must never be recorded as a cleared harness.
 
 **Setup that produced the valid result — energise pin 4, expose no pad.** Use the
@@ -304,7 +304,7 @@ with no number attached is how this got to nine pads.
 
 **Do not connect a Core to this one-wire harness.** Nine GPIO pads have been destroyed, every one
 while carrying this data line, and the mechanism is not established
-([#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
+(#102).
 The production image has destroyed none; that observation does not clear the electrical design.
 
 This is the only current build gate. Later schematics in this section describe the intended
@@ -687,7 +687,7 @@ mapping, and node 002 previously read 12.43 V, -0.01 A, 100 %, 24.0 C over SDA o
 2026-08-30 across nine cycles in two sessions, and the field image's uplink landed at TTN
 (`f_cnt 832`) ([`EVIDENCE.md`](EVIDENCE.md)). Build such a node from `env:rak4631_sda`, with
 `env:battdiag_sda` for fast pack questions — **but not until the harness is cleared under
-[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)**.
+#102**.
 Historical function does not establish electrical safety.
 
 **Qualify the pad before you solder to it — with a meter.** SDA was originally selected on a
@@ -708,9 +708,9 @@ the dead pads are real.
 holding IO1, and ESD. The pack is cleared as an overvoltage source by measurement: its data line
 reads **20 mV** and **15 kohm** to pack minus with the wire off the board. Node 001, from the same
 parts order, reads its pack on `IO1` in the field. See
-[#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102),
-[#96](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/96) and
-[#99](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/99).
+#102,
+#96 and
+#99.
 
 Two rules that follow, both cheap:
 
