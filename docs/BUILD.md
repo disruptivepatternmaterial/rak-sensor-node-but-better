@@ -8,12 +8,18 @@ and the conflict must be resolved before hardware is connected.
 
 ## Current stopping point
 
-**The pack data wire never touches a GPIO. It lands on `U1`, an XR33052 RS-485 transceiver, and
-only `U1`'s logic outputs reach the Core**
-(ADR-0012).
+**The pack data wire never touches a GPIO directly. It lands on `K2`, a normally-open `AQY212EH`
+PhotoMOS relay that firmware closes only for the battery read** —
+[`HARDWARE.md`](HARDWARE.md) § "The data-line front end".
 
-The safe procedure currently ends at step 22. Steps after that do not exist yet because the
-powered-off isolation circuit and powered contention limit have not passed their bench gates
+This supersedes an earlier claim in this file that the wire lands on `U1`, an `XR33052` RS-485
+transceiver, "per ADR-0012". **No such ADR was ever written.** `git log --all -S 'ADR-0012'` finds
+that text only inside a merge-conflict block committed by `5a9d584`; the transceiver was an
+uncommitted draft, never a decision. A second leftover named `SN74CBTLV1G125` as the candidate
+further down the same file. Both are removed.
+
+The safe procedure currently ends at step 22. Step 23 does not exist yet because `K2` has not been
+built or bench-qualified
 ([#101](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/101),
 [#102](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/102)).
 
@@ -24,8 +30,8 @@ powered-off isolation circuit and powered contention limit have not passed their
 - RK900 weather sensor
 - RAK9154 solar battery pack and its 5-pin Sensor Hub Load harness
 - 12 V-to-5 V buck converter
-- `U1`: one `XR33052ID-F` [CIT-XR33052] on a SOIC-8-to-DIP breakout, 2 × 10 kΩ, 1 × 47 kΩ,
-  1 × 100 nF
+- `K2`: one Panasonic `AQY212EH` PhotoMOS, one Preci-Dip `110-87-304-41-001101` 4-pin socket,
+  one 470 Ω ¼ W resistor, and a perfboard offcut
 - multimeter
 - Saleae Logic Pro 8 for any unqualified signal
 - current-limited 3.3 V bench supply
@@ -163,7 +169,7 @@ flowchart LR
     - Exit 1 is inconclusive; correct the measurement setup and repeat.
     - Exit 2 fails; isolate the lead and stop.
 
-## C. Record before `U1`
+## C. Record before fitting `K2`
 
 22. Confirm all of the following:
     - the RAK4631 Core is still not fitted;
@@ -176,22 +182,18 @@ flowchart LR
 
 ## What must be added before step 23 can exist
 
-All five items are required:
+Two of these closed on 2026-09-06. Three remain.
 
-1. A reviewed isolation schematic. The current candidate is TI `SN74CBTLV1G125`, whose datasheet
-   specifies bidirectional operation and at most 10 µA `Ioff` with `VCC = 0 V` and either data
-   terminal up to 3.6 V [CIT-SN74CBTLV1G125].
-2. An exact output-enable circuit. TI requires `OE` pulled to `VCC` so the switch is open during
-   power transitions; no pull-up value or control GPIO has been approved.
-3. A selected current-limiting network that meets both the nRF52840 limits and measured 9600-baud
-   HIGH/LOW thresholds. The existing 1 kΩ resistor does not pass by precedent: it was fitted when
-   `SDA` failed.
-4. A no-Core powered-off test proving the Core-side switch terminal remains isolated while the
-   pack side is active.
-5. A two-sided analyzer capture during the production exchange proving the voltage and current at
-   both ends of the current-limiting element.
+| # | Requirement | State |
+|---|---|---|
+| 1 | A decided front-end part with powered-off isolation on the signal path | **CLOSED** — `K2`, `AQY212EH`: 60 V bidirectional contacts, 1 µA maximum off-state leakage, open whenever P0.14 is low or the node has no power |
+| 2 | The measured voltage that front end has to survive | **CLOSED** — −7.84 V unpowered, −2.62 V powered, events 1.6–10.6 ms (`EVIDENCE.md` 2026-09-06, captures 7 and 11) |
+| 3 | `K2` built on its socket and bench-qualified, analyzer on both sides, across mate and unmate | **OPEN** |
+| 4 | Firmware holding P0.14 low by default, configured for high drive, raised only around the battery read | **OPEN** |
+| 5 | Sleep-current accounting for the finished circuit | **OPEN** |
 
-Until those results are in `EVIDENCE.md`, there is no step that says to install the donor Core.
+Until items 3–5 are recorded in `EVIDENCE.md`, there is no step that says to install the donor
+Core.
 
 ## Build record
 
