@@ -28,6 +28,116 @@ that would have exercised the payload encoder and the frame codec were removed i
 `pio test -e native` is skipped rather than passing. H1–H8 remain open and status stays
 **🚧 NOT YET DEPLOYED**.
 
+## 2026-09-06 — mating the pack drives the data wire to −7.84 V unloaded and −2.62 V powered
+
+**Host:** Heliotrope Ridge. **Instrument:** Saleae Logic Pro 8 `AF11F852CEC20A9`, captures 4–11,
+Logic 2 v2.4.46 driven over its MCP server. **Repo commit at time of measurement:** `2db8ab4`
+(`chore/realign-gates-after-clear`). **No firmware was built or flashed.** The Core's resident
+image was never identified — no banner was read — so nothing here is attributable to a build.
+
+**Analyzer ground on the base-board `GND` pad, not the pack's `P−`.** Every earlier capture in
+this ledger grounded at the pack, which cannot show a pack-to-node offset by construction. This is
+the only setup change, and it is what made the excursion visible.
+
+**A Core was fitted.** The pack data wire was **never landed on the `SDA` clip** at any point, so
+no GPIO pad was in any measurement loop. The board was unpowered for captures 4–8 (the buck's
+USB-C was out of the base board) and powered for 9–11.
+
+| Ch | Probe point | Sample rate |
+|---|---|---|
+| `CH0` | joined pack pins 3+5 (data), node side | 1.5625 MS/s analog |
+| `CH1` | pack pin 2 (`P−`), node side | 1.5625 MS/s analog |
+| `CH2` | pack pin 4 (`3V3_In`), landed on the `VDD` pad | 1.5625 MS/s analog |
+| `CH3` | RAK5802 `GND` clip | 1.5625 MS/s analog |
+| `CH4` | pack pin 1 (`P+`) | 6.25 MS/s digital, 3.3 V threshold |
+
+### Capture 7 — unpowered mate/unmate cycles, 120 s
+
+| Channel | min | max |
+|---|---|---|
+| `CH0` data | **−7.8396 V** | **+4.3262 V** |
+| `CH1` `P−` | −0.0254 V | +0.0060 V |
+| `CH2` `3V3_In` | −0.0017 V | +0.0087 V |
+| `CH3` 5802 `GND` | −0.1075 V | +0.2690 V |
+
+Excursion census on `CH0`: 60 events past −1 V, 47 past −2 V, 35 past −4 V, 17 past −6 V.
+Individual event durations **1.6–10.6 ms**. Every deep event falls in t = 74–104 s, the plugging
+window. A separate shallow population at t = 8–10 s, spaced 16.7/33.3 ms, is mains pickup on a
+floating 2 MΩ input and is excluded from the count.
+
+−7.84 V is inside the analyzer's ±10 V analog range, so it is a measured value and not a clipped
+floor [CIT-SALEAE-LOGICPRO8].
+
+### Capture 8 — same cycles, 1 kΩ shunt from the data wire to node `GND`, 120 s
+
+`CH0` min **−0.8191 V**, max +0.2779 V. Fifteen events past −0.5 V, **none past −1.0 V**, event
+durations collapsed to 3–4 µs.
+
+Derived, treating capture 7's −7.8396 V as the open-circuit value: source impedance
+**≈ 8.6 kΩ**, available current **≈ 0.9 mA**.
+
+### Captures 9 and 10 — board powered, pack mated, signalling check, 30 s each
+
+| Condition | `CH0` idle | Edges in 30 s |
+|---|---|---|
+| 1 kΩ shunt fitted | +0.5965 … +0.6122 V | **0** |
+| shunt removed | +3.2971 … +3.3180 V | **0** |
+
+The 3.31 V idle independently reproduces the +3.3118 V figure recorded on 2026-08-30. With the
+1 kΩ fitted the line reaches only 0.60 V, which puts the pack's HIGH driver at **≈ 4.5 kΩ**
+source impedance.
+
+**Consequence — passive termination cannot work here.** Holding capture 7's −7.84 V above the pad's
+−0.3 V limit through an 8.6 kΩ source requires R < 340 Ω; preserving a valid HIGH through a 4.5 kΩ
+driver requires R in the tens of kΩ. No single resistor satisfies both.
+
+### Capture 11 — powered mate, the real field sequence, 60 s
+
+Unmating the pack removes the buck's input, so the board is dark before the mate and boots as it
+completes. `CH2` rising from −0.0017 V to +3.3756 V records that boot.
+
+| Channel | min | max |
+|---|---|---|
+| `CH0` data | **−2.6160 V** | +3.4747 V |
+| `CH1` `P−` | **−0.2242 V** | +0.0008 V |
+| `CH2` `3V3_In` | −0.0017 V | +3.3756 V |
+| `CH3` 5802 `GND` | −0.0814 V | +0.0598 V |
+
+8,748 `CH0` samples below −0.3 V. **The pack transmits:** 8,501 edges, first at 7.7888 s
+(immediately on mating), last at 58.2600 s, narrowest pulse **102.4 µs ≈ 9,766 baud**, consistent
+with 9600 8N1.
+
+### Verdict
+
+**Ordinary mating of the pack connector puts the data conductor outside the nRF52840's I/O
+absolute maximum of −0.3 V to VDD+0.3 V** [CIT-NRF-GPIO], by 26× unloaded and 9× under real
+powered conditions, for milliseconds at a time, tens of times per plugging session. The violation
+is on the **lower** rail, which is the direction every dead pad failed. A direct GPIO connection to
+this wire is convicted by measurement.
+
+### What this does NOT establish
+
+- **No mechanism.** Node ground moved ≤ 224 mV under load and `3V3_In` ≤ 9 mV, so a pack-to-node
+  ground offset is **refuted** as the driver of the excursion. Coupling from the `P+` contact's
+  inrush is a candidate and is untested. `CH1` sits on the node side of `P−`, the same net as the
+  analyzer ground, so it cannot show a pack-side offset — only that the node's own ground
+  conductor stayed quiet.
+- **No pad-death attribution.** No pad death was instrumented. 0.9 mA through a clamp is out of
+  absolute-maximum spec, but Nordic publishes no per-pin clamp current limit
+  [CIT-NRF-GPIO-TOTAL], so "destroys a pad" is not supported by this data and is not claimed.
+- **Nothing about why the pack went silent** in captures 9 and 10 after sitting mated with the
+  1 kΩ load, then resumed on a fresh mate. Observed, not explained.
+
+CITE(bench): capture 7 preserved on the build host at `/tmp/rak-connector/20260906_connector_mating.sal`, exports in `/tmp/rak-connector/event/`.
+CITE(bench): capture 8 at `/tmp/rak-connector/20260906_connector_mating_1k_shunt.sal`, exports in `/tmp/rak-connector/shunt1k/`.
+CITE(bench): capture 9 at `/tmp/rak-connector/20260906_signalling_1k_shunt.sal`, exports in `/tmp/rak-connector/signal1k/`.
+CITE(bench): capture 10 at `/tmp/rak-connector/20260906_signalling_noshunt.sal`, exports in `/tmp/rak-connector/signal_open/`.
+CITE(bench): capture 11 at `/tmp/rak-connector/20260906_powered_mate.sal`, exports in `/tmp/rak-connector/powered_mate/`.
+CITE(datasheet): [CIT-NRF-GPIO] nRF52840 Product Specification §5, Absolute maximum ratings —
+I/O pin voltage −0.3 V to VDD+0.3 V for VDD ≤ 3.6 V.
+CITE(datasheet): [CIT-SALEAE-LOGICPRO8] Logic Pro 8 analog range −10 V to +10 V, so −7.84 V is
+measured rather than saturated.
+
 ## 2026-09-05 — node 002 resets and reports weather, but the battery remains absent
 
 **TTN query host:** Heliotrope Ridge. **Resident image:** commit `33c0cdd`, version `0.4.4`,
