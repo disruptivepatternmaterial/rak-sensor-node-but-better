@@ -115,9 +115,9 @@ undocumented part.
 |---|---|---|
 | 1 | P+ (~12 V) | Splits two ways: buck VIN+, **and** the RK900's 12 V supply |
 | 2 | P− | GND — shared return for the buck, the RK900, and the RS-485 reference |
-| 3 | TXD | Half-duplex data (bridge to pin 5 for one-wire) |
-| 4 | 3V3_In | Level ref / probe rail — tie carefully to 3V3, **never 5 V** |
-| 5 | RXD | Bridge to TXD for one-wire |
+| 3 | TXD (pack naming) | **Leave unconnected and insulated.** The master's own datasheet calls this pin `Reserved / Not defined` — [ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) |
+| 4 | 3V3_In | Probe rail, **supplied by the node** — the master datasheet lists it as `Vcc_Probe`, a 3.3 V output. Never 5 V |
+| 5 | RXD (pack naming) | **The one-wire link.** The master datasheet calls this pin `One-wire UART` and drives no other |
 
 **Not** full-duplex UART to RX1/TX1 as two independent lines without bridging — Hub protocol is half-duplex one-wire @ 9600. See Meshtastic / RAK-OneWireSerial / `rak-4-5-wire`.
 
@@ -134,7 +134,7 @@ uses this module as the wiring hub rather than the base-board header.
 | 1 | `A/RX` | RS-485 A, non-inverting | RK900 `A` |
 | 1 | `B/TX` | RS-485 B, inverting | RK900 `B` |
 | 2 | `SCL` | I²C clock, an otherwise unused GPIO | *empty* |
-| 2 | `SDA` | **nRF P0.13 — the one-wire pin**, direct passthrough, no buffer | pack pins 3+5 joined |
+| 2 | `SDA` | **nRF P0.13 — the one-wire pin**, direct passthrough, no buffer, plus a base-board 4.7 kΩ pull-up to `VDD` [CIT-RAK19007-SCH-SLOTS] | `K2` pin 4 (pack pin 5 arrives through the relay) |
 | 2 | `3V3` | **switched** output on `3V3_S` — dies mid-cycle | *empty. never use* |
 | 2 | `AIN` | one analog input | *empty* |
 
@@ -179,8 +179,12 @@ Both rails split. Nothing is daisy-chained through the RAK5802, and nothing is e
 
 ### The two data rules, stated plainly
 
-> **Pack pins 3 and 5 (TXD and RXD) are joined in the historical harness. The resulting data
-> line must not reach `SDA` until the powered-off isolation and contention gates below close.**
+> **The one-wire link is pack pin 5 alone. Pin 3 is `Reserved / Not defined` on the master side
+> and is left unconnected** ([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)).
+>
+> **The historical harness joined pins 3 and 5.** Every measurement in
+> [`EVIDENCE.md`](EVIDENCE.md) before 2026-09-07, including the −7.84 V mating transient, was taken
+> on that joined conductor and therefore cannot say which pin sourced it.
 >
 > **Pack pin 4 (**`3V3_In`**) goes to the base-board `VDD` pad, and never to 5 V.**
 
@@ -458,7 +462,10 @@ Ground first, ground last. No exceptions, no shortcuts, and never two power sour
 5. Pack pin 4 → base-board `VDD` pad.
 6. Pack pin 1 → buck input positive, and → RK900 12 V.
 7. RK900 `A` and `B` → RAK5802 `A/RX` and `B/TX`.
-8. Pack data (pins 3+5 joined) → 1 kΩ inline → RAK5802 `SDA` clip. **This wire goes on last.**
+8. Pack data (**pin 5 only** — pin 3 stays insulated) → `K2` → RAK5802 `SDA` clip. **This wire
+   goes on last.** See "The data-line front end" and
+   [ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md); the 1 kΩ inline resistor this step
+   used to name is superseded.
 9. Qualify the pad before trusting it, **with a meter and with the board powered down**: measure
    its resistance to ground and compare against a known-good pin on the same core. Hundreds of kΩ
    is healthy; a few kΩ means the pad is already gone. Do not proceed on a damaged pad, and do not
@@ -513,51 +520,79 @@ measured 8.6 kΩ source needs R < 340 Ω, while preserving a valid HIGH through 
 | Ref | Part | Why this one |
 |---|---|---|
 | `K2` | Panasonic `AQY212EH` PhotoMOS, 1 Form A, DIP-4 | AC/DC type, so it blocks **both** polarities. 60 V / 550 mA contacts against a −7.84 V worst case; 2.5 Ω max on-resistance; 1 µA max off-state leakage; 4 ms max turn-on [CITE(datasheet): Panasonic AQY212EH product data](https://industry.panasonic.com/global/en/products/control/relay/photomos/number/aqy212eh) |
-| — | Preci-Dip `110-87-304-41-001101` | 4-pin machined DIP socket. Keeps soldering heat off the relay and makes it replaceable |
-| `R3` | 470 Ω, ¼ W | LED current limit — 4.6 mA, against a **3.0 mA maximum guaranteed operate current** |
-| — | perfboard offcut | carries the socket and `R3` |
+| — | Preci-Dip `110-87-304-41-001101` | 4-pin machined DIP socket. Bench use only — keeps soldering heat off the relay and makes it replaceable. **Solder the relay directly for the deployed build**: Panasonic's temperature rating carries "avoid icing and condensation" and they disclaim condensation failures outright, so four extra contact interfaces in a sealed forest enclosure are a liability |
+| `R3` | **220 Ω, 1%** | LED current limit. Gives 6.4 mA worst case — above Panasonic's **5 mA recommended minimum**, which is also the current their 4 ms turn-on time is specified at. 470 Ω lands at 2.8–3.0 mA worst case once `VOL`, `Vf` max and tolerance are counted, at or below the guaranteed operate current |
+| `D1`, `D2` | 2 × Vishay `BAT85S`, DO-35 | Negative clamp on the Core side. Required, not optional: Panasonic never tabulates the **output** capacitance across the open switch — the 1.5 pF figure is LED-to-output isolation — so off-state coupling can only be clamped, never calculated |
+| — | BusBoard `PR1593Q` | perfboard, plated through-hole. Conformal-coat after test; it ships with no solder mask |
 
 Pinout: **1** LED anode, **2** LED cathode, **3** and **4** the switch. Pins 3 and 4 are
 interchangeable, because the output is bidirectional.
 
-#### Wiring — five connections, all on RAK5802 spring terminals
+#### Wiring
 
-Nothing below is soldered to the base board.
+Nothing below is soldered to the base board except the `VDD` tap, which shares the joint pack
+pin 4 already makes.
 
 ```
                                 ┌────────────────────┐
-  RAK5802 SCL clip ───[470 Ω]───┤ 1   AQY212EH    3  ├─── pack data wire, pins 3+5 joined
-  = nRF P0.14                   │                    │
-  RAK5802 GND clip ─────────────┤ 2               4  ├─── RAK5802 SDA clip
-                                └────────────────────┘    = nRF P0.13
+  base-board VDD pad ──[220 Ω]──┤ 1   AQY212EH    3  ├─── pack pin 5 ONLY (one-wire)
+  (same joint as pack pin 4)    │                    │
+  RAK5802 SCL clip ─────────────┤ 2               4  ├─┬─ RAK5802 SDA clip
+  = nRF P0.14                   └────────────────────┘ │  = nRF P0.13
+                                                       │
+                              2 × BAT85S, cathode ─────┤
+                                        anode ─────────┴─ RAK5802 GND clip
 ```
 
 | # | From | To |
 |---|---|---|
-| 1 | RAK5802 `SCL` clip (nRF P0.14) | `R3` 470 Ω |
-| 2 | `R3`, other end | `K2` pin 1 |
-| 3 | `K2` pin 2 | RAK5802 `GND` clip |
-| 4 | pack pins 3+5, joined | `K2` pin 3 |
+| 1 | base-board `VDD` pad (same joint as pack pin 4) | `R3` 220 Ω |
+| 2 | `R3`, other end | `K2` pin 1 (LED anode) |
+| 3 | `K2` pin 2 (LED cathode) | RAK5802 `SCL` clip (nRF P0.14) |
+| 4 | **pack pin 5 only** | `K2` pin 3 |
 | 5 | `K2` pin 4 | RAK5802 `SDA` clip (nRF P0.13) |
+| 6 | `D1`, `D2` cathodes (banded) | `K2` pin 4 / `SDA` net |
+| 7 | `D1`, `D2` anodes | RAK5802 `GND` clip |
 
-Everything else in the harness is unchanged: pack pin 1 to the buck and the RK900, pack pin 2 to
-`GND`, pack pin 4 to the base-board `VDD` pad.
+**Pack pin 3 is left unconnected and insulated**
+([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)). Everything else in the harness is
+unchanged: pack pin 1 to the buck and the RK900, pack pin 2 to `GND`, pack pin 4 to the
+base-board `VDD` pad.
+
+**The LED is sunk, not sourced, and that is deliberate.** `R10–R13` on the base board are 4.7 kΩ
+pull-ups from `VDD` to the I²C nets, so the `SCL` and `SDA` clips both carry a pull-up regardless
+of how firmware configures the pin
+[CITE(datasheet): RAK19007 schematic sheet 2, slots and edge headers — CIT-RAK19007-SCH-SLOTS](CITATIONS.md).
+Sourcing the LED from P0.14 would let that pull-up push ~0.4 mA through it whenever the pin is
+high-impedance — at boot, in reset, and during sleep — and `K2`'s guaranteed **turn-off** current
+is 0.4 mA. The relay would sit on its threshold in exactly the state the design exists to prevent.
+Sinking instead puts both LED terminals at `VDD` when the pin floats, so the relay is open whether
+the pull-up is there or not, and nothing stands through the pull-up during sleep.
+
+**Two diodes, in parallel, not spares.** `BAT85S` forward voltage is 320 mV at 1 mA and the
+measured source can deliver 0.9 mA, so one diode would clamp at about −320 mV against the pad's
+−300 mV limit. Splitting the current across two puts each at ~0.45 mA and the clamp at roughly
+−280 mV.
 
 #### Firmware contract
 
-- P0.14 configured for **high drive**. Standard drive tops out near 4 mA and the LED needs 4.6 mA.
-- P0.14 **LOW by default** — so `K2` is open at boot, throughout sleep, and whenever the node has
-  no power at all.
-- Driven HIGH at least 10 ms before the battery read, since `K2` turn-on is 4 ms maximum, then LOW
-  immediately after.
+- P0.14 **input/disconnect by default** — its reset state. Both LED terminals then sit at `VDD`,
+  so `K2` is open at boot, in reset, throughout sleep, and whenever the node has no power.
+- To close `K2`: configure P0.14 as an output with **high drive** and drive it **LOW**. Sink is
+  6.4 mA worst case, 8.9 mA typical, against a high-drive rating of 6–15 mA.
+- Assert at least 10 ms before the battery read, since `K2` turn-on is 4 ms maximum.
+- Return P0.14 to **input/disconnect** immediately after the read, not to output-high — that is
+  what guarantees no current through the base-board pull-up during sleep.
 
 The point of all of it: the pack connector is only ever mated or unmated while `K2` is open, so
 the measured transient arrives at an open switch instead of a pad.
 
 #### What this does not cover
 
-An unmate landing inside an active read still exposes the pad — roughly a 10 ms window per
-15-minute cycle. That is not closed by this design, and no measurement of it exists.
+An unmate landing inside an active read still exposes the pad. `Battery::read()` runs against
+second-scale timeouts, not milliseconds, so that window is far larger than a single frame — size
+it from the code, not from the bit period. It is not closed by this design and no measurement of
+it exists.
 
 
 ### Open measurement detail
@@ -628,7 +663,8 @@ before/after electrical measurements and captures named in the pre-Core gate.
 |---|---|---|
 | Pin 1 `P+` (~12 V) | buck VIN+ **and** RK900 12 V | both, in parallel |
 | Pin 2 `P−` | buck negative **and** RK900 negative **and** the base board `GND` pad | all three |
-| Pins 3 + 5 joined | `K2` pin 3; `K2` pin 4 to the `SDA` clip (`WB_I2C1_SDA`, nRF P0.13) | one-wire half-duplex, behind the normally-open relay — see "The data-line front end" |
+| Pin 5 only | `K2` pin 3; `K2` pin 4 to the `SDA` clip (`WB_I2C1_SDA`, nRF P0.13) | one-wire half-duplex, behind the normally-open relay — see "The data-line front end" |
+| Pin 3 | **nothing — insulated** | `Reserved / Not defined` on the master side ([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)) |
 | Pin 4 `3V3_In` | `VDD` pad | always-on 3.3 V reference |
 
 `IO1` was the original one-wire pad and `A1` replaced it. `SDA`/P0.13 is the intended firmware
@@ -698,7 +734,8 @@ Driving one-wire traffic there would switch the RS-485 transceiver rail at 9600 
    per sensor and the one fleet precedent for this sensor+battery pairing runs 4800, so
    confirm the rate on any replacement unit rather than assuming either value.
    `src/sensors/rk900.cpp:16` is the authority in code.
-3. RAK9154 → **one-wire half-duplex** on the 5-pin socket, TXD/RXD bridged, via the SP11
+3. RAK9154 → **one-wire half-duplex** on the 5-pin socket, **pin 5 only, pins 3 and 5 not
+   bridged** ([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)), via the SP11
    adapter cable. Watch pin 4 (`3V3_In`): tie to 3V3, **never 5 V**.
 4. Leave the 4-pin Gateway Load socket unused — it is the documented fallback.
 

@@ -49,6 +49,7 @@ git show 5a9d584^:docs/decisions/            # list them all
 | 0008 | The console stays in the field image | Accepted — file removed in `5a9d584` |
 | 0009 | Leaked build host address is rotated and hardened, not erased from history | Accepted — mitigation is operator-side and open ([#85](https://github.com/disruptivepatternmaterial/rak-sensor-node-but-better/issues/85)). File removed in `5a9d584` |
 | [0010](ADR-0010-rak19007-vdd-source-conflict.md) | RAK19007 VDD source conflict | Accepted |
+| [0013](ADR-0013-pack-pin-3-is-reserved.md) | One-wire lands on pack pin 5 only; pins 3 and 5 are not joined | Accepted |
 
 **ADR-0011 and ADR-0012 were never written.** `docs/HARDWARE.md` and `docs/FIRMWARE_SPEC.md`
 cite them for the plug-handling rule and for the fault-tolerant one-wire transceiver, so those

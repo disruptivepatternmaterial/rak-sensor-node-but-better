@@ -66,8 +66,12 @@ passes.
     - RK900 12 V positive.
 14. Connect RK900 `A` to RAK5802 `A/RX`.
 15. Connect RK900 `B` to RAK5802 `B/TX`.
-16. Join pack pins 3 and 5 at the pack connector. Terminate the resulting data lead so it cannot
-    touch anything. **Do not put it in `SDA`, `A1`, `IO1`, or any other node terminal.**
+16. **Do not join pins 3 and 5.** Bring pack **pin 5 alone** out as the data lead and terminate it
+    so it cannot touch anything. **Do not put it in `SDA`, `A1`, `IO1`, or any other node
+    terminal.** Leave pack **pin 3 unconnected and insulated** — the master-side datasheet calls it
+    `Reserved / Not defined`, and no shipping Sensor Hub drives it
+    ([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)). Harnesses built before 2026-09-07
+    have these two pins bridged; unbridge before continuing.
 17. Leave pack pin 4 (`3V3_In`) disconnected and insulated.
 
 ### Wiring checkpoint after step 17
@@ -80,7 +84,7 @@ flowchart LR
     subgraph PACK["RAK9154 harness — pack end UNMATED"]
         P1["pin 1 — P+"]
         P2["pin 2 — P−"]
-        P35["pins 3 + 5 joined"]
+        P35["pin 5 only — one-wire<br/>pin 3 insulated, unconnected"]
         P4["pin 4 — 3V3_In"]
     end
 
@@ -154,7 +158,8 @@ flowchart LR
     - bench-supply negative to pack pin 2;
     - bench-supply positive to pack pin 4;
     - Saleae ground to pack pin 2;
-    - Saleae analog channel 0 to the joined pin 3+5 data lead;
+    - Saleae analog channel 0 to the pin 5 data lead, and channel 1 to pin 3 — capture both
+      separately, never bridged ([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md));
     - nothing else on the data lead;
     - set the supply to 3.3 V with a 50 mA current limit;
     - energise pin 4 and capture at least 60 seconds.

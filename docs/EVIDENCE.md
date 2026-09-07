@@ -43,6 +43,13 @@ the only setup change, and it is what made the excursion visible.
 no GPIO pad was in any measurement loop. The board was unpowered for captures 4–8 (the buck's
 USB-C was out of the base board) and powered for 9–11.
 
+**Scope limit added 2026-09-07 — `CH0` was on the JOINED conductor.** Pins 3 and 5 were bridged
+for all of these captures, so none of them can attribute the excursion to a particular pin. RAK's
+master-side datasheet calls pin 3 `Reserved / Not defined` and drives only pin 5, so the bridge was
+a build error and pin 3 is now a candidate source
+([ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md)). The numbers below stand as measured on
+that conductor; the attribution does not. Re-run with the pins separated.
+
 | Ch | Probe point | Sample rate |
 |---|---|---|
 | `CH0` | joined pack pins 3+5 (data), node side | 1.5625 MS/s analog |
