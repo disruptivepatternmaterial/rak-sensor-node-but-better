@@ -35,11 +35,33 @@ Node `GND` held **−0.020 V to +0.126 V** across the whole capture, and `VDD �
 below `GND − 0.3 V`. Node `VDD` sat at 0 V, rose to ~3.34 V while mated, and returned to 0 V —
 and the −9.47 V minimum falls in a window where **the rail was down**.
 
+### Observation — it is not one event, and the worst one is not brief
+
+Counting every excursion below −1 V on either conductor across the ten cycles:
+
+| | |
+|---|---|
+| Events below −1 V | **95** — roughly ten per mate/unmate cycle, not one per cycle |
+| Worst event | **124.129 ms** long, at 15.152 s: pin 5 −8.890 V, pin 3 −9.489 V |
+| Next largest | 4.244 ms at 1.518 s (−7.380 / −7.428 V); the rest are 1.5–8.2 ms |
+| Events where pin 3 goes deeper than pin 5 | **66 of 95** |
+
+Individual events are often lopsided, in both directions — at 34.146 s pin 5 reaches −2.068 V
+while pin 3 reaches −6.487 V; at 58.808 s it is pin 5 at −6.058 V against pin 3 at −2.822 V.
+
+**124 ms is not a transient.** A clamp facing it conducts for an eighth of a second, which is a
+continuous-dissipation problem, not the edge-absorption problem `D1`/`D2` were sized for.
+
 ### What this establishes
 
 - **Both conductors carry it, within 0.58 V of each other, at the same instant** (15.155 s and
  15.157 s — 2.2 ms apart, one event seen twice). Pin 3 is not the quiet one, and pin 5 is not
  the quiet one. **A front end that isolates a single pin does not address this.**
+- **Neither pin can be designated the safe one.** Pin 3 is deeper more often (66/95), but the
+ lopsidedness reverses between events, so a design protecting only the "usually worse" conductor
+ is protecting the wrong one some of the time.
+- **Ten cycles produced ~95 events**, so the exposure per mating is roughly an order of magnitude
+ more than "one spike on connection" — which is how every prior discussion of this framed it.
 - **The excursion is real, not a reference artifact.** Node ground is flat to within 146 mV
  peak-to-peak, so nothing here rests on where the clip sat — which is exactly what could not be
  said of the 2026-08-30 captures or of the withdrawn −8.1 V figure.
@@ -53,7 +75,15 @@ and the −9.47 V minimum falls in a window where **the rail was down**.
 - **The mechanism.** Ten hand-performed cycles show the event is repeatable; nothing here says
  whether it is contact bounce, an inductive kick from the pack's output stage, or stored charge
  dumping into an unloaded harness. The capture is timestamped, so the waveform shape is
- available to answer this without re-running the bench.
+ available to answer this without re-running the bench. Two readings are worth naming as
+ **hypotheses, not findings**: the count (~10 per cycle, mostly 1.5–8 ms) has the shape of
+ contact bounce, while the 124 ms outlier is too long for bounce and looks instead like a
+ sustained condition holding until something re-seats. The test that separates them is a capture
+ with the pack's negative return on its own channel, so contact order can be read directly
+ rather than inferred.
+- **Why node ground sat at 0 V throughout.** It held to within 146 mV of the pack return even
+ while unmated, which means the two are tied by some path outside the connector being mated.
+ That path was not identified here, and it matters: it is the return the fault current uses.
 - **That this is what killed the nine pads.** It remains the only out-of-spec condition found,
  and it is now measured on both conductors with a valid reference — but no pad death was
  instrumented, and correlation is not the mechanism.
