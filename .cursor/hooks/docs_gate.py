@@ -11,6 +11,17 @@ sees the write before it lands. Everything else is allowed untouched.
 Path detection is deliberate rather than a substring match on the whole payload: source
 files legitimately cite docs/ paths in comments, and a gate that fires on every such edit
 would be turned off within a day.
+
+**No tool-name matcher, on purpose.** hooks.json used to filter this gate to a hard-coded
+list of file tools, so any file tool absent from that list — a renamed one, a new one, a
+patch-style variant — wrote into docs/ without asking. The list bought nothing, because
+collect_paths() below already ignores every call that does not name a docs/ path, and it
+cost a hole that widened silently whenever the tool surface changed. Removed 2026-09-07.
+
+**Known gap, not closed by this hook:** it is a preToolUse hook, so it sees file tools
+only. An agent that edits docs/ by running `python3` or `sed` from the shell goes to
+beforeShellExecution, where only flash_gate.py is listening. Writing docs through a shell
+command therefore bypasses this gate entirely.
 """
 
 import json
