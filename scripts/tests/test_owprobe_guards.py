@@ -14,6 +14,7 @@ Run: python3 scripts/tests/test_owprobe_guards.py   (from the repo root; no hard
 """
 import os
 import random
+import shutil
 import struct
 import subprocess
 import sys
@@ -73,6 +74,25 @@ write(f"{d}/s_data.bin", data[:short])
 write(f"{d}/s_vdd.bin", vdd[:short])
 write(f"{d}/s_gnd.bin", gnd[:short])
 
+# 6. intermittent rail, and the reason the verdict may never average one. Powered 80 % of the
+# window and dead for the other 20 %, with a data line that only ever reaches 2.0 V — not a
+# valid HIGH against the 3.3 V rail it actually faces. Averaging gives a 2.64 V "rail", which
+# clears the 2.5 V floor and drags the HIGH threshold down to 1.85 V, so 2.0 V looks like a
+# HIGH and the capture earns exit 0: a wire cleared to touch a pad on a rail that was absent for
+# a fifth of the measurement.
+# The data line rests near 0 V while the rail is down, so this capture contains NO rail
+# violation — exit 2 is not available to catch it, and only the plausibility gate stands
+# between it and a pass.
+powered = int(n * 0.8)
+inter_vdd = [3.3 + rnd.gauss(0, 0.002) if i < powered else rnd.gauss(0, 0.001) for i in range(n)]
+inter_data = [
+    ((2.0 if (i // 163) % 2 else 0.05) if i < powered else 0.05) + rnd.gauss(0, 0.002)
+    for i in range(n)
+]
+write(f"{d}/x_data.bin", inter_data)
+write(f"{d}/x_vdd.bin", inter_vdd)
+write(f"{d}/x_gnd.bin", gnd)
+
 cases = [
     ("all three channels flat 0 V", (f"{d}/z0.bin", f"{d}/z1.bin", f"{d}/z2.bin"), 1),
     ("same file passed three times", (f"{d}/g_data.bin", f"{d}/g_data.bin", f"{d}/g_data.bin"), 1),
@@ -80,14 +100,20 @@ cases = [
     ("powered, line never driven", (f"{d}/i_data.bin", f"{d}/g_vdd.bin", f"{d}/g_gnd.bin"), 1),
     ("unpowered mate, -7.84 V seen", (f"{d}/m_data.bin", f"{d}/z1.bin", f"{d}/z2.bin"), 2),
     ("0.5 s capture", (f"{d}/s_data.bin", f"{d}/s_vdd.bin", f"{d}/s_gnd.bin"), 1),
+    ("rail absent 20% of window", (f"{d}/x_data.bin", f"{d}/x_vdd.bin", f"{d}/x_gnd.bin"), 1),
 ]
 
-fails = 0
-for name, (dp, vp, gp), want in cases:
-    code, banner = run(dp, "--vdd-bin", vp, "--gnd-bin", gp)
-    ok = code == want
-    fails += not ok
-    print(f"{'PASS' if ok else 'FAIL'}  {name:<32} exit={code} (want {want})  {banner}")
+try:
+    fails = 0
+    for name, (dp, vp, gp), want in cases:
+        code, banner = run(dp, "--vdd-bin", vp, "--gnd-bin", gp)
+        ok = code == want
+        fails += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name:<32} exit={code} (want {want})  {banner}")
 
-print("FAILURES:", fails)
+    print("FAILURES:", fails)
+finally:
+    # Seven synthetic exports at 2 s x 1.5625 MS/s x 4 B is ~75 MB, and preflight runs often.
+    shutil.rmtree(d, ignore_errors=True)
+
 sys.exit(1 if fails else 0)

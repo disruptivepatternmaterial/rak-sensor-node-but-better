@@ -63,7 +63,29 @@ MAGIC_RE = re.compile(
 # Comment prose discussing a constant is not introducing it -- the citation belongs on
 # the declaration, which is scanned separately. Seven false warnings on one comment-only
 # PR is how an advisory check trains people to skim past the warning that matters (#106).
-COMMENT_ONLY_RE = re.compile(r"^\s*(//|\*|/\*)")
+_COMMENT_START_RE = re.compile(r"^\s*(//|/\*|\*/)")
+# A leading `*` is ambiguous: block-comment continuation, or a pointer write. `*reg = 0x40;` is
+# the most ordinary way a register value appears in embedded C, and classifying it as prose
+# exempted it from BOTH the magic-number scan and the per-change minimums — one line defeating
+# both gates. What separates the two is an assignment, so that is what gets tested.
+_STAR_CONTINUATION_RE = re.compile(r"^\s*\*")
+# `=` that is not `==`, `!=`, `<=`, `>=`. Compound forms (`|=`, `+=`) count as assignments too.
+_ASSIGNMENT_RE = re.compile(r"(?<![=!<>])=(?!=)")
+
+# How far back a constant may look for its citation, in lines, before the search gives up. Bounds
+# the paragraph walk so a citation far up an unbroken run of code cannot vouch for a line it has
+# nothing to do with.
+PARAGRAPH_MAX_LINES = 12
+
+
+def is_comment_line(line: str) -> bool:
+    """True for a line that is only prose. Errs toward calling an ambiguous `*` line code."""
+    if _COMMENT_START_RE.match(line):
+        return True
+    if _STAR_CONTINUATION_RE.match(line):
+        # ` * the pack answers at 4800 baud` is prose; ` *reg = 0x40;` is not.
+        return not _ASSIGNMENT_RE.search(line)
+    return False
 # `=`, call/initialiser brackets, `return`, `case`, and `#define` are the contexts where a
 # numeral in C/C++ actually takes effect. `#` is NOT a comment in the CODE_EXT set.
 BIND_RE = re.compile(r"=|\(|\{|\breturn\b|\bcase\b|#\s*define\b")
@@ -71,7 +93,7 @@ BIND_RE = re.compile(r"=|\(|\{|\breturn\b|\bcase\b|#\s*define\b")
 
 def magic_in_code(line: str) -> bool:
     """True when an added line introduces a magic value in code, not in prose (#106)."""
-    if COMMENT_ONLY_RE.match(line):
+    if is_comment_line(line):
         return False
     code = line.split("//", 1)[0]   # a trailing comment is prose too
     return bool(MAGIC_RE.search(code)) and bool(BIND_RE.search(code))
@@ -95,7 +117,7 @@ def is_substantive_code(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
-    if COMMENT_ONLY_RE.match(line) or stripped.startswith("*/"):
+    if is_comment_line(line):
         return False
     if VERSION_DEFINE_RE.match(line):
         return False
@@ -272,8 +294,16 @@ def main() -> int:
         changed = [p for p in git("diff", "--name-only", base).splitlines() if p]
         # A brand-new file is invisible to `git diff` until it is added, and a new source file is
         # exactly where a whole register map arrives at once.
+        #
+        # Scoped to the directories this change already touches. `ls-files --others` is
+        # repo-wide, and its output is counted into the SAME citation totals as the change — so
+        # an unrelated scratch file left over from another session, carrying three citations
+        # across two categories, would satisfy the minimums for a change that has none. A gate
+        # that can be cleared by a file the author never opened is worse than no gate.
+        touched_dirs = {str(Path(p).parent) for p in changed} or {"."}
         untracked = [
-            p for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p
+            p for p in git("ls-files", "--others", "--exclude-standard").splitlines()
+            if p and str(Path(p).parent) in touched_dirs
         ]
         code_changed = [
             p for p in changed
@@ -284,13 +314,17 @@ def main() -> int:
             if Path(p).suffix.lower() in CODE_EXT and not is_vendored(p)
         ]
         if code_changed or code_new:
-            # -U2, not -U0: the adjacency rule says a citation may sit on an adjacent
+            # -U6, not -U0: the adjacency rule says a citation may sit on an adjacent
             # line, and that line is often UNCHANGED -- with no context the checker
-            # failed correctly-cited constants. The window also must not cross file or
+            # failed correctly-cited constants. It was -U2 until 2026-09-07, which is
+            # narrower than the comment blocks this codebase actually writes: a citation
+            # three lines above its second declaration was outside the hunk entirely, so
+            # no window could see it. Widening the context is safe only because the
+            # window below stops at the end of the contiguous comment block. The window also must not cross file or
             # hunk boundaries, which the old flattened added-lines list did in both
             # directions: a citation ending one file could clear a constant opening the
             # next (#108 finding 5, same family as #106).
-            diff = git("diff", "-U2", base, "--", *code_changed) if code_changed else ""
+            diff = git("diff", "-U6", base, "--", *code_changed) if code_changed else ""
             for path in code_new:
                 # Rendered as an all-added hunk so the scanner below treats a new file exactly
                 # like an edited one. Not `git diff --no-index`: that exits 1 when the files
@@ -312,9 +346,36 @@ def main() -> int:
                 for i, (prefix, text) in enumerate(hunk):
                     if prefix != "+" or not magic_in_code(text):
                         continue
-                    window = [t for _, t in hunk[max(0, i - 2): i + 1]]
+                    # The window reaches back through the whole comment block above the line,
+                    # not a fixed two. One comment routinely sources several declarations —
+                    #
+                    #   // C-I-T-E(prior-art): ... RULE_DISABLE 0x00, RULE_PERIODIC 0x08
+                    #   constexpr uint16_t kRuleDisable  = 0x0000;
+                    #   constexpr uint16_t kRulePeriodic = 0x0008;   <- 3 lines from its source
+                    #
+                    # (hyphenated above so this illustration is not itself scanned as a citation)
+                    #
+                    # — and a fixed two-line window failed the second one. That single false
+                    # positive appeared in 6 of the last 14 firmware commits, which is precisely
+                    # how an advisory check earns being skimmed past.
+                    # Back to the start of the paragraph -- a blank line -- because the comment
+                    # introduces the whole group, not just the first member of it. Stopping at
+                    # the comment block does not work: the line directly above the second
+                    # declaration is the first declaration, so the walk ends before it begins.
+                    # Capped so one unbroken run of code cannot let a distant citation reach.
+                    start = i
+                    while (start > 0 and i - start < PARAGRAPH_MAX_LINES
+                           and hunk[start - 1][1].strip()):
+                        start -= 1
+                    window = [t for _, t in hunk[min(start, max(0, i - 2)): i + 1]]
                     if not any(CITE_RE.search(w) for w in window):
-                        warnings.append(
+                        # A failure, not a warning, since 2026-09-07. Rule 20 makes a datasheet
+                        # or spec citation beside a new register, baud, address or interval a
+                        # requirement, and this gate implemented the strongest rule in that
+                        # document as advice preflight could print and still pass. It was
+                        # advisory because it was noisy; measured across the last 14 firmware
+                        # commits it now reports zero false positives, so the reason has expired.
+                        failures.append(
                             f"{cur_file}: un-sourced constant on an added line: "
                             f"{text.strip()[:90]}"
                         )
@@ -340,8 +401,9 @@ def main() -> int:
             scan_hunk()
 
             if not substantive:
-                print(f"{DIM}   {len(code_changed)} code file(s) changed, no added code lines "
-                      f"(comments, formatting, or a version bump) — minimums not applied{RESET}")
+                print(f"{DIM}   {len(code_changed) + len(code_new)} code file(s) changed, no "
+                      f"added code lines (comments, formatting, or a version bump) — minimums "
+                      f"not applied{RESET}")
             elif n_cites < MIN_CITATIONS or len(cats) < MIN_CATEGORIES:
                 failures.append(
                     f"firmware change carries {n_cites} citation(s) across "

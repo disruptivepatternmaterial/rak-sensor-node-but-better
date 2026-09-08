@@ -128,7 +128,11 @@ fi
 # its inputs are absent. So preflight printed OK while session.cpp's six-flag replay state machine
 # had zero coverage, and "preflight green" got quoted as if it meant the logic had been checked.
 step "unit tests"
-if [[ -d test ]] && compgen -G "test/**/*.cpp" >/dev/null 2>&1; then
+# `find`, not `compgen -G "test/**/*.cpp"`: this script sets only `set -uo pipefail`, so without
+# `shopt -s globstar` the `**` collapses to a single `*` and the pattern silently means
+# `test/*/*.cpp`. A test at test/test_main.cpp -- depth 1, perfectly legal -- would not match, and
+# the gate would report "nothing off-target is verified" while tests existed.
+if [[ -d test ]] && [[ -n "$(find test -name '*.cpp' -print -quit 2>/dev/null)" ]]; then
   if command -v pio >/dev/null 2>&1; then
     if pio test -e native; then ok "off-target tests"; else bad "off-target tests"; fi
   else
@@ -143,9 +147,13 @@ fi
 # The tool that decides whether a wire may touch a pad used to pass a capture of three flat 0 V
 # channels. Cheap, hardware-free, and it runs the exact banner logic the bench session depends on.
 step "owprobe guards"
-if python3 scripts/tests/test_owprobe_guards.py >/dev/null; then
+# Output is kept on failure. The per-case PASS/FAIL lines are the entire diagnostic value here:
+# without them a regression in the pad-safety tool reports only that something broke, and not
+# which of the seven cases stopped holding.
+if owprobe_out="$(python3 scripts/tests/test_owprobe_guards.py 2>&1)"; then
   ok "owprobe three-channel guards"
 else
+  printf '%s\n' "$owprobe_out" | sed 's/^/   /'
   bad "owprobe three-channel guards"
 fi
 
