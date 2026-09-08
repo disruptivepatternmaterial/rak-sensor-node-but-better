@@ -1,7 +1,14 @@
 # ADR-0013 — The one-wire link lands on pack pin 5 only; pins 3 and 5 are not joined
 
-- **Status:** Accepted for the interface definition; the electrical attribution below is a
-  hypothesis awaiting bench evidence
+- **Status:** Accepted. The bench evidence arrived on 2026-09-07 and the second exit criterion
+  below is what happened — **pin 5 carries the excursion too, so the bridge was never the source
+  and the relay stands on its own.** Pin 3 measured −9.469 V and pin 5 −8.885 V, separately and
+  simultaneously, node-referenced, over ten mate/unmate cycles ([`EVIDENCE.md`](../EVIDENCE.md)
+  2026-09-07). Keeping pin 3 unconnected is now supported by a measurement rather than by two
+  disagreeing datasheets.
+- **Still untested:** the third exit criterion. That capture was mate/unmate with the node
+  unpowered, so there was no protocol traffic in it at all — it says nothing about which pin the
+  pack talks on. Do not read this ADR as having settled that.
 - **Date:** 2026-09-07
 - **Supersedes:** nothing. The 3+5 bridge was never an ADR — it entered the build from the pack
   datasheet's pin names and was never decided.

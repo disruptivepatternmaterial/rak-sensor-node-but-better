@@ -501,11 +501,23 @@ Ground first, ground last. No exceptions, no shortcuts, and never two power sour
 The pack data wire does not reach a GPIO directly. It reaches it through a normally-open
 optically-isolated relay that firmware closes only for the battery read.
 
-**Why, in one measurement.** Mating the pack drives the data conductor to **−7.84 V** with the node
-unpowered and **−2.62 V** with it powered, against an nRF52840 I/O absolute maximum of **−0.3 V**
-[CIT-NRF-GPIO]. Events last 1.6–10.6 ms and recur tens of times per plugging session
-([`EVIDENCE.md`](EVIDENCE.md) 2026-09-06, captures 7 and 11). The violation is on the lower rail,
-which is the direction every dead pad failed.
+**Why, in one measurement.** Mating the pack drives pin 5 to **−8.885 V** with the node unpowered,
+against an nRF52840 I/O absolute maximum of **−0.3 V** [CIT-NRF-GPIO]. The worst event runs
+**124 ms** and there are about **ten per mating** ([`EVIDENCE.md`](EVIDENCE.md) 2026-09-07). The
+violation is on the lower rail, which is the direction every dead pad failed.
+
+**Superseded figures, and why they read low.** This section previously said −7.84 V unpowered and
+−2.62 V powered, with events of 1.6–10.6 ms. Those came from captures taken on pins 3 and 5
+**joined** and referenced to the **pack**; separating the pins and referencing the **node** gave a
+deeper excursion and an event two orders of magnitude longer. Do not size anything against the old
+numbers.
+
+**Pin 3 is worse, and it is why it stays unconnected.** The same capture puts pin 3 at
+**−9.469 V** — deeper than pin 5 in 66 of 95 events. It reaches nothing, by
+[ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md), so it cannot deliver that anywhere; the
+decision now rests on a measurement instead of a datasheet reading. The node's own `VDD` stayed
+within −0.029 V across the same ten cycles, so the excursion did not arrive through pack pin 4's
+unprotected path to the `VDD` pad.
 
 **Why a switch, and not a resistor or a clamp.** Asked what series resistor protects a pin driven
 while `VDD = 0`, Nordic answered that there is no safe value and that the alternative is an
@@ -513,16 +525,20 @@ external normally-off switch
 [CITE(prior-art): Nordic DevZone 91161 — protection-diode clamping current, and the normally-off switch recommendation](https://devzone.nordicsemi.com/f/nordic-q-a/91161/protection-diodes-on-nrf52840-clamping-current).
 Passive termination is separately ruled out by arithmetic: holding −7.84 V above −0.3 V through the
 measured 8.6 kΩ source needs R < 340 Ω, while preserving a valid HIGH through the pack's measured
-4.5 kΩ driver needs tens of kΩ. No single value satisfies both.
+4.5 kΩ driver needs tens of kΩ. No single value satisfies both. The conclusion survives the
+2026-09-07 revision and gets stronger — the excursion is deeper, so the ceiling on R is lower —
+but **both impedances in that sentence come from the joined-conductor capture** and are among the
+figures the pin-5 resistor capture is meant to replace. Treat the conclusion as sound and the two
+resistances as provisional.
 
 #### Parts
 
 | Ref | Part | Why this one |
 |---|---|---|
-| `K2` | Panasonic `AQY212EH` PhotoMOS, 1 Form A, DIP-4 | AC/DC type, so it blocks **both** polarities. 60 V / 550 mA contacts against a −7.84 V worst case; 2.5 Ω max on-resistance; 1 µA max off-state leakage; 4 ms max turn-on [CITE(datasheet): Panasonic AQY212EH product data](https://industry.panasonic.com/global/en/products/control/relay/photomos/number/aqy212eh) |
+| `K2` | Panasonic `AQY212EH` PhotoMOS, 1 Form A, DIP-4 | AC/DC type, so it blocks **both** polarities. 60 V / 550 mA contacts against a −8.885 V worst case, still 6.7x margin; 2.5 Ω max on-resistance; 1 µA max off-state leakage; 4 ms max turn-on [CITE(datasheet): Panasonic AQY212EH product data](https://industry.panasonic.com/global/en/products/control/relay/photomos/number/aqy212eh) |
 | — | Preci-Dip `110-87-304-41-001101` | 4-pin machined DIP socket. Bench use only — keeps soldering heat off the relay and makes it replaceable. **Solder the relay directly for the deployed build**: Panasonic's temperature rating carries "avoid icing and condensation" and they disclaim condensation failures outright, so four extra contact interfaces in a sealed forest enclosure are a liability |
 | `R3` | **220 Ω, 1%** | LED current limit. Gives 6.4 mA worst case — above Panasonic's **5 mA recommended minimum**, which is also the current their 4 ms turn-on time is specified at. 470 Ω lands at 2.8–3.0 mA worst case once `VOL`, `Vf` max and tolerance are counted, at or below the guaranteed operate current |
-| `D1`, `D2` | 2 × Vishay `BAT85S`, DO-35 | Negative clamp on the Core side. Required, not optional: the capacitance in Panasonic's **table** is I/O isolation, LED-to-output, which says nothing about coupling across the open switch. The open-switch **output** capacitance appears only as a curve against applied voltage in the characteristics graphs, reading roughly **80 pF** near 0 V — two orders of magnitude above the isolation figure, and a graph reading rather than a guaranteed maximum. A transient can couple through that; the clamp is what bounds it [CITE(datasheet): AQY212EH — CIT-AQY212EH](CITATIONS.md), [CITE(datasheet): BAT85S forward voltage — CIT-BAT85S](CITATIONS.md) |
+| `D1`, `D2` | 2 × Vishay `BAT85S`, DO-35 | **Sizing reopened 2026-09-07 — do not fit these on the strength of the arithmetic below.** Two parts in parallel were chosen to split 0.9 mA and clamp near −280 mV, for an event of a few milliseconds. The measured worst event is **124 ms**, which is continuous conduction rather than a pulse, and the current pin 5 can source has never been measured — the 0.9 mA came from a joined-conductor capture. Closing this needs one capture with a known resistor from pin 5 to node `GND`. Everything that follows is the original reasoning and still explains **why a clamp is needed**, just not which one. Required, not optional: the capacitance in Panasonic's **table** is I/O isolation, LED-to-output, which says nothing about coupling across the open switch. The open-switch **output** capacitance appears only as a curve against applied voltage in the characteristics graphs, reading roughly **80 pF** near 0 V — two orders of magnitude above the isolation figure, and a graph reading rather than a guaranteed maximum. A transient can couple through that; the clamp is what bounds it [CITE(datasheet): AQY212EH — CIT-AQY212EH](CITATIONS.md), [CITE(datasheet): BAT85S forward voltage — CIT-BAT85S](CITATIONS.md) |
 | — | BusBoard `PR1593Q` | perfboard, plated through-hole. Conformal-coat after test; it ships with no solder mask |
 
 Pinout: **1** LED anode, **2** LED cathode, **3** and **4** the switch. Pins 3 and 4 are
@@ -607,7 +623,7 @@ Both numbers are the exposure this design does not remove. Whether the pack is u
 that window is a question about how the node is handled, not about firmware: it is why the
 procedure is mate and unmate only with the node unpowered
 ([`BUILD.md`](BUILD.md)). No measurement of a transient arriving mid-read exists, and none is
-proposed — it would mean driving a pad with a live pack against a known −7.84 V.
+proposed — it would mean driving a pad with a live pack against a known −8.885 V.
 
 
 ### Open measurement detail

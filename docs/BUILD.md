@@ -189,12 +189,21 @@ flowchart LR
 
 ## What must be added before step 23 can exist
 
-Two of these closed on 2026-09-06. Three remain.
+Two closed on 2026-09-06; item 2 was revised on 2026-09-07 and item 6 opened the same day. Four
+remain.
+
+**What changed on 2026-09-07, in one line:** pins 3 and 5 were finally captured separately, and
+both carry the mating fault — pin 3 worse (−9.469 V) than pin 5 (−8.885 V). Since **pin 3 is
+insulated and connects to nothing**, the node still only sees pin 5, so the single-relay design
+stands and [ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) is confirmed rather than
+overturned. What did change is the size of the event pin 5 delivers: **124 ms**, not the 1.6–10.6
+ms the clamp was sized for.
 
 | # | Requirement | State |
 |---|---|---|
 | 1 | A decided front-end part with powered-off isolation on the signal path | **CLOSED** — `K2`, `AQY212EH`: 60 V bidirectional contacts, 1 µA maximum off-state leakage, open whenever P0.14 is **not driven low** — its reset state, and its state through sleep and with the node unpowered |
-| 2 | The measured voltage that front end has to survive | **CLOSED** — −7.84 V unpowered, −2.62 V powered, events 1.6–10.6 ms (`EVIDENCE.md` 2026-09-06, captures 7 and 11) |
+| 2 | The measured voltage that front end has to survive | **CLOSED, and revised upward 2026-09-07** — **−8.885 V on pin 5**, worst event **124 ms**, about **ten events per mating**. Supersedes the 2026-09-06 figures (−7.84 V, 1.6–10.6 ms), which were taken with pins 3 and 5 joined and referenced to the pack. `K2`'s 60 V contacts cover this with room to spare; the **clamp** does not — see item 6 (`EVIDENCE.md` 2026-09-07) |
+| 6 | Clamp diodes sized for the event that was actually measured | **OPEN, and it reopened on 2026-09-07.** `D1`/`D2` were sized for a millisecond pulse drawing 0.9 mA. A 124 ms event is continuous conduction, and the current pin 5 can source has never been measured — so the two BAT85S parts on the BOM are **not known to be the right parts**. Do not fit them on the strength of the existing sizing. Closing this needs one capture with a known resistor from pin 5 to node `GND`; the voltage across it gives the current directly |
 | 3 | `K2` built on its socket and bench-qualified, analyzer on both sides, across mate and unmate | **OPEN** |
 | 4 | Firmware leaving P0.14 in its reset state (input/disconnect) by default, and driving it **low** with high drive only around the battery read — the LED is sunk, not sourced, so low closes `K2` | **OPEN** — no code in `src/` drives P0.14 today; the contract is in [`HARDWARE.md`](HARDWARE.md) § "Firmware contract" and nothing implements it |
 | 5 | Sleep-current accounting for the finished circuit | **OPEN** |

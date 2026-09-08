@@ -56,10 +56,20 @@ continuous-dissipation problem, not the edge-absorption problem `D1`/`D2` were s
 
 - **Both conductors carry it, within 0.58 V of each other, at the same instant** (15.155 s and
  15.157 s — 2.2 ms apart, one event seen twice). Pin 3 is not the quiet one, and pin 5 is not
- the quiet one. **A front end that isolates a single pin does not address this.**
-- **Neither pin can be designated the safe one.** Pin 3 is deeper more often (66/95), but the
- lopsidedness reverses between events, so a design protecting only the "usually worse" conductor
- is protecting the wrong one some of the time.
+ the quiet one.
+- **[ADR-0013](decisions/ADR-0013-pack-pin-3-is-reserved.md) is vindicated, not overturned.** An
+ earlier revision of this entry said a single-pin front end "does not address this" — that was
+ wrong, and it was wrong because it ignored the harness. Pin 3 goes to **nothing; it is
+ insulated** (`HARDWARE.md` § "Intended harness"), so its −9.469 V never reaches the node. The
+ decision to leave it unconnected now has a measurement behind it rather than a datasheet
+ reading, and the outcome the ADR named as the one that would force it to be superseded — the
+ traffic being on pin 3 — is not what happened.
+- **The number the build has to survive is pin 5's**, because pin 5 is the only data conductor
+ that reaches the node: **−8.885 V**, up to **124 ms**, about ten times per mating.
+- **The node's own 3.3 V reference stayed clean.** `VDD − GND` spanned −0.029 V to +3.432 V and
+ never inverted, across the same ten cycles. Pack pin 4 (`3V3_In`) lands on the `VDD` pad with no
+ protection at all, so had the excursion been common to every conductor in the connector it would
+ have arrived there. Over these ten cycles it did not.
 - **Ten cycles produced ~95 events**, so the exposure per mating is roughly an order of magnitude
  more than "one spike on connection" — which is how every prior discussion of this framed it.
 - **The excursion is real, not a reference artifact.** Node ground is flat to within 146 mV
@@ -87,9 +97,11 @@ continuous-dissipation problem, not the edge-absorption problem `D1`/`D2` were s
 - **That this is what killed the nine pads.** It remains the only out-of-spec condition found,
  and it is now measured on both conductors with a valid reference — but no pad death was
  instrumented, and correlation is not the mechanism.
-- **Anything about the clamp design.** `D1`/`D2` were sized against −0.9 mA through a single
- conductor. Two conductors, both active, at nearly −9.5 V is a different problem, and the
- source impedance behind each was not measured here. `h2` is unblocked but not answered.
+- **Anything about the clamp design.** `D1`/`D2` were sized against a 1.6–10.6 ms event; the
+ worst here is **124 ms**, which is a continuous-conduction problem rather than a pulse, and the
+ source impedance behind pin 5 was not measured. The clamp cannot be sized from this capture.
+ What settles it is one more capture with a known resistor from pin 5 to node ground: the voltage
+ across it gives the current the pin can actually source.
 - **The +6.6 V side.** Both pins also exceed `VDD + 0.3 V` by a wide margin. That gets no
  analysis in this entry beyond the number.
 
