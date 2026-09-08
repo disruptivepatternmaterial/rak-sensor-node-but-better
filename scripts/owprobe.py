@@ -124,11 +124,22 @@ NEGATIVE_ALARM_V = -0.30
 THREE_CHANNEL_MIN_SPAN_S = 1.0
 
 # CITE(datasheet): [CIT-NRF-GPIO] the rail-relative limits are meaningless without a rail. A
-#   median VDD-to-GND outside this band means the board was not powered, the VDD clip was not on
+#   VDD-to-GND reading outside this band means the board was not powered, the VDD clip was not on
 #   VDD, or the two probes were on the same node — none of which the verdict can survive. The
 #   band is deliberately wide: 3.3 V nominal with room for a sagging supply at the bottom and
 #   the pad's own absolute maximum at the top.
+#
+# Applied to the measured MINIMUM and MAXIMUM, never to an average. An average hides exactly the
+# capture this tool is pointed at: a board powered for part of the window and unpowered for the
+# rest. A rail present 80 % of the time averages 2.64 V, clears a 2.5 V floor, and — because the
+# HIGH threshold is a ratio of the same number — quietly lowers "a valid HIGH" from 2.31 V to
+# 1.85 V, so a line that never reached a real HIGH earns a pass. Requiring every sample to be
+# plausible removes the average, and with it the whole question of intermittency: an
+# intermittent rail fails because its minimum is near zero.
 RAIL_PLAUSIBLE_MIN_V = 2.5
+# The pad's damage threshold, used here as a rail ceiling of last resort. It is loose: a rail
+# sitting at 3.55 V is itself a fault, and this gate would still call it plausible. Tightening it
+# needs a sourced regulator tolerance, which this constant does not have.
 RAIL_PLAUSIBLE_MAX_V = PAD_ABS_MAX_V
 
 # CITE(datasheet): [CIT-NRF-GPIO-TOTAL] VIL(max) is 0.3 * VDD and VIH(min) is 0.7 * VDD. A
@@ -428,7 +439,6 @@ def analyze_three_channel(
     lower_violations = upper_violations = rail_inversions = 0
     lower_run = upper_run = longest_lower_run = longest_upper_run = 0
     saturation_samples = 0
-    vdd_gnd_sum = 0.0
 
     for index in range(first, last):
         data_value = data.samples[index]
@@ -451,7 +461,6 @@ def analyze_three_channel(
             data_gnd_max, data_gnd_max_index = data_gnd, index
         vdd_gnd_min = min(vdd_gnd_min, vdd_gnd)
         vdd_gnd_max = max(vdd_gnd_max, vdd_gnd)
-        vdd_gnd_sum += vdd_gnd
         if data_vdd < data_vdd_min:
             data_vdd_min, data_vdd_min_index = data_vdd, index
         if data_vdd > data_vdd_max:
@@ -473,11 +482,13 @@ def analyze_three_channel(
             rail_inversions += 1
 
     span_s = (pair_count - 1) * sample_period
-    rail_mean = vdd_gnd_sum / pair_count
     required_span_s = max(require_seconds, THREE_CHANNEL_MIN_SPAN_S)
-    rail_plausible = RAIL_PLAUSIBLE_MIN_V <= rail_mean <= RAIL_PLAUSIBLE_MAX_V
-    saw_high = data_gnd_max >= VIH_MIN_VDD_RATIO * rail_mean
-    saw_low = data_gnd_min <= VIL_MAX_VDD_RATIO * rail_mean
+    # Every sample, not the average — see RAIL_PLAUSIBLE_MIN_V. The thresholds come off the
+    # weakest rail the capture ever showed, because that is the one the pad had to survive.
+    rail_plausible = (RAIL_PLAUSIBLE_MIN_V <= vdd_gnd_min
+                      and vdd_gnd_max <= RAIL_PLAUSIBLE_MAX_V)
+    saw_high = data_gnd_max >= VIH_MIN_VDD_RATIO * vdd_gnd_min
+    saw_low = data_gnd_min <= VIL_MAX_VDD_RATIO * vdd_gnd_min
 
     def relative_time(index: int) -> float:
         return (index - first) * sample_period
@@ -504,11 +515,10 @@ def analyze_three_channel(
     print(f"   data > VDD+0.3   : {upper_violations}; longest "
           f"{longest_upper_run * sample_period:.9f} s")
     print(f"   VDD < GND-0.3    : {rail_inversions}")
-    print(f"   mean VDD-GND     : {rail_mean:+.6f} V")
     print(f"   data reached HIGH: {'yes' if saw_high else 'NO'} "
-          f"(>= {VIH_MIN_VDD_RATIO * rail_mean:+.3f} V)")
+          f"(>= {VIH_MIN_VDD_RATIO * vdd_gnd_min:+.3f} V, off the weakest rail)")
     print(f"   data reached LOW : {'yes' if saw_low else 'NO'} "
-          f"(<= {VIL_MAX_VDD_RATIO * rail_mean:+.3f} V)")
+          f"(<= {VIL_MAX_VDD_RATIO * vdd_gnd_min:+.3f} V)")
     print()
 
     if span_s < required_span_s:
@@ -532,7 +542,8 @@ def analyze_three_channel(
     # is read as "this wire may touch a pad", so silence must not reach it.
     if not rail_plausible:
         print("=== NOT EVIDENCE -- NO PLAUSIBLE RAIL ===")
-        print(f"   Mean VDD-GND is {rail_mean:+.3f} V; a verdict against VDD+0.3 V needs "
+        print(f"   VDD-GND spans {vdd_gnd_min:+.3f}..{vdd_gnd_max:+.3f} V; a verdict against "
+              f"VDD+0.3 V needs every sample inside "
               f"{RAIL_PLAUSIBLE_MIN_V:.1f}..{RAIL_PLAUSIBLE_MAX_V:.1f} V.")
         print("   The board was not powered, the VDD clip was not on VDD, or two probes were")
         print("   on the same node. This clears nothing: no violation was seen because there")
@@ -543,14 +554,14 @@ def analyze_three_channel(
         missing = " and ".join(
             part for part, seen in (("a HIGH", saw_high), ("a LOW", saw_low)) if not seen
         )
-        print(f"   The data channel never reached {missing} against the measured "
-              f"{rail_mean:.3f} V rail.")
+        print(f"   The data channel never reached {missing} against the weakest measured "
+              f"{vdd_gnd_min:.3f} V rail.")
         print("   An idle or disconnected line stays inside every bound by doing nothing.")
         return 1
 
     print("=== WITHIN THE GPIO'S INSTANTANEOUS RAIL LIMITS ===")
     print(f"   All {pair_count} aligned triples passed both bounds, over {span_s:.3f} s")
-    print(f"   against a {rail_mean:.3f} V rail, with the line observed both HIGH and LOW.")
+    print(f"   against a rail never below {vdd_gnd_min:.3f} V, line observed both HIGH and LOW.")
     return 0
 
 
