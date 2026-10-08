@@ -1,0 +1,51 @@
+name: Idea / research
+description: Something to investigate before it becomes a firmware change
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For things not yet decided. The output of an idea is usually a decision (an ADR),
+        not code.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it might be worth it
+      description: >
+        Tie it to a real constraint — months unattended, airtime budget, no solar in the
+        BOM, no gateway for days, hike-in recovery cost.
+    validations:
+      required: true
+
+  - type: textarea
+    id: against
+    attributes:
+      label: Why it might not be
+      description: >
+        Required. Every option has a downside; an idea with no stated cost has not been
+        examined yet. Note explicitly if it conflicts with a non-goal in FIRMWARE_SPEC.md §8.
+    validations:
+      required: true
+
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources found so far
+      value: |
+        - CITE(datasheet):
+        - CITE(spec):
+        - CITE(prior-art):
+
+  - type: input
+    id: decides
+    attributes:
+      label: What would settle it
+      placeholder: "Bench measurement of sleep current with the RS-485 transceiver disabled"

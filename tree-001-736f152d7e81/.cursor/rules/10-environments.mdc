@@ -1,0 +1,97 @@
+---
+description: Two-environment topology. Where code is authored vs where it is compiled and flashed, and how to stay in sync across machines.
+alwaysApply: true
+---
+
+# Environments — author here, build and flash there
+
+This project spans **two machines**. Getting this wrong wastes a session, so assume
+nothing and check.
+
+| | Workstation (this workspace) | Heliotrope Ridge (build host) |
+|---|---|---|
+| Role | Author code, docs, specs, git, `gh` | Compile, flash, serial capture, soak |
+| Path | `~/Documents/Brandt/rak-sensor-node-but-better` | `~/Documents/GitHub/rak-sensor-node-but-better` |
+| Reach | local | `ssh ntableman@192.168.10.223` (alias `wx3-harness`) |
+| PlatformIO | **absent** | `/opt/homebrew/bin/pio` |
+| `gh` CLI | present | `/opt/homebrew/bin/gh`, `GITHUB_TOKEN` in `~/.zprofile` |
+| USB / DFU | **no device** — cannot flash | **the only machine with the RAK4631 on USB** |
+| Writes outside the repo | **blocked** (agent sandbox: `$HOME` is read-only) | unrestricted |
+
+## The rule
+
+**Author locally. Compile and flash on Heliotrope Ridge. Always.**
+
+Do not try to install PlatformIO, toolchains, or nRF utilities on the workstation. The
+agent sandbox denies writes to `$HOME`, so `~/.platformio` cannot be created — and even
+if it could, the hardware is not on this machine's USB. Anything that touches the
+physical device is a build-host operation, full stop.
+
+If a tool is genuinely missing on **both** machines, install it on the **build host** and
+record it in `docs/ENVIRONMENTS.md`. Never install project toolchains on the workstation.
+
+## The SSH gotcha that will bite you
+
+**Non-interactive SSH does not source `~/.zprofile`, so `/opt/homebrew/bin` is not on
+`PATH`.** A bare `ssh host 'pio run'` reports `pio: command not found` and looks exactly
+like "PlatformIO is not installed." It is installed. Your shell is just wrong.
+
+Always force a login shell:
+
+```bash
+ssh ntableman@192.168.10.223 'zsh -l -c "cd ~/Documents/GitHub/rak-sensor-node-but-better && pio run"'
+```
+
+Use `scripts/remote.sh` instead of hand-rolling this — it handles the login shell, the
+`cd`, and the sentinel lines. Diagnose a "missing" tool with `zsh -l -c "command -v <tool>"`
+before concluding anything.
+
+## Git is the only transport between machines
+
+The user sometimes works directly on the build host, or on a laptop. **Never assume the
+build host mirrors this workspace.** Uncommitted local edits do not exist over there.
+
+Before any remote build:
+
+1. Commit and push locally.
+2. `git -C <remote path> pull --ff-only` on the build host.
+3. Confirm the build host HEAD equals the SHA you intend to build, and **report that SHA**.
+
+`scripts/remote.sh sync` does this and refuses to proceed on a dirty remote tree.
+
+Never `scp`, `rsync`, or paste files between machines — that creates an untracked
+divergence nobody can reproduce later. If the build host has local commits, stop and
+surface it; do not rebase or discard the user's work on the other machine.
+
+## Two GitHub identities — this is normal, not an anomaly
+
+The user has a work account and a personal account. This is settled; do not re-derive it
+every session, and **do not treat commits you did not write as suspicious.** It is the
+user's repository and they push to it directly.
+
+| Where | Authenticates as | Can push to `disruptivepatternmaterial`? |
+|---|---|---|
+| Workstation git CLI + all three SSH keys + keychain credential | `ntableman_sfemu` (work) | **No** — HTTP 403 |
+| The user's IDE (its own GitHub sign-in, not shared with the git CLI) | personal | Yes |
+| Heliotrope Ridge build host | `disruptivepatternmaterial` | Yes |
+
+So an agent on the workstation **cannot** `git push origin`. This is a credential fact,
+not a broken remote — do not "fix" it by editing the remote URL or the git config.
+
+Use `scripts/push.sh`, which relays through the build host: it pushes the branch to a
+non-checked-out ref there, fast-forwards the build host's `main`, and pushes to GitHub
+over SSH as `disruptivepatternmaterial`.
+
+Two consequences worth internalizing:
+
+- **Unfamiliar commits on `origin/main` are expected.** The user commits from their IDE,
+  sometimes mid-session and sometimes capturing an agent's in-progress working tree.
+  Fetch, look, and continue. Do not narrate it as a mystery.
+- **The user's IDE can commit your unfinished work.** A failing gate can therefore reach
+  CI before you have fixed it. Fix forward; do not rewrite the pushed history.
+
+## Reporting
+
+Every build, flash, or soak result must state **which host** it ran on and **which commit
+SHA** was built. A result without a host and a SHA is not evidence
+(`docs/EVIDENCE.md`).

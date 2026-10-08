@@ -1,0 +1,78 @@
+# Citation registry
+
+Canonical sources for this project. **URLs live here and nowhere else** — code and docs
+cite the key (`[CIT-TTN-FUP]`) so a moved link is fixed in one place.
+
+Governed by [`.cursor/rules/20-citation-discipline.mdc`](../.cursor/rules/20-citation-discipline.mdc).
+Validated by [`scripts/check_citations.py`](../scripts/check_citations.py), which fails the
+build on a reference to an undefined key and warns on any row still marked `UNVERIFIED`.
+
+## Status values
+
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | Fetched on the date shown; the page resolved and contained the cited fact |
+| `UNVERIFIED` | Believed correct but **not yet fetched** — verify before relying on it |
+| `ACCESS-LIMITED` | Real and reachable in a browser, but blocked to automated fetching |
+| `REGISTRATION` | Behind a login/registration wall |
+
+Verifying an `UNVERIFIED` row means opening the URL, confirming it states the fact in the
+"Establishes" column, and updating the status and date. Do not upgrade a row on memory.
+
+## Network policy and LoRaWAN specification
+
+| Key | Title | Publisher | URL | Establishes | Status |
+|---|---|---|---|---|---|
+| `CIT-TTN-FUP` | Duty Cycle — Fair Use Policy | The Things Network | https://www.thethingsnetwork.org/docs/lorawan/duty-cycle/ | Sandbox limits are **30 s uplink airtime per node per 24 h** and **10 downlink messages per node per 24 h**. Sets the airtime budget in rule 40. | VERIFIED 2026-07-30 |
+| `CIT-TTN-FUP-EXPLAINED` | Fair Use Policy explained | TTN community forum | https://www.thethingsnetwork.org/forum/t/fair-use-policy-explained/1300 | Derives the 30 s figure as (8 channels × 86400 s × 5% gateway RX duty) ÷ 1000 nodes. States a 10-byte payload allows ~20 msg/day at SF12 vs ~500 at SF7, and that the downlink cap **includes ACKs for confirmed uplinks**. | VERIFIED 2026-07-30 |
+| `CIT-TTN-FREQ` | Frequency Plans | The Things Network | https://www.thethingsnetwork.org/docs/lorawan/frequency-plans/ | US915 sub-band channel plan used by this node. | UNVERIFIED |
+| `CIT-LORA-RP002` | RP002 Regional Parameters | LoRa Alliance | https://lora-alliance.org/resource_hub/rp2-regional-parameters/ | US915 channel plan, DR0–DR13, per-DR max payload (DR0 = 11 bytes application payload), RX2 default frequency and data rate. | REGISTRATION |
+| `CIT-LW-LINK` | LoRaWAN Link Layer Specification | LoRa Alliance | https://lora-alliance.org/resource_hub/lorawan-specification-v1-0-4/ | Class A opens exactly two receive windows (RX1, RX2) after each uplink; ADR mechanism. | REGISTRATION |
+| `CIT-FCC-15247` | 47 CFR § 15.247 | eCFR / US GPO | https://www.ecfr.gov/current/title-47/section-15.247 | Frequency-hopping and digital-modulation rules for 902–928 MHz, including per-channel dwell limits. eCFR blocks automated fetching; open in a browser. | ACCESS-LIMITED |
+
+## Hardware — manufacturer documentation
+
+| Key | Title | Publisher | URL | Establishes | Status |
+|---|---|---|---|---|---|
+| `CIT-RAK4631` | RAK4631 WisBlock LoRaWAN Module Datasheet | RAKwireless | https://docs.rakwireless.com/product-categories/wisblock/rak4631/datasheet/ | MCU/radio (nRF52840 + SX1262), pinout, electrical characteristics. | VERIFIED 2026-07-30 |
+| `CIT-RAK19007` | RAK19007 WisBlock Base Board | RAKwireless | https://docs.rakwireless.com/product-categories/wisblock/rak19007/datasheet/ | Base board slots, power input, IO slot assignment. | UNVERIFIED |
+| `CIT-RAK5802` | RAK5802 RS-485 Interface Module | RAKwireless | https://docs.rakwireless.com/product-categories/wisblock/rak5802/datasheet/ | RS-485 transceiver, IO-slot conflict with RAK13002, enable/direction control. | UNVERIFIED |
+| `CIT-RAK9154` | RAK9154 Solar Battery | RAKwireless | https://docs.rakwireless.com/product-categories/wisnode/rak9154/overview/ | Pack electrical spec and load-socket definitions. Cross-check against the local `rak-4-5-wire` reverse-engineering. | UNVERIFIED |
+| `CIT-RK900` | RAK Weather Station Solution / RK900-09 | RAKwireless | https://docs.rakwireless.com/product-categories/wisnode/weather-station/datasheet/ | RK900-09 Modbus register map, 4800 8N1, slave 0x01. Cited by the live TTN decoder header. | UNVERIFIED |
+| `CIT-NRF-POWER` | nRF52840 Product Specification — power management | Nordic Semiconductor | https://docs.nordicsemi.com/bundle/ps_nrf52840/page/power.html | System ON vs System OFF sleep modes, RAM retention, sleep current figures. | UNVERIFIED |
+| `CIT-SX1262` | SX1262 Long Range Low Power LoRa Transceiver | Semtech | https://www.semtech.com/products/wireless-rf/lora-connect/sx1262 | TX power settings and current consumption for the power budget. | UNVERIFIED |
+
+## Protocols
+
+| Key | Title | Publisher | URL | Establishes | Status |
+|---|---|---|---|---|---|
+| `CIT-MODBUS-APP` | MODBUS Application Protocol Specification V1.1b3 | Modbus Organization | https://www.modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf | Function code 0x03 (Read Holding Registers) request/response framing and exception codes. | UNVERIFIED |
+| `CIT-MODBUS-SERIAL` | MODBUS over Serial Line Specification V1.02 | Modbus Organization | https://www.modbus.org/docs/Modbus_over_serial_line_V1_02.pdf | RTU framing and the 3.5-character inter-frame silent interval that bounds poll timing. | UNVERIFIED |
+| `CIT-CAYENNE-LPP` | Cayenne Low Power Payload | myDevices | https://docs.mydevices.com/docs/lorawan/cayenne-lpp | Channel/type TLV encoding that the payload schema follows. | UNVERIFIED |
+
+## Prior art and implementations
+
+Prior art shows something works in practice. It never establishes correctness on its own —
+pair it with a `datasheet` or `spec` citation (rule 20).
+
+| Key | Title | Publisher | URL | Establishes | Status |
+|---|---|---|---|---|---|
+| `CIT-WISBLOCK-API2` | WisBlock-API-V2 | beegee-tokyo | https://github.com/beegee-tokyo/WisBlock-API-V2 | Event-driven Class A + power-save framework for RAK4631; the P0 stack recommendation in `LIBRARIES.md`. | UNVERIFIED |
+| `CIT-SX126X-ARDUINO` | SX126x-Arduino | beegee-tokyo | https://github.com/beegee-tokyo/SX126x-Arduino | LoRaWAN MAC implementation underlying the RAK4631 Arduino path. | UNVERIFIED |
+| `CIT-ONEWIRE-SERIAL` | RAK-OneWireSerial | beegee-tokyo | https://github.com/beegee-tokyo/RAK-OneWireSerial | Half-duplex one-wire Sensor Hub protocol — the alternate RAK9154 path. | UNVERIFIED |
+| `CIT-MESHTASTIC-9154` | meshtastic/firmware `RAK9154Sensor` | Meshtastic | https://github.com/meshtastic/firmware | Working RAK9154 reader; nRF52 brownout lessons. | UNVERIFIED |
+| `CIT-MODBUSMASTER` | ModbusMaster | 4-20ma | https://github.com/4-20ma/ModbusMaster | Arduino Modbus master with timeout handling. | UNVERIFIED |
+| `CIT-RAK-SLEEP` | RAK4631 deep sleep until reset | RAKwireless forum | https://forum.rakwireless.com/t/rak4631-deep-sleep-until-reset/7253 | **`Serial.end()` is required before sleep** or the node holds ~mA indefinitely. The most common failure mode for this class of node. | UNVERIFIED |
+
+## Sibling repositories (local)
+
+Local paths move and these repos advance independently, so **cite a commit SHA**.
+
+| Key | Repo | Path | Establishes | Pinned |
+|---|---|---|---|---|
+| `CIT-FWM-DECODER` | forest-weather-machines | `LoRaWAN/payload/rak-wx-station-default.js` | The live TTN uplink formatter — the other half of the payload contract. Channel/type map, `WIND_DIR_OFFSET = 230`, zero-wind null policy. | `efc0e3c` (2026-07-30) |
+| `CIT-FWM-RAK2560` | forest-weather-machines | `LoRaWAN/docs/RAK2560_weather_station_settings.md` | Field-proven RK900 and BMS Modbus settings from the deployed Sensor Hub. | `efc0e3c` |
+| `CIT-RAK45WIRE` | forest-weather-machines | `rak-4-5-wire/` | RAK9154 connector reference and bench reverse-engineering, including the one-wire POC. | `efc0e3c` |
+
+Clone location on both machines: `~/Documents/GitHub/forest-weather-machines`.
+Override for tooling with `FWM_REPO=/path/to/repo`.

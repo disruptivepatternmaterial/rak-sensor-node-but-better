@@ -1,0 +1,70 @@
+name: Field or bench bug
+description: Observed misbehavior on hardware
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Record what was **observed**, not what was inferred. A guess written as an
+        observation sends the next person down the wrong path.
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened
+      description: Raw serial output, TTN console entry, or meter reading. Paste it verbatim.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+      description: Cite the spec section that says so.
+    validations:
+      required: true
+
+  - type: input
+    id: build
+    attributes:
+      label: Firmware commit / version
+      description: Short SHA and version from the boot banner. "Unknown" is a valid answer — say so rather than guessing.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Bench (Heliotrope Ridge, USB)
+        - Bench (battery, USB detached)
+        - Field
+    validations:
+      required: true
+
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Conditions
+      description: >
+        Battery voltage / SoC, temperature, gateway reachable, sensors connected, how long
+        it had been running. Power and RF bugs are usually environmental.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Steps, and how many attempts out of how many reproduced it.
+
+  - type: checkboxes
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - label: Node became unreachable (requires a hike) — treat as release-blocking
+        - label: Data loss or wrong values reaching ingest
+        - label: Power regression
+        - label: Cosmetic or logging only

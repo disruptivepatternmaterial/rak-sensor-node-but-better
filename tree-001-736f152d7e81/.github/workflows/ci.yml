@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Gates (citations, parity, secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The TTN formatter lives in a sibling repo. Parity cannot be proven without it.
+      # Requires an FWM_TOKEN secret with read access if that repo is private.
+      - name: Check out forest-weather-machines (TTN formatter)
+        id: fwm
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: disruptivepatternmaterial/forest-weather-machines
+          path: .fwm
+          token: ${{ secrets.FWM_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install pyyaml
+
+      - name: Citation discipline
+        run: python3 scripts/check_citations.py
+
+      - name: Citation minimums for this change
+        if: github.event_name == 'pull_request'
+        run: |
+          python3 scripts/check_citations.py \
+            --diff "origin/${{ github.base_ref }}"
+
+      # forest-weather-machines is private, and the default workflow token is scoped to
+      # this repository, so the checkout above normally fails here. It still creates the
+      # .fwm directory before failing, which is why this sets FWM_REPO only when the
+      # decoder is actually present -- testing for the directory silently pointed the
+      # gate at an empty folder and reported the decoder as missing.
+      #
+      # Without the live repo the checker falls back to the pinned copy in
+      # payload/reference/ and says so in its output. That verifies the field-by-field
+      # contract but not upstream drift; the build host, which has the sibling cloned,
+      # is what proves the formatter has not moved.
+      - name: TTN formatter parity
+        run: |
+          DECODER=".fwm/LoRaWAN/payload/rak-wx-station-default.js"
+          if [ -f "$DECODER" ]; then
+            export FWM_REPO="${{ github.workspace }}/.fwm"
+            echo "Using the live decoder from forest-weather-machines."
+          else
+            echo "::warning title=Parity checked against the pinned copy::\
+          forest-weather-machines was not reachable, so upstream drift is unverified \
+          here. Add an FWM_TOKEN secret with read access to that repo to check the live \
+          formatter."
+          fi
+          python3 scripts/check_decoder_parity.py
+
+      - name: Preflight (secrets, golden vectors, links, null policy)
+        run: |
+          DECODER=".fwm/LoRaWAN/payload/rak-wx-station-default.js"
+          if [ -f "$DECODER" ]; then
+            export FWM_REPO="${{ github.workspace }}/.fwm"
+          fi
+          scripts/preflight.sh
+
+  build:
+    name: Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for firmware
+        id: check
+        run: |
+          if [ -f platformio.ini ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No platformio.ini yet — WP1 has not created the skeleton. \
+          Nothing to compile."
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.present == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO
+        if: steps.check.outputs.present == 'true'
+        run: pip install platformio
+
+      - name: Cache PlatformIO
+        if: steps.check.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      # The payload encoder and the Modbus checksum are pure computation, so they can be
+      # tested here. Both fail silently on hardware — a mis-sized payload field shifts
+      # every field after it and decodes into plausible wrong numbers, and a wrong
+      # checksum makes a working sensor look unplugged — which is exactly the class of bug
+      # that should never reach a device nobody can visit.
+      - name: Tests
+        if: steps.check.outputs.present == 'true'
+        run: pio test -e native
+
+      # Every staged image has to keep compiling, not just the field one. The stages exist
+      # so a fault during bring-up has a single candidate cause; a stage that no longer
+      # builds is only discovered at the moment it is needed, standing next to the
+      # hardware.
+      #
+      # CI proves it compiles. It cannot prove behavior — the RAK4631 is on the
+      # Heliotrope Ridge build host, and only bench evidence closes H1-H8.
+      - name: Build every stage
+        if: steps.check.outputs.present == 'true'
+        run: pio run -e stage1 -e stage2 -e stage3 -e rak4631
