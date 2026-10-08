@@ -1,0 +1,52 @@
+{
+  "_comment": [
+    "What the live TTN decoder must produce from bytes the encoder actually emitted.",
+    "Case names come from tools/emit_vectors.cpp; scripts/check_golden_vectors.py fails if",
+    "the two lists disagree, so a new case cannot be added on one side only.",
+    "",
+    "These numbers are written from the decoder's documented behavior, not copied from its",
+    "output. Copying the output would make the test agree with whatever the decoder does,",
+    "including whatever it does wrong."
+  ],
+
+  "all_fields": {
+    "_why": "Every field the node can report, at a data rate that fits all of them.",
+    "wx_wind_speed": 12.34,
+    "wx_wind_direction": 275,
+    "wx_temperature": -15.5,
+    "wx_humidity": 87.3,
+    "wx_barometer": 987.1,
+    "batt_voltage": 11.74,
+    "batt_current": -4.32,
+    "batt_capacity": 87,
+    "batt_temperature": -20.1
+  },
+
+  "slowest_rate": {
+    "_why": "Eleven bytes is all the network allows at its slowest rate. These three fields are the ones worth keeping: whether the node is dying, and the two readings the station exists to take.",
+    "batt_capacity": 87,
+    "wx_wind_speed": 12.34,
+    "wx_temperature": -15.5
+  },
+
+  "weather_only": {
+    "_why": "The pack is silent. Its fields are absent rather than zero, so nobody downstream can mistake a dead sensor for a flat battery.",
+    "wx_wind_speed": 12.34,
+    "wx_wind_direction": 275,
+    "wx_temperature": -15.5,
+    "wx_humidity": 87.3,
+    "wx_barometer": 987.1
+  },
+
+  "pack_only": {
+    "_why": "The weather station is silent, and the same rule applies in the other direction.",
+    "batt_voltage": 11.74,
+    "batt_current": -4.32,
+    "batt_capacity": 87,
+    "batt_temperature": -20.1
+  },
+
+  "nothing_valid": {
+    "_why": "Both sensors silent. The encoder produces no bytes at all, and the node sends nothing."
+  }
+}
